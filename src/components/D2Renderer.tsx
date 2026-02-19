@@ -91,7 +91,7 @@ export default function D2Renderer({ code, className = "" }: D2RendererProps) {
       translateStart.current = { ...t };
       return t;
     });
-    e.currentTarget.style.cursor = "grabbing";
+    (e.currentTarget as HTMLElement).style.cursor = "grabbing";
   }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -106,7 +106,7 @@ export default function D2Renderer({ code, className = "" }: D2RendererProps) {
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     isPanning.current = false;
-    e.currentTarget.style.cursor = "grab";
+    (e.currentTarget as HTMLElement).style.cursor = "grab";
   }, []);
 
   const handleZoomIn = () => setScale((s) => Math.min(s * 1.2, 5));
