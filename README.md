@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DiagramAgent — AI-Powered Architecture Diagram Generator
 
-## Getting Started
+Generate technical architecture diagrams from natural language prompts using AI and D2 diagram-as-code.
 
-First, run the development server:
+![DiagramAgent](https://img.shields.io/badge/Next.js-16-black) ![D2](https://img.shields.io/badge/D2-WASM-blue) ![Azure AI](https://img.shields.io/badge/Azure_AI-Foundry-purple)
+
+## Features
+
+- **Natural Language → Diagram**: Describe any architecture and get a rendered diagram
+- **D2 Diagram-as-Code**: Uses the D2 language with WASM rendering in the browser
+- **Multi-Cloud Icons**: 200+ icons for AWS, Azure, GCP, Kubernetes, and general tech
+- **Split-Pane Editor**: View and edit D2 code alongside the rendered diagram
+- **Streaming Generation**: Watch the diagram code appear in real-time
+- **Export**: Download diagrams as SVG or PNG
+- **Refine**: Iteratively modify diagrams with follow-up prompts
+- **Example Gallery**: Pre-built prompts to get started quickly
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 18+
+- Azure AI Foundry API key
+
+### Setup
 
 ```bash
+# Install dependencies
+npm install
+
+# Configure environment — edit .env.local with your Azure AI Foundry credentials
+# AZURE_AI_FOUNDRY_ENDPOINT=https://your-resource.services.ai.azure.com/api/projects/your-project
+# AZURE_AI_FOUNDRY_API_KEY=your-api-key
+# AZURE_AI_FOUNDRY_MODEL=gpt-4o
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Description |
+|----------|-------------|
+| `AZURE_AI_FOUNDRY_ENDPOINT` | Azure AI Foundry project endpoint |
+| `AZURE_AI_FOUNDRY_API_KEY` | API key for authentication |
+| `AZURE_AI_FOUNDRY_MODEL` | Model deployment name (default: `gpt-4o`) |
 
-## Learn More
+## How It Works
 
-To learn more about Next.js, take a look at the following resources:
+1. **User enters a prompt** (e.g., "SQL Always On AG on Azure")
+2. **Next.js API route** sends it to Azure AI Foundry with a system prompt containing D2 syntax reference and available icon keys
+3. **LLM streams back** valid D2 code with cloud-specific icons
+4. **D2 WASM engine** renders it as SVG in the browser with auto-layout
+5. **User can edit** the D2 code manually and re-render, or export as SVG/PNG
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router, TypeScript) |
+| Styling | Tailwind CSS 4 |
+| Diagram Engine | D2 via WASM (`@terrastruct/d2`) |
+| Code Editor | Monaco Editor |
+| LLM Backend | Azure AI Foundry Chat Completions API |
+| Icons | Iconify CDN (200+ cloud provider icons) |
 
-## Deploy on Vercel
+## Project Structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+├── app/
+│   ├── api/generate/route.ts   # LLM streaming API endpoint
+│   ├── globals.css              # Global styles
+│   ├── layout.tsx               # Root layout
+│   └── page.tsx                 # Main app page
+├── components/
+│   ├── CodeEditor.tsx           # Monaco D2 code editor
+│   ├── D2Renderer.tsx           # D2 WASM rendering + export
+│   └── PromptInput.tsx          # Prompt input + example gallery
+└── lib/
+    ├── icon-registry.ts         # 200+ icon key → URL mappings
+    └── system-prompt.ts         # LLM system prompt with D2 reference
+```
