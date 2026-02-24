@@ -1,18 +1,17 @@
 import { NextRequest } from "next/server";
 import { DefaultAzureCredential } from "@azure/identity";
 import { buildSystemPrompt } from "@/lib/system-prompt";
+import { getModelConfig } from "@/lib/models";
 
 const AZURE_ENDPOINT = process.env.AZURE_AI_FOUNDRY_ENDPOINT || "";
 const AZURE_API_KEY = process.env.AZURE_AI_FOUNDRY_API_KEY || "";
-const AZURE_MODEL = process.env.AZURE_AI_FOUNDRY_MODEL || "gpt-4o";
+const DEFAULT_MODEL = process.env.AZURE_AI_FOUNDRY_MODEL || "gpt-5.2-chat";
 
 const COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default";
 let cachedCredential: DefaultAzureCredential | null = null;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  // If API key auth works, use it; otherwise fall back to Entra ID
   if (AZURE_API_KEY && AZURE_API_KEY !== "your-api-key-here") {
-    // Try Entra ID token (key-based auth may be disabled on the resource)
     try {
       if (!cachedCredential) {
         cachedCredential = new DefaultAzureCredential();
@@ -20,11 +19,9 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       const tokenResponse = await cachedCredential.getToken(COGNITIVE_SERVICES_SCOPE);
       return { "Authorization": `Bearer ${tokenResponse.token}` };
     } catch {
-      // Fall back to API key
       return { "api-key": AZURE_API_KEY };
     }
   }
-  // No API key — must use Entra ID
   if (!cachedCredential) {
     cachedCredential = new DefaultAzureCredential();
   }
@@ -34,7 +31,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, existingCode } = await request.json();
+    const { prompt, existingCode, history, model: requestedModel } = await request.json();
 
     if (!prompt || typeof prompt !== "string") {
       return new Response(JSON.stringify({ error: "Prompt is required" }), {
@@ -45,16 +42,27 @@ export async function POST(request: NextRequest) {
 
     if (!AZURE_ENDPOINT) {
       return new Response(
-        JSON.stringify({ error: "Azure AI Foundry is not configured. Set AZURE_AI_FOUNDRY_ENDPOINT environment variable." }),
+        JSON.stringify({ error: "Azure AI Foundry is not configured." }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
+    const modelId = requestedModel || DEFAULT_MODEL;
+    const modelConfig = getModelConfig(modelId);
     const systemPrompt = buildSystemPrompt();
 
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: systemPrompt },
     ];
+
+    // Append conversation history if present
+    if (Array.isArray(history) && history.length > 0) {
+      for (const msg of history) {
+        if (msg.role && msg.content) {
+          messages.push({ role: msg.role, content: msg.content });
+        }
+      }
+    }
 
     if (existingCode) {
       messages.push({
@@ -63,7 +71,7 @@ export async function POST(request: NextRequest) {
       });
       messages.push({
         role: "user",
-        content: `Modify the above D2 diagram based on this request: ${prompt}`,
+        content: `Modify the above D2 diagram based on this request: ${prompt}. Output the COMPLETE updated D2 code.`,
       });
     } else {
       messages.push({
@@ -72,23 +80,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Determine the correct API URL based on endpoint format
-    let apiUrl: string;
+    // Build API URL
     const baseEndpoint = AZURE_ENDPOINT.trim().replace(/\/+$/, "");
+    let apiUrl: string;
 
     if (baseEndpoint.includes(".openai.azure.com")) {
       const base = baseEndpoint.replace(/\/openai\/.*$/, "");
-      apiUrl = `${base}/openai/deployments/${AZURE_MODEL}/chat/completions?api-version=2024-05-01-preview`;
+      apiUrl = `${base}/openai/deployments/${modelId}/chat/completions?api-version=${modelConfig.apiVersion}`;
     } else if (baseEndpoint.includes("services.ai.azure.com")) {
       const base = baseEndpoint.replace(/\/models\/?$/, "").replace(/\/api\/projects\/.*$/, "");
-      apiUrl = `${base}/models/chat/completions?api-version=2024-05-01-preview`;
+      apiUrl = `${base}/models/chat/completions?api-version=${modelConfig.apiVersion}`;
     } else {
-      apiUrl = `${baseEndpoint}/chat/completions?api-version=2024-05-01-preview`;
+      apiUrl = `${baseEndpoint}/chat/completions?api-version=${modelConfig.apiVersion}`;
     }
 
-    console.log("Calling Azure AI:", apiUrl);
+    console.log(`Calling Azure AI [${modelId}]:`, apiUrl);
 
     const authHeaders = await getAuthHeaders();
+
+    // Build request body with model-appropriate params
+    const requestBody: Record<string, unknown> = {
+      model: modelId,
+      messages,
+      stream: modelConfig.supportsStreaming,
+    };
+
+    if (modelConfig.useMaxCompletionTokens) {
+      requestBody.max_completion_tokens = modelConfig.maxTokens;
+    } else {
+      requestBody.max_tokens = modelConfig.maxTokens;
+    }
+
+    if (modelConfig.supportsTemperature) {
+      requestBody.temperature = 0.3;
+    }
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -96,33 +121,24 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         ...authHeaders,
       },
-      body: JSON.stringify({
-        model: AZURE_MODEL,
-        messages,
-        max_tokens: 4000,
-        temperature: 0.3,
-        stream: true,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Azure AI Foundry error:", response.status, errorText);
+      console.error("Azure AI error:", response.status, errorText);
       return new Response(
         JSON.stringify({ error: `LLM API error: ${response.status}`, details: errorText }),
         { status: response.status, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Stream the response back to the client as SSE
+    // Stream the response back as SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response.body?.getReader();
-        if (!reader) {
-          controller.close();
-          return;
-        }
+        if (!reader) { controller.close(); return; }
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -155,7 +171,7 @@ export async function POST(request: NextRequest) {
                   );
                 }
               } catch {
-                // Skip unparseable chunks
+                // Skip
               }
             }
           }
