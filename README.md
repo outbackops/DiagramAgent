@@ -67,23 +67,6 @@ Try these prompts to see what DiagramAgent can generate:
 | `Data pipeline with Kafka, Spark, and Snowflake` | Producers → Kafka → Spark Streaming → Snowflake → BI dashboards |
 | `Real-time analytics platform with Kafka and Elasticsearch` | Event ingestion → Kafka → Logstash → Elasticsearch → Kibana |
 
-## Reference Diagram Styles
-
-The samples folder contains reference diagrams that informed the styling:
-
-<table>
-<tr>
-<td><img src="samples/Diagram1.png" alt="Sample 1" width="300"></td>
-<td><img src="samples/Diagram2.png" alt="Sample 2" width="300"></td>
-<td><img src="samples/Diagram3.png" alt="Sample 3" width="300"></td>
-</tr>
-<tr>
-<td>AWS serverless architecture</td>
-<td>Microservices with messaging</td>
-<td>Azure DevOps pipeline</td>
-</tr>
-</table>
-
 ## Features
 
 - **Natural Language → Diagram** — Describe any architecture and get a styled, horizontal-layout diagram
