@@ -382,7 +382,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "diagram.vsdx";
+      a.download = "diagram.drawio";
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -461,10 +461,10 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
           onClick={exportVsdx}
           disabled={!svg || exportingVsdx}
           className="px-2 py-1 text-xs rounded bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-          title="Export as Microsoft Visio file"
+          title="Export as draw.io file (opens in draw.io, Visio, Lucidchart)"
         >
           {exportingVsdx && <div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />}
-          VSDX
+          Visio
         </button>
       </div>
 
