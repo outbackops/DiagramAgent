@@ -12,6 +12,7 @@
     "@azure/identity": "^4.13.0",
     "@monaco-editor/react": "^4.7.0",
     "@terrastruct/d2": "^0.1.33",
+    "jszip": "^3.10.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"

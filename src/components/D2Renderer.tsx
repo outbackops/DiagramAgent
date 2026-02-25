@@ -352,6 +352,36 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
     img.src = url;
   }, [svg]);
 
+  const [exportingVsdx, setExportingVsdx] = useState(false);
+
+  const exportVsdx = useCallback(async () => {
+    if (!svg) return;
+    setExportingVsdx(true);
+    try {
+      const res = await fetch("/api/export/vsdx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ svg, title: "Architecture Diagram" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Export failed" }));
+        console.error("VSDX export error:", err.error);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "diagram.vsdx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("VSDX export error:", err);
+    } finally {
+      setExportingVsdx(false);
+    }
+  }, [svg]);
+
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Toolbar */}
@@ -416,6 +446,15 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
           className="px-2 py-1 text-xs rounded bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           PNG
+        </button>
+        <button
+          onClick={exportVsdx}
+          disabled={!svg || exportingVsdx}
+          className="px-2 py-1 text-xs rounded bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+          title="Export as Microsoft Visio file"
+        >
+          {exportingVsdx && <div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />}
+          VSDX
         </button>
       </div>
 
