@@ -13,12 +13,24 @@ interface ModelInfo {
   description: string;
 }
 
+interface RefinementStatus {
+  phase: "generating" | "rendering" | "assessing" | "refining" | "done";
+  iteration: number;
+  maxIterations: number;
+  score?: number;
+  issues?: string[];
+}
+
+const MAX_REFINE_ITERATIONS = 3;
+
 export default function Home() {
   const [d2Code, setD2Code] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [selectedModel, setSelectedModel] = useState("gpt-5.2-chat");
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [autoRefine, setAutoRefine] = useState(true);
+  const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Load available models
@@ -31,7 +43,110 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  // Stream generate and return the final D2 code
   const streamGenerate = useCallback(
+    async (
+      prompt: string,
+      existingCode: string,
+      history: ChatMessage[],
+      signal?: AbortSignal
+    ): Promise<string> => {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          existingCode,
+          history,
+          model: selectedModel,
+        }),
+        signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error || `API error ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) {
+              accumulated += parsed.content;
+              const cleaned = accumulated
+                .replace(/^```d2?\n?/m, "")
+                .replace(/\n?```$/m, "");
+              setD2Code(cleaned);
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+
+      const final = accumulated
+        .replace(/^```d2?\n?/m, "")
+        .replace(/\n?```$/m, "")
+        .trim();
+      setD2Code(final);
+      return final;
+    },
+    [selectedModel]
+  );
+
+  // Render D2 code to SVG via the render API
+  const renderToSvg = useCallback(async (code: string): Promise<string> => {
+    const res = await fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Render failed");
+    return data.svg;
+  }, []);
+
+  // Assess a rendered diagram using vision model
+  const assessDiagram = useCallback(
+    async (
+      svg: string,
+      prompt: string,
+      code: string
+    ): Promise<{ score: number; pass: boolean; issues: string[]; suggestions: string[] }> => {
+      const res = await fetch("/api/assess", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ svg, prompt, d2Code: code }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Assessment failed");
+      return data.assessment;
+    },
+    []
+  );
+
+  // Full generate + refine loop
+  const generateWithRefinement = useCallback(
     async (prompt: string, existingCode: string, history: ChatMessage[]) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -39,72 +154,128 @@ export default function Home() {
 
       setIsGenerating(true);
       if (!existingCode) setD2Code("");
+      setRefinementStatus({
+        phase: "generating",
+        iteration: 1,
+        maxIterations: autoRefine ? MAX_REFINE_ITERATIONS : 1,
+      });
 
       try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt,
-            existingCode,
-            history,
-            model: selectedModel,
-          }),
-          signal: controller.signal,
-        });
+        // Step 1: Initial generation
+        let currentCode = await streamGenerate(prompt, existingCode, history, controller.signal);
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new Error(err.error || `API error ${res.status}`);
+        if (!autoRefine || controller.signal.aborted) {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "Diagram generated." },
+          ]);
+          setRefinementStatus(null);
+          return;
         }
 
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response stream");
+        // Step 2: Iterative refinement loop
+        for (let i = 0; i < MAX_REFINE_ITERATIONS; i++) {
+          if (controller.signal.aborted) break;
 
-        const decoder = new TextDecoder();
-        let accumulated = "";
-        let buffer = "";
+          // 2a: Render to SVG
+          setRefinementStatus({
+            phase: "rendering",
+            iteration: i + 1,
+            maxIterations: MAX_REFINE_ITERATIONS,
+          });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          let svg: string;
+          try {
+            svg = await renderToSvg(currentCode);
+          } catch (renderErr: any) {
+            // If render fails, the code has syntax errors — ask the model to fix
+            setRefinementStatus({
+              phase: "refining",
+              iteration: i + 1,
+              maxIterations: MAX_REFINE_ITERATIONS,
+              issues: [`Render error: ${renderErr.message}`],
+            });
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data: ")) continue;
-            const data = trimmed.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.content) {
-                accumulated += parsed.content;
-                const cleaned = accumulated
-                  .replace(/^```d2?\n?/m, "")
-                  .replace(/\n?```$/m, "");
-                setD2Code(cleaned);
-              }
-            } catch {
-              // skip
-            }
+            const fixPrompt = `The D2 code has a rendering error: "${renderErr.message}". Fix the D2 syntax while keeping the architecture intact. Output the COMPLETE corrected D2 code.`;
+            currentCode = await streamGenerate(fixPrompt, currentCode, [], controller.signal);
+            continue;
           }
+
+          if (controller.signal.aborted) break;
+
+          // 2b: Assess with vision model
+          setRefinementStatus({
+            phase: "assessing",
+            iteration: i + 1,
+            maxIterations: MAX_REFINE_ITERATIONS,
+          });
+
+          let assessment: { score: number; pass: boolean; issues: string[]; suggestions: string[] };
+          try {
+            assessment = await assessDiagram(svg, prompt, currentCode);
+          } catch (assessErr: any) {
+            console.warn("Assessment failed, skipping:", assessErr.message);
+            break;
+          }
+
+          setRefinementStatus({
+            phase: "assessing",
+            iteration: i + 1,
+            maxIterations: MAX_REFINE_ITERATIONS,
+            score: assessment.score,
+            issues: assessment.issues,
+          });
+
+          // 2c: If passing, we're done
+          if (assessment.pass) {
+            setChatMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: `Diagram generated and verified (score: ${assessment.score}/10 after ${i + 1} iteration${i > 0 ? "s" : ""}).`,
+              },
+            ]);
+            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: MAX_REFINE_ITERATIONS, score: assessment.score });
+            setTimeout(() => setRefinementStatus(null), 4000);
+            return;
+          }
+
+          if (controller.signal.aborted) break;
+
+          // 2d: Refine based on assessment feedback
+          setRefinementStatus({
+            phase: "refining",
+            iteration: i + 1,
+            maxIterations: MAX_REFINE_ITERATIONS,
+            score: assessment.score,
+            issues: assessment.issues,
+          });
+
+          const issuesList = assessment.issues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
+          const suggestionsList = assessment.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join("\n");
+
+          const refinePrompt = `A vision-based assessment of the rendered diagram found these issues (score ${assessment.score}/10):
+
+Issues:
+${issuesList}
+
+Suggested fixes:
+${suggestionsList}
+
+Fix these issues in the D2 code. Maintain the overall architecture but improve layout, grouping, connections, and completeness. Output the COMPLETE updated D2 code.`;
+
+          currentCode = await streamGenerate(refinePrompt, currentCode, [], controller.signal);
         }
 
-        const final = accumulated
-          .replace(/^```d2?\n?/m, "")
-          .replace(/\n?```$/m, "")
-          .trim();
-        setD2Code(final);
-
-        // Add assistant confirmation to chat
+        // Exhausted iterations
         setChatMessages((prev) => [
           ...prev,
-          { role: "assistant", content: "Diagram updated." },
+          {
+            role: "assistant",
+            content: `Diagram generated with ${MAX_REFINE_ITERATIONS} refinement iterations.`,
+          },
         ]);
+        setRefinementStatus(null);
       } catch (err: any) {
         if (err.name !== "AbortError") {
           console.error("Generation error:", err);
@@ -116,11 +287,12 @@ export default function Home() {
             { role: "assistant", content: `Error: ${err.message}` },
           ]);
         }
+        setRefinementStatus(null);
       } finally {
         setIsGenerating(false);
       }
     },
-    [selectedModel]
+    [selectedModel, autoRefine, streamGenerate, renderToSvg, assessDiagram]
   );
 
   const handleSend = useCallback(
@@ -130,14 +302,12 @@ export default function Home() {
       setChatMessages(newMessages);
 
       if (d2Code) {
-        // Follow-up: modify existing diagram
-        streamGenerate(prompt, d2Code, chatMessages);
+        generateWithRefinement(prompt, d2Code, chatMessages);
       } else {
-        // Initial generation
-        streamGenerate(prompt, "", []);
+        generateWithRefinement(prompt, "", []);
       }
     },
-    [chatMessages, d2Code, streamGenerate]
+    [chatMessages, d2Code, generateWithRefinement]
   );
 
   const handleNewDiagram = useCallback(() => {
@@ -145,6 +315,7 @@ export default function Home() {
     setD2Code("");
     setChatMessages([]);
     setIsGenerating(false);
+    setRefinementStatus(null);
   }, []);
 
   return (
@@ -160,26 +331,81 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Model picker */}
-        <div className="ml-auto flex items-center gap-2">
-          <label className="text-xs text-gray-500 dark:text-gray-400">Model:</label>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            disabled={isGenerating}
-          >
-            {models.length > 0
-              ? models.map((m) => (
-                  <option key={m.id} value={m.id} title={m.description}>
-                    {m.label}
-                  </option>
-                ))
-              : <option value={selectedModel}>{selectedModel}</option>
-            }
-          </select>
+        {/* Controls */}
+        <div className="ml-auto flex items-center gap-4">
+          {/* Auto-refine toggle */}
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <span className="text-xs text-gray-500 dark:text-gray-400">Vision Refine</span>
+            <button
+              onClick={() => setAutoRefine((v) => !v)}
+              disabled={isGenerating}
+              className={`relative w-8 h-4.5 rounded-full transition-colors ${
+                autoRefine
+                  ? "bg-blue-600"
+                  : "bg-gray-300 dark:bg-gray-600"
+              } ${isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
+                  autoRefine ? "translate-x-3.5" : ""
+                }`}
+              />
+            </button>
+          </label>
+
+          {/* Model picker */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 dark:text-gray-400">Model:</label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              disabled={isGenerating}
+            >
+              {models.length > 0
+                ? models.map((m) => (
+                    <option key={m.id} value={m.id} title={m.description}>
+                      {m.label}
+                    </option>
+                  ))
+                : <option value={selectedModel}>{selectedModel}</option>
+              }
+            </select>
+          </div>
         </div>
       </header>
+
+      {/* Refinement Status Bar */}
+      {refinementStatus && (
+        <div className="px-6 py-1.5 bg-blue-50 dark:bg-blue-950/50 border-b border-blue-200 dark:border-blue-800 shrink-0">
+          <div className="flex items-center gap-3">
+            {refinementStatus.phase !== "done" && (
+              <div className="w-3.5 h-3.5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin shrink-0" />
+            )}
+            {refinementStatus.phase === "done" && (
+              <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+              {refinementStatus.phase === "generating" && `Generating diagram (iteration ${refinementStatus.iteration}/${refinementStatus.maxIterations})...`}
+              {refinementStatus.phase === "rendering" && `Rendering SVG for assessment (iteration ${refinementStatus.iteration})...`}
+              {refinementStatus.phase === "assessing" && (
+                refinementStatus.score != null
+                  ? `Assessment: ${refinementStatus.score}/10 — ${refinementStatus.score >= 7 ? "passed" : "needs refinement"}`
+                  : `Assessing diagram with vision model (iteration ${refinementStatus.iteration})...`
+              )}
+              {refinementStatus.phase === "refining" && `Refining diagram based on feedback (iteration ${refinementStatus.iteration})...`}
+              {refinementStatus.phase === "done" && `Verified — score: ${refinementStatus.score}/10`}
+            </span>
+            {refinementStatus.issues && refinementStatus.issues.length > 0 && refinementStatus.phase !== "done" && (
+              <span className="text-xs text-blue-500 dark:text-blue-400 truncate max-w-md" title={refinementStatus.issues.join("; ")}>
+                {refinementStatus.issues[0]}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Content: 3-column layout */}
       <div className="flex flex-1 min-h-0">
