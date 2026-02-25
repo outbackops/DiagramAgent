@@ -475,14 +475,16 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950">
       {/* Header */}
       <header className="flex items-center px-6 py-2.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <div className="flex items-center gap-3">
+        <button
+          onClick={handleNewDiagram}
+          className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+          title="Start new diagram"
+        >
           <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
           </svg>
-          <div>
-            <h1 className="text-base font-bold text-gray-900 dark:text-white">DiagramAgent</h1>
-          </div>
-        </div>
+          <h1 className="text-base font-bold text-gray-900 dark:text-white">DiagramAgent</h1>
+        </button>
 
         {/* Controls */}
         <div className="ml-auto flex items-center gap-4">
