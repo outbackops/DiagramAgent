@@ -13,6 +13,7 @@ import {
   addConnection,
   deleteConnection,
   updateConnectionLabel,
+  moveNodeToContainer,
 } from "@/lib/d2-editor";
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
@@ -588,6 +589,17 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     setConnectSource(null);
   }, []);
 
+  const handleMoveNode = useCallback(
+    (nodePath: string, targetContainerPath: string) => {
+      const newCode = moveNodeToContainer(d2Code, nodePath, targetContainerPath);
+      if (newCode) {
+        setD2Code(newCode);
+        setSelectedElement(null);
+      }
+    },
+    [d2Code]
+  );
+
   const handleNewDiagram = useCallback(() => {
     abortRef.current?.abort();
     if (doneTimerRef.current) {
@@ -731,6 +743,7 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
             code={d2Code}
             isStreaming={isGenerating}
             onElementClick={handleElementClick}
+            onMoveNode={handleMoveNode}
             selectedPath={selectedElement?.path}
           />
           <ElementEditor

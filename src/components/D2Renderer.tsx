@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { findD2Element, parseConnectionPath } from "@/lib/d2-editor";
+import { findD2Element, parseConnectionPath, getParentPath } from "@/lib/d2-editor";
 
 interface D2RendererProps {
   code: string;
   isStreaming?: boolean;
   /** Callback when user clicks a diagram element. Passes the D2 path and whether it's a connection. */
   onElementClick?: (path: string, isConnection: boolean) => void;
+  /** Callback when user drags a node onto a different container */
+  onMoveNode?: (nodePath: string, targetContainerPath: string) => void;
   /** The currently selected element path (for highlight styling) */
   selectedPath?: string | null;
   className?: string;
 }
 
-export default function D2Renderer({ code, isStreaming = false, onElementClick, selectedPath, className = "" }: D2RendererProps) {
+export default function D2Renderer({ code, isStreaming = false, onElementClick, onMoveNode, selectedPath, className = "" }: D2RendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>("");
@@ -34,6 +36,13 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   // Click vs drag detection
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
   const CLICK_THRESHOLD = 5; // pixels — if mouse moves less than this, it's a click
+  const DRAG_THRESHOLD = 10; // pixels — start element drag after this distance
+
+  // Element drag state
+  const [isDraggingElement, setIsDraggingElement] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const dragSourceRef = useRef<{ path: string; element: Element; startX: number; startY: number } | null>(null);
 
   // Server-side render via /api/render
   const renderDiagram = useCallback(async (d2Code: string, requestId: number) => {
@@ -107,58 +116,70 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, svg]);
 
-  // Highlight selected element in the SVG
+  // Highlight selected element and apply drag visual offset
   useEffect(() => {
     const container = svgContainerRef.current;
     if (!container || !svg) return;
 
-    // Remove previous highlights
-    container.querySelectorAll(".d2-element-highlight").forEach((el) => el.remove());
-    container.querySelectorAll("[data-d2-selected]").forEach((el) => el.removeAttribute("data-d2-selected"));
+    // Remove previous highlights and transforms
+    container.querySelectorAll(".d2-element-highlight, .d2-drop-highlight").forEach((el) => el.remove());
+    container.querySelectorAll("[data-d2-selected]").forEach((el) => {
+      el.removeAttribute("data-d2-selected");
+      (el as HTMLElement).style.transform = "";
+      (el as HTMLElement).style.opacity = "";
+    });
+    container.querySelectorAll("[data-d2-drop-target]").forEach((el) => el.removeAttribute("data-d2-drop-target"));
 
-    if (!selectedPath) return;
-
-    // Find the element by base64-encoding the path and matching class
-    try {
-      const encoded = btoa(selectedPath);
-      // For connections, the path contains ">" which gets HTML-encoded
-      const encodedAlt = btoa(selectedPath.replace(/>/g, "&gt;"));
-
-      const allGroups = container.querySelectorAll("g[class]");
-      for (const g of allGroups) {
-        const classes = g.getAttribute("class") || "";
-        if (classes.split(/\s+/).includes(encoded) || classes.split(/\s+/).includes(encodedAlt)) {
-          g.setAttribute("data-d2-selected", "true");
-
-          // Add a highlight overlay
-          const rect = g.getBoundingClientRect();
-          const svgEl = container.querySelector("svg");
-          if (svgEl) {
-            const svgRect = svgEl.getBoundingClientRect();
-            const highlight = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const highlightElement = (path: string, color: string, dashArray: string, fillOpacity: string, cssClass: string) => {
+      try {
+        const encoded = btoa(path);
+        const encodedAlt = btoa(path.replace(/>/g, "&gt;"));
+        const allGroups = container.querySelectorAll("g[class]");
+        for (const g of allGroups) {
+          const classes = g.getAttribute("class") || "";
+          if (classes.split(/\s+/).includes(encoded) || classes.split(/\s+/).includes(encodedAlt)) {
             const bbox = (g as SVGGraphicsElement).getBBox?.();
             if (bbox) {
+              const highlight = document.createElementNS("http://www.w3.org/2000/svg", "rect");
               highlight.setAttribute("x", String(bbox.x - 4));
               highlight.setAttribute("y", String(bbox.y - 4));
               highlight.setAttribute("width", String(bbox.width + 8));
               highlight.setAttribute("height", String(bbox.height + 8));
               highlight.setAttribute("rx", "6");
-              highlight.setAttribute("fill", "rgba(59, 130, 246, 0.08)");
-              highlight.setAttribute("stroke", "#3b82f6");
+              highlight.setAttribute("fill", fillOpacity);
+              highlight.setAttribute("stroke", color);
               highlight.setAttribute("stroke-width", "2");
-              highlight.setAttribute("stroke-dasharray", "6 3");
-              highlight.classList.add("d2-element-highlight");
-              // Insert highlight before the element so it appears behind
+              highlight.setAttribute("stroke-dasharray", dashArray);
+              highlight.classList.add(cssClass);
               g.parentNode?.insertBefore(highlight, g);
             }
+
+            // Apply drag offset to the selected element
+            if (cssClass === "d2-element-highlight" && isDraggingElement && (dragOffset.x !== 0 || dragOffset.y !== 0)) {
+              (g as HTMLElement).style.transform = `translate(${dragOffset.x}px, ${dragOffset.y}px)`;
+              (g as HTMLElement).style.opacity = "0.7";
+              g.setAttribute("data-d2-selected", "true");
+            } else if (cssClass === "d2-element-highlight") {
+              g.setAttribute("data-d2-selected", "true");
+            }
+            return;
           }
-          break;
         }
+      } catch {
+        // base64 encoding failed
       }
-    } catch {
-      // base64 encoding failed — skip highlight
+    };
+
+    // Highlight selected element
+    if (selectedPath) {
+      highlightElement(selectedPath, "#3b82f6", "6 3", "rgba(59, 130, 246, 0.08)", "d2-element-highlight");
     }
-  }, [selectedPath, svg]);
+
+    // Highlight drop target container
+    if (dropTarget) {
+      highlightElement(dropTarget, "#22c55e", "4 2", "rgba(34, 197, 94, 0.12)", "d2-drop-highlight");
+    }
+  }, [selectedPath, dropTarget, svg, isDraggingElement, dragOffset]);
 
   // Mouse wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -167,20 +188,63 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
     setScale((s) => Math.min(Math.max(s * delta, 0.1), 5));
   }, []);
 
-  // Pan handlers — with click detection for element selection
+  // Pan handlers — with click detection for element selection and element dragging
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    isPanning.current = true;
     mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+
+    // Check if we're clicking on a selected element (start drag)
+    if (selectedPath && onMoveNode) {
+      const target = e.target as Element;
+      const hit = findD2Element(target);
+      if (hit && !hit.isConnection && hit.path === selectedPath) {
+        dragSourceRef.current = { path: hit.path, element: hit.element, startX: e.clientX, startY: e.clientY };
+        // Don't start panning yet — wait to see if it's a drag
+        return;
+      }
+    }
+
+    // Otherwise, start panning
+    isPanning.current = true;
     panStart.current = { x: e.clientX, y: e.clientY };
     setTranslate((t) => {
       translateStart.current = { ...t };
       return t;
     });
     (e.currentTarget as HTMLElement).style.cursor = "grabbing";
-  }, []);
+  }, [selectedPath, onMoveNode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // Element drag mode
+    if (dragSourceRef.current && mouseDownPosRef.current) {
+      const dx = e.clientX - dragSourceRef.current.startX;
+      const dy = e.clientY - dragSourceRef.current.startY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist >= DRAG_THRESHOLD || isDraggingElement) {
+        if (!isDraggingElement) setIsDraggingElement(true);
+        setDragOffset({ x: dx / scale, y: dy / scale });
+
+        // Check for drop target (container under cursor)
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (target) {
+          const hit = findD2Element(target);
+          if (hit && !hit.isConnection && hit.path !== dragSourceRef.current.path) {
+            // Check it's a container (has dot in path or is different from source's parent)
+            const sourceParent = getParentPath(dragSourceRef.current.path);
+            if (hit.path !== sourceParent) {
+              setDropTarget(hit.path);
+            } else {
+              setDropTarget(null);
+            }
+          } else {
+            setDropTarget(null);
+          }
+        }
+        return;
+      }
+    }
+
     if (!isPanning.current) return;
     const dx = e.clientX - panStart.current.x;
     const dy = e.clientY - panStart.current.y;
@@ -188,15 +252,34 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       x: translateStart.current.x + dx,
       y: translateStart.current.y + dy,
     });
-  }, []);
+  }, [scale, isDraggingElement]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // Handle element drop
+    if (isDraggingElement && dragSourceRef.current && dropTarget && onMoveNode) {
+      onMoveNode(dragSourceRef.current.path, dropTarget);
+      setIsDraggingElement(false);
+      setDragOffset({ x: 0, y: 0 });
+      setDropTarget(null);
+      dragSourceRef.current = null;
+      mouseDownPosRef.current = null;
+      return;
+    }
+
+    // Cancel element drag without drop
+    if (dragSourceRef.current) {
+      setIsDraggingElement(false);
+      setDragOffset({ x: 0, y: 0 });
+      setDropTarget(null);
+      dragSourceRef.current = null;
+    }
+
     const wasPanning = isPanning.current;
     isPanning.current = false;
     (e.currentTarget as HTMLElement).style.cursor = svg ? "grab" : "default";
 
     // Detect click (not drag) for element selection
-    if (wasPanning && mouseDownPosRef.current && onElementClick) {
+    if (mouseDownPosRef.current && onElementClick) {
       const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
       const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
       if (dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD) {
@@ -213,7 +296,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       }
     }
     mouseDownPosRef.current = null;
-  }, [svg, onElementClick]);
+  }, [svg, onElementClick, onMoveNode, isDraggingElement, dropTarget]);
 
   const handleZoomIn = () => setScale((s) => Math.min(s * 1.2, 5));
   const handleZoomOut = () => setScale((s) => Math.max(s / 1.2, 0.1));
@@ -275,6 +358,16 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <span className="text-sm font-medium text-gray-600 dark:text-gray-300 mr-auto">
           Diagram Preview
+          {selectedPath && !isDraggingElement && (
+            <span className="ml-2 text-xs text-blue-500 font-normal">
+              — click to select, drag to move
+            </span>
+          )}
+          {isDraggingElement && (
+            <span className="ml-2 text-xs text-green-500 font-normal">
+              — drop on a container to move
+            </span>
+          )}
         </span>
         {loading && (
           <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
@@ -330,7 +423,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       <div
         ref={containerRef}
         className="flex-1 overflow-hidden bg-white dark:bg-gray-900 relative"
-        style={{ cursor: svg ? "grab" : "default" }}
+        style={{ cursor: isDraggingElement ? "grabbing" : svg ? "grab" : "default" }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

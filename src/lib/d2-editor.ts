@@ -262,3 +262,182 @@ export function updateConnectionLabel(code: string, fromPath: string, toPath: st
   }
   return code;
 }
+
+/**
+ * Extract a node block (its full text including properties) from D2 code.
+ * Returns { blockText, startLine, endLine } or null.
+ */
+export function extractNodeBlock(code: string, leafName: string): { blockText: string; startLine: number; endLine: number } | null {
+  const lines = code.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith(`${leafName}:`) && trimmed.includes("{") || trimmed === `${leafName} {`) {
+      // Find matching closing brace
+      let depth = 0;
+      const start = i;
+      for (let j = i; j < lines.length; j++) {
+        const l = lines[j];
+        for (const ch of l) {
+          if (ch === "{") depth++;
+          if (ch === "}") depth--;
+        }
+        if (depth <= 0) {
+          // Also grab .class: line above if present
+          const classLineIdx = (start > 0 && lines[start - 1].trim().startsWith(`${leafName}.class:`)) ? start - 1 : start;
+          const block = lines.slice(classLineIdx, j + 1).join("\n");
+          return { blockText: block, startLine: classLineIdx, endLine: j };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Move a node from one container to another.
+ * Extracts the node block text and re-inserts it into the target container.
+ * Also updates all connection paths to use the new fully-qualified path.
+ */
+export function moveNodeToContainer(code: string, nodePath: string, targetContainerPath: string): string | null {
+  const parts = nodePath.split(".");
+  const leafName = parts[parts.length - 1];
+
+  // Extract the node block
+  const block = extractNodeBlock(code, leafName);
+  if (!block) return null;
+
+  const lines = code.split("\n");
+
+  // Remove the node block from its current location
+  const withoutNode = [
+    ...lines.slice(0, block.startLine),
+    ...lines.slice(block.endLine + 1),
+  ].join("\n");
+
+  // Find the target container's closing brace to insert before it
+  const targetLeaf = targetContainerPath.split(".").pop()!;
+  const targetLines = withoutNode.split("\n");
+  let insertIdx = -1;
+  let depth = 0;
+  let inTarget = false;
+
+  for (let i = 0; i < targetLines.length; i++) {
+    const trimmed = targetLines[i].trim();
+    if (!inTarget && (trimmed.startsWith(`${targetLeaf}:`) && trimmed.includes("{") || trimmed === `${targetLeaf} {`)) {
+      inTarget = true;
+      depth = 0;
+    }
+    if (inTarget) {
+      for (const ch of targetLines[i]) {
+        if (ch === "{") depth++;
+        if (ch === "}") depth--;
+      }
+      if (depth <= 0) {
+        insertIdx = i; // insert before the closing }
+        break;
+      }
+    }
+  }
+
+  if (insertIdx < 0) return null;
+
+  // Indent the node block to match the target container
+  const containerIndent = targetLines[insertIdx].match(/^(\s*)/)?.[1] || "";
+  const nodeIndent = containerIndent + "  ";
+  const indentedBlock = block.blockText
+    .split("\n")
+    .map((l) => {
+      const stripped = l.replace(/^\s+/, "");
+      return stripped ? `${nodeIndent}${stripped}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  // Insert the node block
+  const result = [
+    ...targetLines.slice(0, insertIdx),
+    "",
+    indentedBlock,
+    ...targetLines.slice(insertIdx),
+  ].join("\n");
+
+  // Update connection paths: oldPath.LeafName → newPath.LeafName
+  const newNodePath = `${targetContainerPath}.${leafName}`;
+  return result.replace(new RegExp(nodePath.replace(/\./g, "\\."), "g"), newNodePath);
+}
+
+/**
+ * Set container width/height in D2 code.
+ */
+export function setContainerSize(code: string, containerPath: string, width?: number, height?: number): string {
+  const leafName = containerPath.split(".").pop()!;
+  const lines = code.split("\n");
+
+  let inTarget = false;
+  let depth = 0;
+  let insertIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!inTarget && (trimmed.startsWith(`${leafName}:`) && trimmed.includes("{") || trimmed === `${leafName} {`)) {
+      inTarget = true;
+      depth = 0;
+      insertIdx = i + 1; // After opening line
+    }
+    if (inTarget) {
+      for (const ch of lines[i]) {
+        if (ch === "{") depth++;
+        if (ch === "}") depth--;
+      }
+
+      // Check for existing style.width/height and update
+      if (trimmed.startsWith("style.width:") && width != null) {
+        lines[i] = lines[i].replace(/style\.width:\s*\d+/, `style.width: ${width}`);
+        width = undefined; // Mark as handled
+      }
+      if (trimmed.startsWith("style.height:") && height != null) {
+        lines[i] = lines[i].replace(/style\.height:\s*\d+/, `style.height: ${height}`);
+        height = undefined; // Mark as handled
+      }
+
+      if (depth <= 0) {
+        // Insert any remaining width/height before closing brace
+        const indent = lines[i].match(/^(\s*)/)?.[1] || "  ";
+        const additions: string[] = [];
+        if (width != null) additions.push(`${indent}  style.width: ${width}`);
+        if (height != null) additions.push(`${indent}  style.height: ${height}`);
+        if (additions.length > 0) {
+          lines.splice(i, 0, ...additions);
+        }
+        break;
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Determine the container path for a given element path.
+ * E.g., "Platform.WebTier.Web1" → "Platform.WebTier"
+ */
+export function getParentPath(path: string): string | null {
+  const idx = path.lastIndexOf(".");
+  return idx > 0 ? path.substring(0, idx) : null;
+}
+
+/**
+ * Check if a path represents a container (has children) in the D2 code.
+ */
+export function isContainer(code: string, path: string): boolean {
+  const leafName = path.split(".").pop()!;
+  const lines = code.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if ((trimmed.startsWith(`${leafName}:`) && trimmed.includes("{")) || trimmed === `${leafName} {`) {
+      // Check if it has child elements (not just properties)
+      return true;
+    }
+  }
+  return false;
+}
