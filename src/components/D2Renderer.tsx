@@ -317,18 +317,22 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   }, [svg]);
 
   const exportPng = useCallback(async () => {
-    if (!svg) return;
+    if (!svg || typeof svg !== "string") return;
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const img = new Image();
-    const fullSvg = svg.startsWith("<svg")
-      ? `<?xml version="1.0" encoding="utf-8"?>${svg}`
+    const fullSvg = svg.startsWith("<svg") || svg.startsWith("<?xml")
+      ? (svg.startsWith("<?xml") ? svg : `<?xml version="1.0" encoding="utf-8"?>${svg}`)
       : svg;
     const svgBlob = new Blob([fullSvg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(svgBlob);
 
+    img.onerror = () => {
+      console.warn("PNG export: failed to load SVG as image");
+      URL.revokeObjectURL(url);
+    };
     img.onload = () => {
       const s = 2;
       canvas.width = img.width * s;
@@ -355,7 +359,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   const [exportingVsdx, setExportingVsdx] = useState(false);
 
   const exportVsdx = useCallback(async () => {
-    if (!svg) return;
+    if (!svg || typeof svg !== "string") return;
     setExportingVsdx(true);
     try {
       const res = await fetch("/api/export/vsdx", {
@@ -364,8 +368,14 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
         body: JSON.stringify({ svg, title: "Architecture Diagram" }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Export failed" }));
-        console.error("VSDX export error:", err.error);
+        let errorMsg = "Export failed";
+        try {
+          const err = await res.json();
+          errorMsg = err.error || errorMsg;
+        } catch {
+          // response wasn't JSON
+        }
+        console.error("VSDX export error:", errorMsg);
         return;
       }
       const blob = await res.blob();

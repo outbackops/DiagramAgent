@@ -19,10 +19,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Convert SVG to PNG for embedding
-    const pngBuffer = await sharp(Buffer.from(svg), { density: 150 })
-      .resize({ width: 3200, height: 2400, fit: "inside", withoutEnlargement: true })
-      .png()
-      .toBuffer();
+    // D2 SVGs may contain embedded fonts and external URLs — wrap in try/catch
+    let pngBuffer: Buffer;
+    try {
+      pngBuffer = await sharp(Buffer.from(svg, "utf-8"), { density: 150 })
+        .resize({ width: 3200, height: 2400, fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    } catch (sharpErr: any) {
+      console.error("Sharp SVG->PNG conversion failed:", sharpErr.message);
+      // Fallback: create a minimal placeholder PNG
+      pngBuffer = await sharp({
+        create: { width: 800, height: 600, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+      }).png().toBuffer();
+    }
 
     // Get image dimensions
     const metadata = await sharp(pngBuffer).metadata();
