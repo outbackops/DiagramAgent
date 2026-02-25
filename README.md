@@ -4,6 +4,86 @@ Generate professional cloud architecture diagrams from natural language using AI
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![D2](https://img.shields.io/badge/D2-WASM-blue) ![Azure AI](https://img.shields.io/badge/Azure_AI-Foundry-purple) ![Version](https://img.shields.io/badge/version-0.1-green)
 
+## Sample Output
+
+### Azure SQL Always On with Disaster Recovery
+
+> **Prompt:** "SQL Always On Availability Group on Azure with disaster recovery"
+
+<p align="center">
+  <img src="samples/Generation1.svg" alt="Azure SQL Always On AG with DR" width="100%">
+</p>
+
+### Azure Platform Architecture
+
+> **Prompt:** "Azure SQL HA architecture with primary and DR regions, private endpoints, and monitoring"
+
+<p align="center">
+  <img src="samples/Generation2.svg" alt="Azure Platform Architecture" width="100%">
+</p>
+
+## UI Overview
+
+DiagramAgent uses a **three-panel layout**:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  DiagramAgent              [Vision Refine ○]  [Model: GPT-5.2]  │
+├────────────┬──────────────┬──────────────────────────────────────┤
+│            │              │                                      │
+│   Chat     │  D2 Code     │   Diagram Preview                    │
+│   Panel    │  Editor      │   (pan/zoom/export)                  │
+│            │  (Monaco)    │                                      │
+│  Clarify   │              │      ┌────┐    ┌────┐    ┌────┐     │
+│  Questions │  direction:  │      │ LB │───→│ VM │───→│ DB │     │
+│  appear    │  right       │      └────┘    └────┘    └────┘     │
+│  here      │  classes: {  │                                      │
+│            │    ...       │                                      │
+│ [textarea] │  }           │              [SVG] [PNG]             │
+├────────────┴──────────────┴──────────────────────────────────────┤
+│  Ctrl+Enter to send                                              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Flow:**
+1. Type a prompt in the chat panel (left)
+2. Answer clarifying questions via clickable pills
+3. Watch D2 code stream into the editor (center)
+4. See the diagram render live in the preview (right)
+5. Export as SVG or PNG, or zoom/pan to inspect
+
+## Example Prompts
+
+Try these prompts to see what DiagramAgent can generate:
+
+| Prompt | What You Get |
+|--------|-------------|
+| `SQL Always On Availability Group on Azure with disaster recovery` | Multi-region Azure architecture with AG listeners, replication, blob backup, and monitoring |
+| `Three-tier web application on AWS with auto-scaling and CDN` | CloudFront → ALB → EC2 Auto Scaling → RDS with read replicas and ElastiCache |
+| `Microservices architecture on Kubernetes with service mesh` | K8s cluster with Istio/Linkerd, API gateway, 4+ services, Prometheus monitoring |
+| `Serverless event-driven architecture on AWS` | API Gateway → Lambda → DynamoDB/SQS/SNS → CloudWatch |
+| `CI/CD pipeline with GitHub Actions, Docker, and Kubernetes` | Source → Build → Test → Container Registry → K8s Deployment |
+| `Multi-region active-active setup on Azure` | Two regions with Traffic Manager, paired App Services, Cosmos DB geo-replication |
+| `Data pipeline with Kafka, Spark, and Snowflake` | Producers → Kafka → Spark Streaming → Snowflake → BI dashboards |
+| `Real-time analytics platform with Kafka and Elasticsearch` | Event ingestion → Kafka → Logstash → Elasticsearch → Kibana |
+
+## Reference Diagram Styles
+
+The samples folder contains reference diagrams that informed the styling:
+
+<table>
+<tr>
+<td><img src="samples/Diagram1.png" alt="Sample 1" width="300"></td>
+<td><img src="samples/Diagram2.png" alt="Sample 2" width="300"></td>
+<td><img src="samples/Diagram3.png" alt="Sample 3" width="300"></td>
+</tr>
+<tr>
+<td>AWS serverless architecture</td>
+<td>Microservices with messaging</td>
+<td>Azure DevOps pipeline</td>
+</tr>
+</table>
+
 ## Features
 
 - **Natural Language → Diagram** — Describe any architecture and get a styled, horizontal-layout diagram
