@@ -12,6 +12,8 @@ interface ChatPanelProps {
   onSend: (prompt: string) => void;
   onNewDiagram: () => void;
   isGenerating: boolean;
+  /** Whether the system is fetching clarifying questions */
+  isClarifying?: boolean;
   /** Slot rendered at the bottom of the messages area (above the input), e.g. clarify panel */
   inlinePanel?: ReactNode;
 }
@@ -27,24 +29,33 @@ const EXAMPLE_PROMPTS = [
   "Real-time analytics platform with Kafka and Elasticsearch",
 ];
 
-export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating, inlinePanel }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating, isClarifying = false, inlinePanel }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Auto-scroll when messages change, clarify panel appears, or generation starts
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [messages, inlinePanel, isGenerating, isClarifying]);
+
+  // Auto-focus textarea when not generating/clarifying
+  useEffect(() => {
+    if (!isGenerating && !isClarifying) {
+      inputRef.current?.focus();
+    }
+  }, [isGenerating, isClarifying]);
 
   const handleSubmit = useCallback(
     (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (input.trim() && !isGenerating) {
+      const busy = isGenerating || isClarifying;
+      if (input.trim() && !busy) {
         onSend(input.trim());
         setInput("");
       }
     },
-    [input, isGenerating, onSend]
+    [input, isGenerating, isClarifying, onSend]
   );
 
   const handleKeyDown = useCallback(
@@ -58,13 +69,14 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
 
   const handleExampleClick = useCallback(
     (example: string) => {
-      if (!isGenerating) {
+      if (!isGenerating && !isClarifying) {
         onSend(example);
       }
     },
-    [isGenerating, onSend]
+    [isGenerating, isClarifying, onSend]
   );
 
+  const busy = isGenerating || isClarifying;
   const hasMessages = messages.length > 0;
 
   return (
@@ -85,7 +97,7 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
                   <button
                     key={i}
                     onClick={() => handleExampleClick(example)}
-                    disabled={isGenerating}
+                    disabled={busy}
                     className="px-2.5 py-1 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
                   >
                     {example}
@@ -113,17 +125,17 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
           </div>
         ))}
 
-        {isGenerating && (
+        {(isGenerating || isClarifying) && (
           <div className="flex justify-start">
             <div className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 text-sm flex items-center gap-2">
               <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-              Generating diagram...
+              {isClarifying ? "Analyzing your request..." : "Generating diagram..."}
             </div>
           </div>
         )}
 
         {/* Inline panel (clarify questions, etc.) */}
-        {inlinePanel && !isGenerating && (
+        {inlinePanel && !isGenerating && !isClarifying && (
           <div className="px-1 py-1">
             {inlinePanel}
           </div>
@@ -142,13 +154,13 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
               placeholder={hasMessages ? "Describe changes to the diagram..." : "Describe an architecture..."}
               rows={2}
               className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400 dark:placeholder-gray-500 text-gray-900 dark:text-gray-100"
-              disabled={isGenerating}
+              disabled={busy}
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <button
               type="submit"
-              disabled={!input.trim() || isGenerating}
+              disabled={!input.trim() || busy}
               className="px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -160,7 +172,7 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
               <button
                 type="button"
                 onClick={onNewDiagram}
-                disabled={isGenerating}
+                disabled={busy}
                 className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
               >
                 New

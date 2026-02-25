@@ -33,6 +33,7 @@ export default function Home() {
   const [autoRefine, setAutoRefine] = useState(true);
   const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Clarify state
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
@@ -137,12 +138,14 @@ export default function Home() {
     async (
       svg: string,
       prompt: string,
-      code: string
+      code: string,
+      signal?: AbortSignal
     ): Promise<{ score: number; pass: boolean; issues: string[]; suggestions: string[] }> => {
       const res = await fetch("/api/assess", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ svg, prompt, d2Code: code }),
+        signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Assessment failed");
@@ -160,6 +163,11 @@ export default function Home() {
 
       setIsGenerating(true);
       if (!existingCode) setD2Code("");
+      // Clear any lingering done-status timer
+      if (doneTimerRef.current) {
+        clearTimeout(doneTimerRef.current);
+        doneTimerRef.current = null;
+      }
       setRefinementStatus({
         phase: "generating",
         iteration: 1,
@@ -218,7 +226,7 @@ export default function Home() {
 
           let assessment: { score: number; pass: boolean; issues: string[]; suggestions: string[] };
           try {
-            assessment = await assessDiagram(svg, prompt, currentCode);
+            assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
           } catch (assessErr: any) {
             console.warn("Assessment failed, skipping:", assessErr.message);
             break;
@@ -242,7 +250,10 @@ export default function Home() {
               },
             ]);
             setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: MAX_REFINE_ITERATIONS, score: assessment.score });
-            setTimeout(() => setRefinementStatus(null), 4000);
+            doneTimerRef.current = setTimeout(() => {
+              setRefinementStatus(null);
+              doneTimerRef.current = null;
+            }, 4000);
             return;
           }
 
@@ -435,16 +446,22 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         const newMessages = [...chatMessages, userMsg];
         setChatMessages(newMessages);
         generateWithRefinement(prompt, d2Code, chatMessages);
-      } else if (!clarifyQuestions) {
-        // New diagram — trigger clarify flow
+      } else {
+        // New diagram — dismiss any existing clarify panel and start fresh
+        setClarifyQuestions(null);
+        setClarifyPrompt("");
         fetchClarifyQuestions(prompt);
       }
     },
-    [chatMessages, d2Code, clarifyQuestions, generateWithRefinement, fetchClarifyQuestions]
+    [chatMessages, d2Code, generateWithRefinement, fetchClarifyQuestions]
   );
 
   const handleNewDiagram = useCallback(() => {
     abortRef.current?.abort();
+    if (doneTimerRef.current) {
+      clearTimeout(doneTimerRef.current);
+      doneTimerRef.current = null;
+    }
     setD2Code("");
     setChatMessages([]);
     setIsGenerating(false);
@@ -551,7 +568,8 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
             messages={chatMessages}
             onSend={handleSend}
             onNewDiagram={handleNewDiagram}
-            isGenerating={isGenerating || isClarifying}
+            isGenerating={isGenerating}
+            isClarifying={isClarifying}
             inlinePanel={
               clarifyQuestions ? (
                 <ClarifyPanel
@@ -567,12 +585,12 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
 
         {/* Code Editor */}
         <div className="w-[30%] border-r border-gray-200 dark:border-gray-800">
-          <CodeEditor code={d2Code} onChange={setD2Code} />
+          <CodeEditor code={d2Code} onChange={setD2Code} readOnly={isGenerating} />
         </div>
 
         {/* Diagram Preview */}
         <div className="flex-1">
-          <D2Renderer code={d2Code} />
+          <D2Renderer code={d2Code} isStreaming={isGenerating} />
         </div>
       </div>
     </div>

@@ -4,10 +4,11 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 interface D2RendererProps {
   code: string;
+  isStreaming?: boolean;
   className?: string;
 }
 
-export default function D2Renderer({ code, className = "" }: D2RendererProps) {
+export default function D2Renderer({ code, isStreaming = false, className = "" }: D2RendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>("");
@@ -21,13 +22,22 @@ export default function D2Renderer({ code, className = "" }: D2RendererProps) {
   const panStart = useRef({ x: 0, y: 0 });
   const translateStart = useRef({ x: 0, y: 0 });
 
+  // Render request tracking for abort + race condition prevention
+  const renderIdRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Server-side render via /api/render
-  const renderDiagram = useCallback(async (d2Code: string) => {
+  const renderDiagram = useCallback(async (d2Code: string, requestId: number) => {
     if (!d2Code.trim()) {
       setSvg("");
       setError("");
       return;
     }
+
+    // Abort any in-flight request
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setLoading(true);
     setError("");
@@ -37,7 +47,11 @@ export default function D2Renderer({ code, className = "" }: D2RendererProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: d2Code }),
+        signal: controller.signal,
       });
+
+      // Race condition guard: ignore response if a newer request was made
+      if (renderIdRef.current !== requestId) return;
 
       const data = await res.json();
 
@@ -49,31 +63,40 @@ export default function D2Renderer({ code, className = "" }: D2RendererProps) {
         setError("");
       }
     } catch (err: any) {
+      if (err.name === "AbortError") return; // Silently ignore aborted requests
+      if (renderIdRef.current !== requestId) return;
       setError(err?.message || "Network error");
       setSvg("");
     } finally {
-      setLoading(false);
+      if (renderIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  // Debounced render on code change
+  // Debounced render on code change — longer debounce during streaming
   useEffect(() => {
     if (!code) {
       setSvg("");
       setError("");
       return;
     }
-    const timeout = setTimeout(() => renderDiagram(code), 400);
+    const debounceMs = isStreaming ? 1200 : 400;
+    const id = ++renderIdRef.current;
+    const timeout = setTimeout(() => renderDiagram(code, id), debounceMs);
     return () => clearTimeout(timeout);
-  }, [code, renderDiagram]);
+  }, [code, isStreaming, renderDiagram]);
 
-  // Fit diagram to container when SVG changes
+  // Reset zoom/pan only when streaming stops (not on every SVG update)
+  const prevStreamingRef = useRef(isStreaming);
   useEffect(() => {
-    if (svg) {
+    if (prevStreamingRef.current && !isStreaming && svg) {
+      // Streaming just ended — fit to view
       setScale(1);
       setTranslate({ x: 0, y: 0 });
     }
-  }, [svg]);
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming, svg]);
 
   // Mouse wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
