@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     const resolvedCode = resolveIconsInD2Code(code);
 
     const result = await d2.compile(resolvedCode, {
-      layout: "elk",
+      layout: "dagre",
       sketch: false,
       pad: 40,
     });
