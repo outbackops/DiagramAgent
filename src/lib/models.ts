@@ -20,8 +20,8 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     description: "Thinking model — best architecture reasoning",
     apiVersion: "2025-04-01-preview",
     useMaxCompletionTokens: true,
-    maxTokens: 16000,
-    supportsTemperature: true,
+    maxTokens: 32000,
+    supportsTemperature: false,
     supportsStreaming: true,
   },
   {
@@ -30,8 +30,8 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     description: "Advanced — good balance of speed and quality",
     apiVersion: "2025-04-01-preview",
     useMaxCompletionTokens: true,
-    maxTokens: 8000,
-    supportsTemperature: true,
+    maxTokens: 16000,
+    supportsTemperature: false,
     supportsStreaming: true,
   },
   {
@@ -51,8 +51,8 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     description: "Fast — quick iterations",
     apiVersion: "2025-04-01-preview",
     useMaxCompletionTokens: true,
-    maxTokens: 4000,
-    supportsTemperature: true,
+    maxTokens: 16000,
+    supportsTemperature: false,
     supportsStreaming: true,
   },
   {

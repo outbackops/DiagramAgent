@@ -1,33 +1,10 @@
 import { NextRequest } from "next/server";
-import { DefaultAzureCredential } from "@azure/identity";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { getModelConfig } from "@/lib/models";
+import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 
-const AZURE_ENDPOINT = process.env.AZURE_AI_FOUNDRY_ENDPOINT || "";
-const AZURE_API_KEY = process.env.AZURE_AI_FOUNDRY_API_KEY || "";
+const AZURE_ENDPOINT = getAzureEndpoint();
 const DEFAULT_MODEL = process.env.AZURE_AI_FOUNDRY_MODEL || "gpt-5.2-chat";
-
-const COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default";
-let cachedCredential: DefaultAzureCredential | null = null;
-
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  if (AZURE_API_KEY && AZURE_API_KEY !== "your-api-key-here") {
-    try {
-      if (!cachedCredential) {
-        cachedCredential = new DefaultAzureCredential();
-      }
-      const tokenResponse = await cachedCredential.getToken(COGNITIVE_SERVICES_SCOPE);
-      return { "Authorization": `Bearer ${tokenResponse.token}` };
-    } catch {
-      return { "api-key": AZURE_API_KEY };
-    }
-  }
-  if (!cachedCredential) {
-    cachedCredential = new DefaultAzureCredential();
-  }
-  const tokenResponse = await cachedCredential.getToken(COGNITIVE_SERVICES_SCOPE);
-  return { "Authorization": `Bearer ${tokenResponse.token}` };
-}
 
 export async function POST(request: NextRequest) {
   try {

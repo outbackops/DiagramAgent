@@ -1,51 +1,33 @@
 import { NextRequest } from "next/server";
-import { DefaultAzureCredential } from "@azure/identity";
 import { VISION_MODEL_ID, getModelConfig } from "@/lib/models";
+import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
+import sharp from "sharp";
 
-const AZURE_ENDPOINT = process.env.AZURE_AI_FOUNDRY_ENDPOINT || "";
-const AZURE_API_KEY = process.env.AZURE_AI_FOUNDRY_API_KEY || "";
+const AZURE_ENDPOINT = getAzureEndpoint();
 
-const COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default";
-let cachedCredential: DefaultAzureCredential | null = null;
+const ASSESSMENT_SYSTEM_PROMPT = `You are a diagram quality assessor. You receive a rendered architecture diagram image, the D2 source code, and the original user prompt. Evaluate STRUCTURAL COHERENCE, LAYOUT QUALITY, and COMPLETENESS.
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  if (AZURE_API_KEY && AZURE_API_KEY !== "your-api-key-here") {
-    try {
-      if (!cachedCredential) {
-        cachedCredential = new DefaultAzureCredential();
-      }
-      const tokenResponse = await cachedCredential.getToken(COGNITIVE_SERVICES_SCOPE);
-      return { Authorization: `Bearer ${tokenResponse.token}` };
-    } catch {
-      return { "api-key": AZURE_API_KEY };
-    }
-  }
-  if (!cachedCredential) {
-    cachedCredential = new DefaultAzureCredential();
-  }
-  const tokenResponse = await cachedCredential.getToken(COGNITIVE_SERVICES_SCOPE);
-  return { Authorization: `Bearer ${tokenResponse.token}` };
-}
+Evaluation criteria (score each 1-10, then average):
+1. **Completeness** (weight: 30%) — All components from the prompt are present. Missing a major component = -3 points.
+2. **Structure** (weight: 25%) — Components grouped in logical containers/boundaries. Flat diagrams with no grouping = max 4.
+3. **Connections** (weight: 20%) — Data flows are correct, labeled, and directional. Excessive crossing lines = -2.
+4. **Layout** (weight: 15%) — Clean spacing, no overlapping labels or nodes. Readable at a glance.
+5. **Accuracy** (weight: 10%) — Architecture makes technical sense for the described use case.
 
-const ASSESSMENT_SYSTEM_PROMPT = `You are a diagram quality assessor. You receive a rendered architecture diagram image and the original user prompt. Your job is to assess STRUCTURAL and LAYOUT quality of the diagram.
+ALSO check the D2 source code for syntax problems:
+- Properties on a single line (e.g. \`Node { icon: x label: y }\`) — this is INVALID and causes parse errors
+- Missing connections between obviously related components
+- Excessive node count (>40 nodes makes diagrams unreadable)
 
-Evaluate these aspects:
-1. **Completeness**: Does the diagram include all components mentioned or implied by the prompt?
-2. **Layout**: Are components arranged logically with clear visual hierarchy? Are there overlapping elements or crossed connections?
-3. **Grouping**: Are related components properly grouped into containers/boundaries?
-4. **Connections**: Are connections between components logical and properly labeled?
-5. **Readability**: Are labels readable? Is there sufficient spacing?
-
-Respond with a JSON object (no markdown fences):
+Respond with ONLY a JSON object (no markdown, no code fences):
 {
-  "score": <1-10 integer>,
+  "score": <1-10 integer, weighted average>,
   "pass": <true if score >= 7>,
-  "issues": ["issue 1", "issue 2"],
-  "suggestions": ["specific D2 code fix suggestion 1", "suggestion 2"]
+  "issues": ["concrete issue 1", "concrete issue 2"],
+  "suggestions": ["D2 code fix: move X into container Y", "Add connection: A -> B: protocol"]
 }
 
-If the diagram is acceptable (score >= 7), set "pass" to true and "issues"/"suggestions" can be empty arrays.
-If the diagram has problems, provide SPECIFIC and ACTIONABLE suggestions for how to fix the D2 code. Reference component names and connection directions.`;
+Suggestions MUST be specific D2 code actions, not vague advice. Reference actual node names from the code.`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -67,9 +49,24 @@ export async function POST(request: NextRequest) {
 
     const visionConfig = getModelConfig(VISION_MODEL_ID);
 
-    // Convert SVG to a base64 data URI for the vision model
-    const svgBase64 = Buffer.from(svg).toString("base64");
-    const imageUrl = `data:image/svg+xml;base64,${svgBase64}`;
+    // Convert SVG to PNG using sharp (GPT-4o vision doesn't accept SVG)
+    let pngBase64: string;
+    try {
+      const svgBuffer = Buffer.from(svg);
+      const pngBuffer = await sharp(svgBuffer, { density: 150 })
+        .resize({ width: 1600, height: 1200, fit: "inside", withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      pngBase64 = pngBuffer.toString("base64");
+    } catch (convErr: any) {
+      console.error("SVG to PNG conversion error:", convErr);
+      return new Response(
+        JSON.stringify({ error: `Failed to convert SVG to PNG: ${convErr.message}` }),
+        { status: 422, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const imageUrl = `data:image/png;base64,${pngBase64}`;
 
     const messages = [
       { role: "system", content: ASSESSMENT_SYSTEM_PROMPT },

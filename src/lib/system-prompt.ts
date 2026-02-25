@@ -144,6 +144,21 @@ Node.style.border-radius: 8
 4. Node identifiers: no spaces. Use \`.label\` for display names.
 5. Comments: \`#\` at line start.
 6. Do NOT use Mermaid or PlantUML syntax.
+7. NEVER put multiple properties on one line. Each property MUST be on its own line:
+   CORRECT:
+   \`\`\`
+   Node {
+     icon: server
+     label: My Node
+   }
+   \`\`\`
+   WRONG (will cause parse errors):
+   \`\`\`
+   Node { icon: server label: My Node }
+   \`\`\`
+8. Keep containers to a maximum of 10 nodes. If more are needed, create sub-containers.
+9. Limit total diagram connections to ~30. Consolidate where possible (e.g. use a service mesh node instead of N×M connections).
+10. Prefer grouping replicas under a single container with a label like "Service A (×2)" instead of separate replica nodes, unless replication topology is the focus.
 
 ## Available Icon Keys
 
