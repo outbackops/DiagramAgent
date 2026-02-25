@@ -4,6 +4,16 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import ChatPanel, { ChatMessage } from "@/components/PromptInput";
 import ClarifyPanel, { ClarifyQuestion, ClarifyAnswers } from "@/components/ClarifyPanel";
+import ElementEditor, { SelectedElement } from "@/components/ElementEditor";
+import {
+  parseConnectionPath,
+  findElementLabel,
+  updateElementLabel,
+  deleteElement,
+  addConnection,
+  deleteConnection,
+  updateConnectionLabel,
+} from "@/lib/d2-editor";
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
 const D2Renderer = dynamic(() => import("@/components/D2Renderer"), { ssr: false });
@@ -39,6 +49,11 @@ export default function Home() {
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
   const [clarifyPrompt, setClarifyPrompt] = useState<string>(""); // the original prompt waiting for clarification
   const [isClarifying, setIsClarifying] = useState(false);
+
+  // Diagram interaction state
+  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
+  const [connectMode, setConnectMode] = useState(false);
+  const [connectSource, setConnectSource] = useState<string | null>(null);
 
   // Load available models
   useEffect(() => {
@@ -456,6 +471,123 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     [chatMessages, d2Code, generateWithRefinement, fetchClarifyQuestions]
   );
 
+  // --- Diagram Interaction Handlers ---
+
+  const handleElementClick = useCallback(
+    (path: string, isConnection: boolean) => {
+      // If in connect mode, this click is the target
+      if (connectMode && connectSource && path && !isConnection) {
+        const newCode = addConnection(d2Code, connectSource, path, "");
+        setD2Code(newCode);
+        setConnectMode(false);
+        setConnectSource(null);
+        setSelectedElement(null);
+        return;
+      }
+
+      // Deselect if clicked on empty space or same element
+      if (!path || (selectedElement?.path === path)) {
+        setSelectedElement(null);
+        setConnectMode(false);
+        setConnectSource(null);
+        return;
+      }
+
+      // Select the element
+      if (isConnection) {
+        const conn = parseConnectionPath(path);
+        // Find the connection label from D2 code
+        let label = "";
+        if (conn) {
+          const lines = d2Code.split("\n");
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.includes("->") && trimmed.includes(conn.from) && trimmed.includes(conn.to)) {
+              const labelMatch = trimmed.match(/:\s*(.+?)(?:\s*\{|$)/);
+              if (labelMatch) label = labelMatch[1].trim();
+              break;
+            }
+          }
+        }
+        setSelectedElement({
+          path,
+          isConnection: true,
+          connectionFrom: conn?.from,
+          connectionTo: conn?.to,
+          label,
+        });
+      } else {
+        const label = findElementLabel(d2Code, path);
+        setSelectedElement({
+          path,
+          isConnection: false,
+          label: label || path.split(".").pop() || path,
+        });
+      }
+    },
+    [d2Code, connectMode, connectSource, selectedElement]
+  );
+
+  const handleUpdateLabel = useCallback(
+    (path: string, newLabel: string, isConnection: boolean) => {
+      let newCode: string | null = null;
+
+      if (isConnection) {
+        const conn = parseConnectionPath(path);
+        if (conn) {
+          newCode = updateConnectionLabel(d2Code, conn.from, conn.to, newLabel);
+        }
+      } else {
+        newCode = updateElementLabel(d2Code, path, newLabel);
+      }
+
+      if (newCode) {
+        setD2Code(newCode);
+        setSelectedElement((prev) => prev ? { ...prev, label: newLabel } : null);
+      }
+    },
+    [d2Code]
+  );
+
+  const handleDeleteElement = useCallback(
+    (path: string, isConnection: boolean) => {
+      let newCode: string;
+
+      if (isConnection) {
+        const conn = parseConnectionPath(path);
+        if (conn) {
+          newCode = deleteConnection(d2Code, conn.from, conn.to);
+        } else {
+          return;
+        }
+      } else {
+        newCode = deleteElement(d2Code, path);
+      }
+
+      setD2Code(newCode);
+      setSelectedElement(null);
+    },
+    [d2Code]
+  );
+
+  const handleStartConnect = useCallback(() => {
+    if (selectedElement && !selectedElement.isConnection) {
+      setConnectSource(selectedElement.path);
+      setConnectMode(true);
+    }
+  }, [selectedElement]);
+
+  const handleCancelConnect = useCallback(() => {
+    setConnectMode(false);
+    setConnectSource(null);
+  }, []);
+
+  const handleDeselect = useCallback(() => {
+    setSelectedElement(null);
+    setConnectMode(false);
+    setConnectSource(null);
+  }, []);
+
   const handleNewDiagram = useCallback(() => {
     abortRef.current?.abort();
     if (doneTimerRef.current) {
@@ -469,6 +601,9 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     setClarifyQuestions(null);
     setClarifyPrompt("");
     setIsClarifying(false);
+    setSelectedElement(null);
+    setConnectMode(false);
+    setConnectSource(null);
   }, []);
 
   return (
@@ -591,8 +726,22 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         </div>
 
         {/* Diagram Preview */}
-        <div className="flex-1">
-          <D2Renderer code={d2Code} isStreaming={isGenerating} />
+        <div className="flex-1 relative">
+          <D2Renderer
+            code={d2Code}
+            isStreaming={isGenerating}
+            onElementClick={handleElementClick}
+            selectedPath={selectedElement?.path}
+          />
+          <ElementEditor
+            selected={selectedElement}
+            connectMode={connectMode}
+            onUpdateLabel={handleUpdateLabel}
+            onDelete={handleDeleteElement}
+            onStartConnect={handleStartConnect}
+            onCancelConnect={handleCancelConnect}
+            onDeselect={handleDeselect}
+          />
         </div>
       </div>
     </div>

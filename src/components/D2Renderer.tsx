@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { findD2Element, parseConnectionPath } from "@/lib/d2-editor";
 
 interface D2RendererProps {
   code: string;
   isStreaming?: boolean;
+  /** Callback when user clicks a diagram element. Passes the D2 path and whether it's a connection. */
+  onElementClick?: (path: string, isConnection: boolean) => void;
+  /** The currently selected element path (for highlight styling) */
+  selectedPath?: string | null;
   className?: string;
 }
 
-export default function D2Renderer({ code, isStreaming = false, className = "" }: D2RendererProps) {
+export default function D2Renderer({ code, isStreaming = false, onElementClick, selectedPath, className = "" }: D2RendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string>("");
@@ -25,6 +30,10 @@ export default function D2Renderer({ code, isStreaming = false, className = "" }
   // Render request tracking for abort + race condition prevention
   const renderIdRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Click vs drag detection
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const CLICK_THRESHOLD = 5; // pixels — if mouse moves less than this, it's a click
 
   // Server-side render via /api/render
   const renderDiagram = useCallback(async (d2Code: string, requestId: number) => {
@@ -98,6 +107,59 @@ export default function D2Renderer({ code, isStreaming = false, className = "" }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, svg]);
 
+  // Highlight selected element in the SVG
+  useEffect(() => {
+    const container = svgContainerRef.current;
+    if (!container || !svg) return;
+
+    // Remove previous highlights
+    container.querySelectorAll(".d2-element-highlight").forEach((el) => el.remove());
+    container.querySelectorAll("[data-d2-selected]").forEach((el) => el.removeAttribute("data-d2-selected"));
+
+    if (!selectedPath) return;
+
+    // Find the element by base64-encoding the path and matching class
+    try {
+      const encoded = btoa(selectedPath);
+      // For connections, the path contains ">" which gets HTML-encoded
+      const encodedAlt = btoa(selectedPath.replace(/>/g, "&gt;"));
+
+      const allGroups = container.querySelectorAll("g[class]");
+      for (const g of allGroups) {
+        const classes = g.getAttribute("class") || "";
+        if (classes.split(/\s+/).includes(encoded) || classes.split(/\s+/).includes(encodedAlt)) {
+          g.setAttribute("data-d2-selected", "true");
+
+          // Add a highlight overlay
+          const rect = g.getBoundingClientRect();
+          const svgEl = container.querySelector("svg");
+          if (svgEl) {
+            const svgRect = svgEl.getBoundingClientRect();
+            const highlight = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            const bbox = (g as SVGGraphicsElement).getBBox?.();
+            if (bbox) {
+              highlight.setAttribute("x", String(bbox.x - 4));
+              highlight.setAttribute("y", String(bbox.y - 4));
+              highlight.setAttribute("width", String(bbox.width + 8));
+              highlight.setAttribute("height", String(bbox.height + 8));
+              highlight.setAttribute("rx", "6");
+              highlight.setAttribute("fill", "rgba(59, 130, 246, 0.08)");
+              highlight.setAttribute("stroke", "#3b82f6");
+              highlight.setAttribute("stroke-width", "2");
+              highlight.setAttribute("stroke-dasharray", "6 3");
+              highlight.classList.add("d2-element-highlight");
+              // Insert highlight before the element so it appears behind
+              g.parentNode?.insertBefore(highlight, g);
+            }
+          }
+          break;
+        }
+      }
+    } catch {
+      // base64 encoding failed — skip highlight
+    }
+  }, [selectedPath, svg]);
+
   // Mouse wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -105,10 +167,11 @@ export default function D2Renderer({ code, isStreaming = false, className = "" }
     setScale((s) => Math.min(Math.max(s * delta, 0.1), 5));
   }, []);
 
-  // Pan handlers
+  // Pan handlers — with click detection for element selection
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     isPanning.current = true;
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
     panStart.current = { x: e.clientX, y: e.clientY };
     setTranslate((t) => {
       translateStart.current = { ...t };
@@ -128,9 +191,29 @@ export default function D2Renderer({ code, isStreaming = false, className = "" }
   }, []);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    const wasPanning = isPanning.current;
     isPanning.current = false;
-    (e.currentTarget as HTMLElement).style.cursor = "grab";
-  }, []);
+    (e.currentTarget as HTMLElement).style.cursor = svg ? "grab" : "default";
+
+    // Detect click (not drag) for element selection
+    if (wasPanning && mouseDownPosRef.current && onElementClick) {
+      const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
+      const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
+      if (dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD) {
+        // This was a click, not a drag — try to find a D2 element
+        const target = e.target as Element;
+        const hit = findD2Element(target);
+        if (hit) {
+          e.stopPropagation();
+          onElementClick(hit.path, hit.isConnection);
+        } else {
+          // Clicked on empty space — deselect
+          onElementClick("", false);
+        }
+      }
+    }
+    mouseDownPosRef.current = null;
+  }, [svg, onElementClick]);
 
   const handleZoomIn = () => setScale((s) => Math.min(s * 1.2, 5));
   const handleZoomOut = () => setScale((s) => Math.max(s / 1.2, 0.1));
