@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -12,6 +12,8 @@ interface ChatPanelProps {
   onSend: (prompt: string) => void;
   onNewDiagram: () => void;
   isGenerating: boolean;
+  /** Slot rendered at the bottom of the messages area (above the input), e.g. clarify panel */
+  inlinePanel?: ReactNode;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -25,7 +27,7 @@ const EXAMPLE_PROMPTS = [
   "Real-time analytics platform with Kafka and Elasticsearch",
 ];
 
-export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating, inlinePanel }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -117,6 +119,13 @@ export default function ChatPanel({ messages, onSend, onNewDiagram, isGenerating
               <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
               Generating diagram...
             </div>
+          </div>
+        )}
+
+        {/* Inline panel (clarify questions, etc.) */}
+        {inlinePanel && !isGenerating && (
+          <div className="px-1 py-1">
+            {inlinePanel}
           </div>
         )}
       </div>

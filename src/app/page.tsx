@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import ChatPanel, { ChatMessage } from "@/components/PromptInput";
+import ClarifyPanel, { ClarifyQuestion, ClarifyAnswers } from "@/components/ClarifyPanel";
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
 const D2Renderer = dynamic(() => import("@/components/D2Renderer"), { ssr: false });
@@ -32,6 +33,11 @@ export default function Home() {
   const [autoRefine, setAutoRefine] = useState(true);
   const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Clarify state
+  const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
+  const [clarifyPrompt, setClarifyPrompt] = useState<string>(""); // the original prompt waiting for clarification
+  const [isClarifying, setIsClarifying] = useState(false);
 
   // Load available models
   useEffect(() => {
@@ -295,19 +301,146 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     [selectedModel, autoRefine, streamGenerate, renderToSvg, assessDiagram]
   );
 
+  // Fetch clarifying questions for a new diagram prompt
+  const fetchClarifyQuestions = useCallback(
+    async (prompt: string) => {
+      setIsClarifying(true);
+      setClarifyPrompt(prompt);
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "user", content: prompt },
+      ]);
+
+      try {
+        const res = await fetch("/api/clarify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, model: selectedModel }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.questions && data.questions.length > 0) {
+          setClarifyQuestions(data.questions);
+        } else {
+          // Clarify failed — generate directly
+          setClarifyQuestions(null);
+          setClarifyPrompt("");
+          generateWithRefinement(prompt, "", []);
+        }
+      } catch {
+        // Fallback: generate directly
+        setClarifyQuestions(null);
+        setClarifyPrompt("");
+        generateWithRefinement(prompt, "", []);
+      } finally {
+        setIsClarifying(false);
+      }
+    },
+    [selectedModel, generateWithRefinement]
+  );
+
+  // Build enhanced prompt from clarify answers
+  const buildEnhancedPrompt = useCallback(
+    (originalPrompt: string, questions: ClarifyQuestion[], answers: ClarifyAnswers): string => {
+      const parts: string[] = [originalPrompt];
+      const specs: string[] = [];
+
+      for (const q of questions) {
+        const answer = answers[q.id];
+        if (!answer) continue;
+
+        if (q.type === "freetext") {
+          const text = (answer as string).trim();
+          if (text) specs.push(`${q.question}: ${text}`);
+        } else if (q.type === "single") {
+          const opt = q.options.find((o) => o.value === answer);
+          if (opt) specs.push(`${q.question}: ${opt.label}`);
+        } else if (q.type === "multi") {
+          const selected = (answer as string[])
+            .map((v) => q.options.find((o) => o.value === v)?.label)
+            .filter(Boolean);
+          if (selected.length > 0) specs.push(`${q.question}: ${selected.join(", ")}`);
+        }
+      }
+
+      if (specs.length > 0) {
+        parts.push("\n\nAdditional specifications:");
+        for (const spec of specs) {
+          parts.push(`- ${spec}`);
+        }
+      }
+
+      return parts.join("\n");
+    },
+    []
+  );
+
+  // Handle clarify answers submitted
+  const handleClarifySubmit = useCallback(
+    (answers: ClarifyAnswers) => {
+      if (!clarifyQuestions || !clarifyPrompt) return;
+
+      const enhancedPrompt = buildEnhancedPrompt(clarifyPrompt, clarifyQuestions, answers);
+
+      // Show a summary of selections in chat
+      const answeredSpecs: string[] = [];
+      for (const q of clarifyQuestions) {
+        const answer = answers[q.id];
+        if (!answer) continue;
+        if (q.type === "freetext") {
+          const text = (answer as string).trim();
+          if (text) answeredSpecs.push(`${q.question} ${text}`);
+        } else if (q.type === "single") {
+          const opt = q.options.find((o) => o.value === answer);
+          if (opt) answeredSpecs.push(`${q.question} ${opt.label}`);
+        } else if (q.type === "multi") {
+          const selected = (answer as string[])
+            .map((v) => q.options.find((o) => o.value === v)?.label)
+            .filter(Boolean);
+          if (selected.length > 0) answeredSpecs.push(`${q.question} ${selected.join(", ")}`);
+        }
+      }
+
+      if (answeredSpecs.length > 0) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "user", content: answeredSpecs.map((s) => `• ${s}`).join("\n") },
+        ]);
+      }
+
+      // Clear clarify state and generate
+      setClarifyQuestions(null);
+      setClarifyPrompt("");
+      generateWithRefinement(enhancedPrompt, "", []);
+    },
+    [clarifyQuestions, clarifyPrompt, buildEnhancedPrompt, generateWithRefinement]
+  );
+
+  // Skip clarification and generate directly
+  const handleClarifySkip = useCallback(() => {
+    const prompt = clarifyPrompt;
+    setClarifyQuestions(null);
+    setClarifyPrompt("");
+    if (prompt) {
+      generateWithRefinement(prompt, "", []);
+    }
+  }, [clarifyPrompt, generateWithRefinement]);
+
   const handleSend = useCallback(
     (prompt: string) => {
       const userMsg: ChatMessage = { role: "user", content: prompt };
-      const newMessages = [...chatMessages, userMsg];
-      setChatMessages(newMessages);
 
       if (d2Code) {
+        // Existing diagram — update directly (no clarify)
+        const newMessages = [...chatMessages, userMsg];
+        setChatMessages(newMessages);
         generateWithRefinement(prompt, d2Code, chatMessages);
-      } else {
-        generateWithRefinement(prompt, "", []);
+      } else if (!clarifyQuestions) {
+        // New diagram — trigger clarify flow
+        fetchClarifyQuestions(prompt);
       }
     },
-    [chatMessages, d2Code, generateWithRefinement]
+    [chatMessages, d2Code, clarifyQuestions, generateWithRefinement, fetchClarifyQuestions]
   );
 
   const handleNewDiagram = useCallback(() => {
@@ -316,6 +449,9 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     setChatMessages([]);
     setIsGenerating(false);
     setRefinementStatus(null);
+    setClarifyQuestions(null);
+    setClarifyPrompt("");
+    setIsClarifying(false);
   }, []);
 
   return (
@@ -415,7 +551,17 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
             messages={chatMessages}
             onSend={handleSend}
             onNewDiagram={handleNewDiagram}
-            isGenerating={isGenerating}
+            isGenerating={isGenerating || isClarifying}
+            inlinePanel={
+              clarifyQuestions ? (
+                <ClarifyPanel
+                  questions={clarifyQuestions}
+                  onSubmit={handleClarifySubmit}
+                  onSkip={handleClarifySkip}
+                  isSubmitting={isGenerating}
+                />
+              ) : undefined
+            }
           />
         </div>
 
