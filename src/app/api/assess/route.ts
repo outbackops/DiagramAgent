@@ -5,29 +5,32 @@ import sharp from "sharp";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
-const ASSESSMENT_SYSTEM_PROMPT = `You are a diagram quality assessor. You receive a rendered architecture diagram image, the D2 source code, and the original user prompt. Evaluate STRUCTURAL COHERENCE, LAYOUT QUALITY, and COMPLETENESS.
+const ASSESSMENT_SYSTEM_PROMPT = `You are a diagram quality assessor. You receive a rendered architecture diagram image, the D2 source code, and the original user prompt. Evaluate STRUCTURAL COHERENCE, VISUAL QUALITY, and COMPLETENESS.
 
 Evaluation criteria (score each 1-10, then average):
-1. **Completeness** (weight: 30%) — All components from the prompt are present. Missing a major component = -3 points.
-2. **Structure** (weight: 25%) — Components grouped in logical containers/boundaries. Flat diagrams with no grouping = max 4.
-3. **Connections** (weight: 20%) — Data flows are correct, labeled, and directional. Excessive crossing lines = -2.
-4. **Layout** (weight: 15%) — Clean spacing, no overlapping labels or nodes. Readable at a glance.
-5. **Accuracy** (weight: 10%) — Architecture makes technical sense for the described use case.
+1. **Completeness** (weight: 25%) — All components from the prompt are present. Missing a major component = -3.
+2. **Structure** (weight: 20%) — Components grouped in logical containers/boundaries. Flat diagrams with no grouping = max 4.
+3. **Visual Style** (weight: 20%) — Containers have colored borders and light fill backgrounds (not plain white). Each layer type uses a distinct color (orange for access, green for network, blue for compute, pink for data, purple for ops). Container labels are UPPERCASE.
+4. **Connections** (weight: 15%) — Data flows are correct, labeled, and directional. Excessive crossing = -2.
+5. **Layout** (weight: 10%) — Clean spacing, no overlaps, readable at a glance.
+6. **Accuracy** (weight: 10%) — Architecture makes technical sense.
 
-ALSO check the D2 source code for syntax problems:
-- Properties on a single line (e.g. \`Node { icon: x label: y }\`) — this is INVALID and causes parse errors
-- Missing connections between obviously related components
-- Excessive node count (>40 nodes makes diagrams unreadable)
+ALSO check D2 source code for:
+- Missing \`classes:\` block at the top (required for styling)
+- Containers without \`.class:\` assignment
+- Properties on a single line (INVALID)
+- Nodes missing \`icon:\` property
+- Container labels not UPPERCASE
 
 Respond with ONLY a JSON object (no markdown, no code fences):
 {
   "score": <1-10 integer, weighted average>,
   "pass": <true if score >= 7>,
   "issues": ["concrete issue 1", "concrete issue 2"],
-  "suggestions": ["D2 code fix: move X into container Y", "Add connection: A -> B: protocol"]
+  "suggestions": ["D2 code fix: add .class: network to VPC container", "Change label to UPPERCASE"]
 }
 
-Suggestions MUST be specific D2 code actions, not vague advice. Reference actual node names from the code.`;
+Suggestions MUST be specific D2 code actions referencing actual node names.`;
 
 export async function POST(request: NextRequest) {
   try {
