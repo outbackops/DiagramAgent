@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { resolveIconsInD2Code } from "@/lib/icon-registry";
+import { convertConnectionsToOrthogonal } from "@/lib/svg-orthogonal";
 
 let d2Instance: any = null;
 let d2InitPromise: Promise<any> | null = null;
@@ -44,7 +45,10 @@ export async function POST(request: NextRequest) {
       noXMLTag: true,
     });
 
-    return new Response(JSON.stringify({ svg }), {
+    // Post-process: convert curved connectors to orthogonal (right-angled) lines
+    const processedSvg = convertConnectionsToOrthogonal(svg, 8);
+
+    return new Response(JSON.stringify({ svg: processedSvg }), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err: any) {
