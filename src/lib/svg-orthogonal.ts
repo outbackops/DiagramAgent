@@ -1,246 +1,229 @@
 /**
- * Post-processes D2-rendered SVG to convert curved connection paths
- * into orthogonal (right-angled) polylines with rounded corners.
+ * Post-processes D2-rendered SVG to convert curved Bezier connections
+ * into clean orthogonal (right-angled) paths with rounded corners.
  *
- * Key improvement: instead of routing through the geometric midpoint (which
- * causes lines to overlap with components), we sample the original Bezier
- * curves at multiple points. The Bezier control points encode D2's obstacle
- * avoidance routing — by following these sampled waypoints, the orthogonal
- * paths route around shapes instead of through them.
+ * Strategy: use the SIMPLEST possible route between start and end points.
+ * - Same Y: straight horizontal line
+ * - Same X: straight vertical line
+ * - Different X and Y: 3-segment H→V→H route through midpoint
+ *
+ * Only adds extra waypoints when the original Bezier significantly deviates
+ * from a straight line (indicating the layout engine routed around an obstacle).
  */
 
-interface Point {
-  x: number;
-  y: number;
-}
+interface Point { x: number; y: number }
 
-/**
- * Sample a cubic Bezier curve at parameter t (0–1).
- */
-function sampleBezier(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
+/** Sample a cubic Bezier at parameter t. */
+function bezierAt(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
   const mt = 1 - t;
   return {
-    x: mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
-    y: mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
+    x: mt*mt*mt*p0.x + 3*mt*mt*t*p1.x + 3*mt*t*t*p2.x + t*t*t*p3.x,
+    y: mt*mt*mt*p0.y + 3*mt*mt*t*p1.y + 3*mt*t*t*p2.y + t*t*t*p3.y,
   };
 }
 
-/**
- * Parse an SVG path and sample all Bezier segments into waypoints.
- */
-function samplePathWaypoints(pathData: string): Point[] {
+/** Max perpendicular deviation of a Bezier from the straight line between its endpoints. */
+function bezierDeviation(p0: Point, p1: Point, p2: Point, p3: Point): number {
+  const dx = p3.x - p0.x;
+  const dy = p3.y - p0.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return 0;
+
+  let maxDev = 0;
+  for (const t of [0.25, 0.5, 0.75]) {
+    const pt = bezierAt(p0, p1, p2, p3, t);
+    // Perpendicular distance from point to line p0→p3
+    const dev = Math.abs((pt.x - p0.x) * dy - (pt.y - p0.y) * dx) / len;
+    maxDev = Math.max(maxDev, dev);
+  }
+  return maxDev;
+}
+
+/** Parse path data, extract start/end points and check if Bezier deviates significantly. */
+function parsePath(pathData: string): { start: Point; end: Point; needsDetour: boolean; detourY: number } | null {
   const tokens = pathData.trim().split(/[\s,]+/);
-  const waypoints: Point[] = [];
+  const allEndpoints: Point[] = [];
   let cur: Point = { x: 0, y: 0 };
+  let totalDeviation = 0;
+  let detourYSum = 0;
+  let bezierCount = 0;
   let i = 0;
 
   while (i < tokens.length) {
     const cmd = tokens[i];
-    if (cmd === "M" || cmd === "L") {
-      cur = { x: parseFloat(tokens[i + 1]), y: parseFloat(tokens[i + 2]) };
-      waypoints.push({ ...cur });
+    if (cmd === "M") {
+      cur = { x: parseFloat(tokens[i+1]), y: parseFloat(tokens[i+2]) };
+      allEndpoints.push({ ...cur });
+      i += 3;
+    } else if (cmd === "L") {
+      cur = { x: parseFloat(tokens[i+1]), y: parseFloat(tokens[i+2]) };
+      allEndpoints.push({ ...cur });
       i += 3;
     } else if (cmd === "C") {
-      const cp1 = { x: parseFloat(tokens[i + 1]), y: parseFloat(tokens[i + 2]) };
-      const cp2 = { x: parseFloat(tokens[i + 3]), y: parseFloat(tokens[i + 4]) };
-      const end = { x: parseFloat(tokens[i + 5]), y: parseFloat(tokens[i + 6]) };
-      // Sample at 5 points to capture the curve's avoidance trajectory
-      for (const t of [0.2, 0.4, 0.6, 0.8]) {
-        waypoints.push(sampleBezier(cur, cp1, cp2, end, t));
-      }
-      waypoints.push(end);
+      const cp1 = { x: parseFloat(tokens[i+1]), y: parseFloat(tokens[i+2]) };
+      const cp2 = { x: parseFloat(tokens[i+3]), y: parseFloat(tokens[i+4]) };
+      const end = { x: parseFloat(tokens[i+5]), y: parseFloat(tokens[i+6]) };
+      const dev = bezierDeviation(cur, cp1, cp2, end);
+      totalDeviation = Math.max(totalDeviation, dev);
+      // Track the midpoint Y to know where the detour goes
+      const midPt = bezierAt(cur, cp1, cp2, end, 0.5);
+      detourYSum += midPt.y;
+      bezierCount++;
       cur = end;
+      allEndpoints.push({ ...cur });
       i += 7;
     } else if (cmd === "V") {
-      cur = { x: cur.x, y: parseFloat(tokens[i + 1]) };
-      waypoints.push({ ...cur });
+      cur = { x: cur.x, y: parseFloat(tokens[i+1]) };
+      allEndpoints.push({ ...cur });
       i += 2;
     } else if (cmd === "H") {
-      cur = { x: parseFloat(tokens[i + 1]), y: cur.y };
-      waypoints.push({ ...cur });
+      cur = { x: parseFloat(tokens[i+1]), y: cur.y };
+      allEndpoints.push({ ...cur });
       i += 2;
     } else if (cmd === "Z") {
       i += 1;
     } else if (!isNaN(parseFloat(cmd))) {
-      cur = { x: parseFloat(tokens[i]), y: parseFloat(tokens[i + 1]) };
-      waypoints.push({ ...cur });
+      cur = { x: parseFloat(tokens[i]), y: parseFloat(tokens[i+1]) };
+      allEndpoints.push({ ...cur });
       i += 2;
     } else {
       i += 1;
     }
   }
-  return waypoints;
+
+  if (allEndpoints.length < 2) return null;
+
+  return {
+    start: allEndpoints[0],
+    end: allEndpoints[allEndpoints.length - 1],
+    needsDetour: totalDeviation > 15, // Only detour if Bezier swings > 15px from straight line
+    detourY: bezierCount > 0 ? detourYSum / bezierCount : (allEndpoints[0].y + allEndpoints[allEndpoints.length-1].y) / 2,
+  };
 }
 
-/**
- * Simplify waypoints: keep only those where the direction changes significantly.
- */
-function simplifyWaypoints(pts: Point[]): Point[] {
-  if (pts.length <= 2) return pts;
-  const result: Point[] = [pts[0]];
-
-  for (let i = 1; i < pts.length - 1; i++) {
-    const prev = result[result.length - 1];
-    const curr = pts[i];
-    const next = pts[i + 1];
-
-    const dx1 = curr.x - prev.x;
-    const dy1 = curr.y - prev.y;
-    const dx2 = next.x - curr.x;
-    const dy2 = next.y - curr.y;
-    const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-    const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-
-    if (len1 < 1 || len2 < 1) continue;
-
-    const cross = Math.abs(dx1 * dy2 - dy1 * dx2) / (len1 * len2);
-    if (cross > 0.12) result.push(curr); // ~7° direction change
-  }
-
-  result.push(pts[pts.length - 1]);
-  return result;
-}
-
-/**
- * Build an orthogonal SVG path through waypoints with rounded corners.
- */
-function waypointsToOrthogonalPath(waypoints: Point[], r: number): string {
-  if (waypoints.length < 2) return "";
-
-  const start = waypoints[0];
-  const end = waypoints[waypoints.length - 1];
+/** Build a clean orthogonal SVG path with rounded corners. */
+function buildOrthogonalPath(start: Point, end: Point, r: number, detourY?: number): string {
   const dx = Math.abs(end.x - start.x);
   const dy = Math.abs(end.y - start.y);
 
-  // Straight lines
-  if (dy < 3) return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
-  if (dx < 3) return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
-
-  // Build orthogonal segments: for each waypoint, go H then V
-  const segs: Point[] = [start];
-  for (let i = 1; i < waypoints.length; i++) {
-    const prev = segs[segs.length - 1];
-    const curr = waypoints[i];
-    const segDx = Math.abs(curr.x - prev.x);
-    const segDy = Math.abs(curr.y - prev.y);
-
-    if (segDx < 3) {
-      segs.push({ x: prev.x, y: curr.y });
-    } else if (segDy < 3) {
-      segs.push({ x: curr.x, y: prev.y });
-    } else {
-      // H then V
-      segs.push({ x: curr.x, y: prev.y });
-      segs.push({ x: curr.x, y: curr.y });
-    }
+  // Case 1: Nearly horizontal — straight line
+  if (dy < 4) {
+    return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
   }
 
-  // Dedup consecutive identical points
-  const deduped: Point[] = [segs[0]];
-  for (let i = 1; i < segs.length; i++) {
-    const prev = deduped[deduped.length - 1];
-    if (Math.abs(segs[i].x - prev.x) > 1 || Math.abs(segs[i].y - prev.y) > 1) {
-      deduped.push(segs[i]);
-    }
+  // Case 2: Nearly vertical — straight line
+  if (dx < 4) {
+    return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
   }
 
-  // Merge consecutive segments going the same direction
-  const merged: Point[] = [deduped[0]];
-  for (let i = 1; i < deduped.length; i++) {
-    const a = merged.length >= 2 ? merged[merged.length - 2] : null;
-    const b = merged[merged.length - 1];
-    const c = deduped[i];
-    if (a) {
-      const abH = Math.abs(b.y - a.y) < 2; // a→b is horizontal
-      const bcH = Math.abs(c.y - b.y) < 2; // b→c is horizontal
-      const abV = Math.abs(b.x - a.x) < 2;
-      const bcV = Math.abs(c.x - b.x) < 2;
-      if ((abH && bcH) || (abV && bcV)) {
-        // Same direction — skip the middle point
-        merged[merged.length - 1] = c;
-        continue;
-      }
-    }
-    merged.push(c);
+  // Case 3: Need H→V→H route
+  // Use detourY if provided (from Bezier deviation), otherwise route through midpoint X
+  const midX = detourY !== undefined
+    ? (start.x + end.x) / 2  // Standard midpoint
+    : (start.x + end.x) / 2;
+
+  const cr = Math.min(r, dx / 4, dy / 2);
+  if (cr < 2) {
+    // Too tight for arcs — just do sharp corners
+    return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
   }
 
-  // Ensure endpoint
-  const last = merged[merged.length - 1];
-  if (Math.abs(last.x - end.x) > 2 || Math.abs(last.y - end.y) > 2) {
-    merged.push(end);
+  const goingRight = end.x > start.x;
+  const goingDown = end.y > start.y;
+  const rX = goingRight ? cr : -cr;
+  const rY = goingDown ? cr : -cr;
+
+  // Sweep flags for the two corners
+  const sweep1 = (goingRight && goingDown) || (!goingRight && !goingDown) ? 1 : 0;
+  const sweep2 = 1 - sweep1;
+
+  return [
+    `M ${start.x} ${start.y}`,
+    `L ${midX - rX} ${start.y}`,
+    `A ${cr} ${cr} 0 0 ${sweep1} ${midX} ${start.y + rY}`,
+    `L ${midX} ${end.y - rY}`,
+    `A ${cr} ${cr} 0 0 ${sweep2} ${midX + rX} ${end.y}`,
+    `L ${end.x} ${end.y}`,
+  ].join(" ");
+}
+
+/** Build a 5-segment detour path: H→V→H→V→H (goes around an obstacle). */
+function buildDetourPath(start: Point, end: Point, detourY: number, r: number): string {
+  const dx = Math.abs(end.x - start.x);
+  const dy1 = Math.abs(detourY - start.y);
+  const dy2 = Math.abs(end.y - detourY);
+
+  // If detour Y is very close to start or end Y, fall back to simple route
+  if (dy1 < 8 || dy2 < 8) {
+    return buildOrthogonalPath(start, end, r);
   }
 
-  if (merged.length < 2) return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+  const x1 = start.x + (end.x - start.x) * 0.33;
+  const x2 = start.x + (end.x - start.x) * 0.67;
+  const cr = Math.min(r, dx / 6, dy1 / 2, dy2 / 2);
 
-  // Build path with rounded corners at bends
-  const parts: string[] = [`M ${merged[0].x} ${merged[0].y}`];
-
-  for (let i = 1; i < merged.length; i++) {
-    const prev = merged[i - 1];
-    const curr = merged[i];
-    const next = i < merged.length - 1 ? merged[i + 1] : null;
-
-    if (!next) {
-      parts.push(`L ${curr.x} ${curr.y}`);
-      break;
-    }
-
-    // Check for 90° corner
-    const hIn = Math.abs(curr.y - prev.y) < 2;
-    const vIn = Math.abs(curr.x - prev.x) < 2;
-    const hOut = Math.abs(next.y - curr.y) < 2;
-    const vOut = Math.abs(next.x - curr.x) < 2;
-
-    if ((hIn && vOut) || (vIn && hOut)) {
-      const inDx = curr.x - prev.x;
-      const inDy = curr.y - prev.y;
-      const outDx = next.x - curr.x;
-      const outDy = next.y - curr.y;
-      const inLen = Math.sqrt(inDx * inDx + inDy * inDy);
-      const outLen = Math.sqrt(outDx * outDx + outDy * outDy);
-      const cr = Math.min(r, inLen / 2, outLen / 2);
-
-      if (cr < 1) {
-        parts.push(`L ${curr.x} ${curr.y}`);
-        continue;
-      }
-
-      const inNx = inDx / inLen, inNy = inDy / inLen;
-      const outNx = outDx / outLen, outNy = outDy / outLen;
-      const cross = inNx * outNy - inNy * outNx;
-
-      parts.push(`L ${curr.x - inNx * cr} ${curr.y - inNy * cr}`);
-      parts.push(`A ${cr} ${cr} 0 0 ${cross > 0 ? 1 : 0} ${curr.x + outNx * cr} ${curr.y + outNy * cr}`);
-    } else {
-      parts.push(`L ${curr.x} ${curr.y}`);
-    }
+  if (cr < 2) {
+    // Too tight — sharp corners
+    return `M ${start.x} ${start.y} L ${x1} ${start.y} L ${x1} ${detourY} L ${x2} ${detourY} L ${x2} ${end.y} L ${end.x} ${end.y}`;
   }
+
+  // Build with 4 rounded corners
+  const parts: string[] = [`M ${start.x} ${start.y}`];
+
+  // Corner 1: H→V at (x1, start.y)
+  const down1 = detourY > start.y;
+  parts.push(`L ${x1 - (end.x > start.x ? cr : -cr)} ${start.y}`);
+  parts.push(`A ${cr} ${cr} 0 0 ${down1 ? 1 : 0} ${x1} ${start.y + (down1 ? cr : -cr)}`);
+
+  // Vertical to detourY
+  parts.push(`L ${x1} ${detourY - (down1 ? cr : -cr)}`);
+
+  // Corner 2: V→H at (x1, detourY)
+  parts.push(`A ${cr} ${cr} 0 0 ${down1 ? 0 : 1} ${x1 + (end.x > start.x ? cr : -cr)} ${detourY}`);
+
+  // Horizontal to x2
+  parts.push(`L ${x2 - (end.x > start.x ? cr : -cr)} ${detourY}`);
+
+  // Corner 3: H→V at (x2, detourY)
+  const up2 = end.y < detourY;
+  parts.push(`A ${cr} ${cr} 0 0 ${up2 ? 1 : 0} ${x2} ${detourY + (up2 ? -cr : cr)}`);
+
+  // Vertical to end.y
+  parts.push(`L ${x2} ${end.y - (up2 ? -cr : cr)}`);
+
+  // Corner 4: V→H at (x2, end.y)
+  parts.push(`A ${cr} ${cr} 0 0 ${up2 ? 0 : 1} ${x2 + (end.x > start.x ? cr : -cr)} ${end.y}`);
+
+  // Final horizontal
+  parts.push(`L ${end.x} ${end.y}`);
 
   return parts.join(" ");
 }
 
-/**
- * Convert a Bezier connection path to an orthogonal path that follows
- * the original curve's routing (avoiding obstacles).
- */
-function bezierToOrthogonal(pathData: string, cornerRadius: number = 8): string {
-  const raw = samplePathWaypoints(pathData);
-  if (raw.length < 2) return pathData;
-  const simplified = simplifyWaypoints(raw);
-  return waypointsToOrthogonalPath(simplified, cornerRadius);
+/** Convert a single Bezier path to a clean orthogonal path. */
+function bezierToOrthogonal(pathData: string, cornerRadius: number): string {
+  const parsed = parsePath(pathData);
+  if (!parsed) return pathData;
+
+  const { start, end, needsDetour, detourY } = parsed;
+
+  if (needsDetour) {
+    return buildDetourPath(start, end, detourY, cornerRadius);
+  }
+
+  return buildOrthogonalPath(start, end, cornerRadius);
 }
 
-/**
- * Post-process SVG to convert connection Bezier curves to orthogonal paths.
- */
+/** Post-process SVG: convert connection Bezier curves to orthogonal paths. */
 export function convertConnectionsToOrthogonal(svgContent: string, cornerRadius: number = 8): string {
   return svgContent.replace(
     /<path\s+([^>]*?)d="(M[^"]+)"([^>]*?)>/g,
     (match, before: string, pathData: string, after: string) => {
       const attrs = before + after;
       if (!attrs.includes("connection")) return match;
-      if (pathData.includes(" Z")) return match;
-      if (!pathData.includes(" C ")) return match;
+      if (pathData.includes(" Z")) return match;       // Skip arrowheads
+      if (!pathData.includes(" C ")) return match;      // Already straight
+
       const converted = bezierToOrthogonal(pathData, cornerRadius);
       return `<path ${before}d="${converted}"${after}>`;
     }
