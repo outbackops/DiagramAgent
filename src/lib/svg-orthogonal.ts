@@ -1,25 +1,14 @@
+import * as cheerio from "cheerio";
+
 /**
  * Converts D2's curved Bezier connections to clean orthogonal paths.
- *
- * Design principles:
- * 1. STRAIGHT lines unless a turn is absolutely necessary (different X AND Y)
- * 2. Minimum turns: at most 2 corners (H→V→H) for standard connections
- * 3. Parallel lines kept equidistant when sharing the same corridor
- * 4. Rounded corners at turns (8px radius default)
+ * Uses cheerio for robust SVG parsing.
  */
 
 interface Point { x: number; y: number }
 
-interface ParsedConnection {
-  start: Point;
-  end: Point;
-  pathData: string;
-}
-
 /**
  * Parse a Bezier path to extract just the start and end points.
- * These are the only points that matter — the route between them should be
- * the simplest possible orthogonal path.
  */
 function parseEndpoints(pathData: string): { start: Point; end: Point } | null {
   const tokens = pathData.trim().split(/[\s,]+/);
@@ -30,6 +19,7 @@ function parseEndpoints(pathData: string): { start: Point; end: Point } | null {
 
   while (i < tokens.length) {
     const cmd = tokens[i];
+    
     if (cmd === "M") {
       cur = { x: parseFloat(tokens[i + 1]), y: parseFloat(tokens[i + 2]) };
       if (!first) first = { ...cur };
@@ -43,21 +33,29 @@ function parseEndpoints(pathData: string): { start: Point; end: Point } | null {
       cur = { x: parseFloat(tokens[i + 5]), y: parseFloat(tokens[i + 6]) };
       last = { ...cur };
       i += 7;
+    } else if (cmd === "Q") {
+        cur = { x: parseFloat(tokens[i + 3]), y: parseFloat(tokens[i + 4]) };
+        last = { ...cur };
+        i += 5;
     } else if (cmd === "V") {
+      // V y
       cur = { x: cur.x, y: parseFloat(tokens[i + 1]) };
       last = { ...cur };
       i += 2;
     } else if (cmd === "H") {
+      // H x
       cur = { x: parseFloat(tokens[i + 1]), y: cur.y };
       last = { ...cur };
       i += 2;
     } else if (cmd === "Z") {
       i += 1;
     } else if (!isNaN(parseFloat(cmd))) {
+      // Implicit L or M continuation
       cur = { x: parseFloat(tokens[i]), y: parseFloat(tokens[i + 1]) };
       last = { ...cur };
       i += 2;
     } else {
+      // Unknown command, skip 1 token and hope for sync
       i += 1;
     }
   }
@@ -67,37 +65,69 @@ function parseEndpoints(pathData: string): { start: Point; end: Point } | null {
 }
 
 /**
- * Build a clean path between two points.
- * - If nearly same Y (within threshold): STRAIGHT horizontal line
- * - If nearly same X: STRAIGHT vertical line
- * - Otherwise: H → V → H with midpoint X and rounded corners
+ * Build a simple orthogonal path (H -> V -> H).
  */
-function buildCleanPath(
+function buildOrthogonalPath(
   start: Point,
   end: Point,
-  midX: number,
-  cornerRadius: number
+  radius: number
 ): string {
-  const dy = Math.abs(end.y - start.y);
+  const midX = (start.x + end.x) / 2;
+  const midY = (start.y + end.y) / 2;
   const dx = Math.abs(end.x - start.x);
+  const dy = Math.abs(end.y - start.y);
 
-  // Priority 1: Straight horizontal line
-  // Keep lines straight when the slope is gentle (Y delta is small relative to X span).
-  // D2 dagre connects from node edges so even same-row nodes have 20-80px Y diff.
-  // Threshold: if the angle from horizontal is under ~18° (dy/dx < 0.33), go straight.
-  if (dx > 30 && dy / dx < 0.33) {
-    const avgY = (start.y + end.y) / 2;
-    return `M ${start.x} ${avgY} L ${end.x} ${avgY}`;
+  // If points are close vertically/horizontally, draw straight line
+  if (dx < 2) return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+  if (dy < 2) return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+
+  // If major move is horizontal, go H-V-H
+  if (dx > dy) {
+      return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+  } else {
+      // Vertical major move, go V-H-V
+      return `M ${start.x} ${start.y} L ${start.x} ${midY} L ${end.x} ${midY} L ${end.x} ${end.y}`;
+  }
+}
+
+export function convertConnectionsToOrthogonal(svg: string, cornerRadius = 8): string {
+  const $ = cheerio.load(svg, { xmlMode: true });
+
+  // D2 SVG structure usually puts connections in a specific group or with class
+  // We look for paths that likely represent connections.
+  // Often they are in <g class="connection"> or just paths with stroke but no fill (or fill=none)
+  
+  // Strategy: Find all paths inside elements with class 'connection'
+  // If no class 'connection', look for paths that are not filled.
+  
+  let connections = $("g.connection path");
+  
+  if (connections.length === 0) {
+      // Fallback: look for paths with stroke and no fill
+      connections = $("path[fill='none'][stroke]");
   }
 
-  // Priority 2: Straight vertical line (steep connections)
-  if (dy > 30 && dx / dy < 0.33) {
-    const avgX = (start.x + end.x) / 2;
-    return `M ${avgX} ${start.y} L ${avgX} ${end.y}`;
-  }
+  connections.each((i, el) => {
+    const $path = $(el);
+    const d = $path.attr("d");
+    if (!d) return;
 
-  // Priority 3: Single turn — H then V (or V then H)
-  // Only if the midpoint would be very close to start or end X
+    const endpoints = parseEndpoints(d);
+    if (!endpoints) return;
+
+    // TODO: Obstacle avoidance could be implemented here by analyzing 
+    // bounding boxes of other <g class="node"> elements.
+    // For now, we enforce a clean H-V-H or V-H-V route.
+
+    const newPath = buildOrthogonalPath(endpoints.start, endpoints.end, cornerRadius);
+    $path.attr("d", newPath);
+    // Remove smooth attribute if present
+    $path.removeAttr("stroke-linejoin");
+    $path.attr("stroke-linejoin", "round");
+  });
+
+  return $.xml();
+}
   const distToStart = Math.abs(midX - start.x);
   const distToEnd = Math.abs(midX - end.x);
 
