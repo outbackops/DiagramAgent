@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       sketch: false,
       pad: 40,
     });
+    console.log("[Render API] D2 compiled");
 
     const svg = await d2.render(result.diagram, {
       ...result.renderOptions,
@@ -44,9 +45,11 @@ export async function POST(request: NextRequest) {
       center: true,
       noXMLTag: true,
     });
+    console.log("[Render API] D2 rendered, length:", svg.length);
 
     // Post-process: convert curved connectors to orthogonal (right-angled) lines
     const processedSvg = convertConnectionsToOrthogonal(svg, 8);
+    console.log("[Render API] Orthogonal post-processing complete, length:", processedSvg.length);
 
     return new Response(JSON.stringify({ svg: processedSvg }), {
       headers: { "Content-Type": "application/json" },

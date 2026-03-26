@@ -208,16 +208,21 @@ export default function Home() {
           if (controller.signal.aborted) break;
 
           // 2a: Render to SVG
+          console.log(`[Client] Starting render iteration ${i + 1}`);
           setRefinementStatus({
             phase: "rendering",
             iteration: i + 1,
             maxIterations: MAX_REFINE_ITERATIONS,
           });
 
+
           let svg: string;
           try {
             svg = await renderToSvg(currentCode);
+            setSvg(svg); // Update the displayed diagram
+            console.log(`[Client] Render complete, length: ${svg?.length}`);
           } catch (renderErr: any) {
+            console.error("[Client] Render error:", renderErr);
             // If render fails, the code has syntax errors — ask the model to fix
             setRefinementStatus({
               phase: "refining",
@@ -323,6 +328,10 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         setRefinementStatus(null);
       } finally {
         setIsGenerating(false);
+        if (abortRef.current === controller) {
+           // Clear abort controller only if it's the current one
+           abortRef.current = null;
+        }
       }
     },
     [selectedModel, autoRefine, streamGenerate, renderToSvg, assessDiagram]
