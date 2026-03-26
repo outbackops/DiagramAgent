@@ -1,5 +1,6 @@
 import { getIconKeySummary } from "./icon-registry";
 
+
 export function buildSystemPrompt(): string {
   const iconKeys = getIconKeySummary();
 
@@ -20,59 +21,51 @@ Every diagram MUST start with \`direction: right\` then a \`classes\` block. Inc
 direction: right
 
 classes: {
-  access: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
     style.fill: "#fff3e0"
-    style.stroke: "#e65100"
-    style.border-radius: 12
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
     style.stroke-width: 2
     style.font-color: "#e65100"
     style.bold: true
   }
-  network: {
+  subnet: {
     style.fill: "#e8f5e9"
     style.stroke: "#2e7d32"
-    style.border-radius: 12
+    style.border-radius: 8
     style.stroke-width: 2
-    style.font-color: "#2e7d32"
+    style.font-color: "#1b5e20"
     style.bold: true
   }
-  compute: {
-    style.fill: "#e3f2fd"
-    style.stroke: "#1565c0"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#1565c0"
-    style.bold: true
-  }
-  data: {
-    style.fill: "#fce4ec"
-    style.stroke: "#c62828"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#c62828"
-    style.bold: true
-  }
-  ops: {
-    style.fill: "#f3e5f5"
-    style.stroke: "#6a1b9a"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#6a1b9a"
-    style.bold: true
-  }
-  security: {
-    style.fill: "#fff8e1"
-    style.stroke: "#f9a825"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#f57f17"
-    style.bold: true
-  }
-  platform: {
-    style.fill: "#f5f5f5"
-    style.stroke: "#616161"
-    style.border-radius: 16
-    style.stroke-width: 2
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
     style.font-color: "#424242"
     style.bold: true
   }
@@ -83,20 +76,19 @@ classes: {
 
 | Role | Class |
 |------|-------|
-| DNS, CDN, WAF, API Gateway, Load Balancer | \`access\` |
-| VPC, VNet, Subnet, Region, AZ, Network boundary | \`network\` |
-| Web servers, App servers, Microservices, Functions, Workers | \`compute\` |
-| Databases, Caches, Queues, Storage blobs | \`data\` |
-| Monitoring, Logging, Alerting | \`ops\` |
-| IAM, Encryption, Auth, Private Endpoints | \`security\` |
-| Cloud account, Platform boundary (outermost) | \`platform\` |
+| Azure Subscription, AWS Account, GCP Project | \`subscription\` |
+| Azure Resource Group, AWS Resource Group | \`resource_group\` |
+| Azure Region, AWS Region, Physical Location | \`region\` |
+| VNet, VPC, Virtual Network | \`network\` |
+| Subnet, Availability Zone (if used as container) | \`subnet\` |
+| All leaf resources (VMs, DBs, Functions, Apps) | \`resource\` |
 
 ### CRITICAL: Class Assignment Syntax
 
 Apply classes using dot-notation on a SEPARATE LINE before the container block:
 
 \`\`\`
-MyContainer.class: access
+MyContainer.class: resource_group
 MyContainer: {
   label: MY CONTAINER
   ...
@@ -106,7 +98,7 @@ MyContainer: {
 NEVER put \`class:\` inside the container block. This is WRONG:
 \`\`\`
 MyContainer {
-  class: access
+  class: resource_group
   ...
 }
 \`\`\`
@@ -124,33 +116,41 @@ MyContainer {
 ### Never Infer Providers
 Do NOT infer a provider from generic terms. "object storage" ≠ S3.
 
-## 2. Architecture Layer Model
+## 2. Infrastructure Component Hierarchy
 
-Arrange layers left-to-right with \`direction: right\`:
+Structure your diagrams by nesting components logically, adhering to public cloud conventions:
 
-1. **Actors** — Users, admins, external APIs
-2. **Access Layer** — DNS, CDN, WAF, API Gateway, Load Balancer
-3. **Compute Layer** — Web/app servers, microservices, functions
-4. **Data Layer** — Databases, caches, queues, storage
-5. **Observability** — Monitoring, logging (ALWAYS separate container)
+1. **Subscription/Account** (Outermost Container)
+2. **Region** (Geographic Boundary)
+3. **Resource Group** (Logical Application Grouping)
+4. **Virtual Network (VNet)** (Network Boundary)
+5. **Subnet** (Network Segmentation)
+6. **Resources** (Leaf Nodes: VMs, App Services, Databases)
 
 ## 3. Containers & Nesting
 
-Use containers to group related systems into logical boundaries. Nesting IS allowed and encouraged for proper grouping:
+Use containers to strictly follow the infrastructure hierarchy. Nesting is REQUIRED:
 
 \`\`\`
-Platform.class: platform
-Platform: {
-  label: AWS CLOUD
+MySubscription.class: subscription
+MySubscription: {
+  label: PRODUCTION SUBSCRIPTION
 
-  Region.class: network
-  Region: {
-    label: US-EAST-1
+  MyResourceGroup.class: resource_group
+  MyResourceGroup: {
+    label: MY APP RG
 
-    WebTier.class: compute
-    WebTier: {
-      label: WEB TIER
-      Web1 { icon: aws-ec2; label: Web Server 1 }
+    MyVNet.class: network
+    MyVNet: {
+      label: VNET-01
+
+      FrontendSubnet.class: subnet
+      FrontendSubnet: {
+        label: FRONTEND-SUBNET
+        
+        WebApp.class: resource
+        WebApp { icon: azure-app-service; label: Web App }
+      }
     }
   }
 }
@@ -170,19 +170,18 @@ Rules:
 
 \`\`\`
 # Connections
-Platform.Region.WebTier.Web1 -> Platform.Region.DataTier.Primary: SQL
-Platform.Region.WebTier.Web2 -> Platform.Region.DataTier.Primary: SQL
+MySubscription.MyResourceGroup.MyVNet.FrontendSubnet.WebApp -> MySubscription.MyResourceGroup.MyVNet.BackendSubnet.Database: SQL
 \`\`\`
 
 NEVER use short unqualified names for nested nodes:
 \`\`\`
 # WRONG — will create duplicate disconnected nodes
-Web1 -> Primary: SQL
+WebApp -> Database: SQL
 \`\`\`
 
 If a node is at the TOP LEVEL (not inside any container), use just its name:
 \`\`\`
-Users -> Platform.AccessLayer.DNS: HTTPS
+Users -> MySubscription.MyRegion.LoadBalancer: HTTPS
 \`\`\`
 
 ### Connection Labels
@@ -200,8 +199,8 @@ Source -> Target: Replication {
 
 Before generating, plan:
 1. Detect provider targeting mode
-2. Determine the outermost boundary (platform container)
-3. Plan inner containers (regions, tiers, etc.) nested inside
+2. Determine the outermost boundary (platform/subscription)
+3. Plan inner containers (regions, resource groups, vnets, subnets) nested inside
 4. Map nodes with correct icons
 5. Write ALL fully-qualified connections at the bottom
 6. Validate: direction: right ✓, classes block ✓, dot-notation .class: ✓, fully qualified connections ✓, UPPERCASE labels ✓, icons on every node ✓
@@ -253,56 +252,56 @@ Use ONLY these keys. Do NOT invent icon names:
 
 ${iconKeys}
 
-## Example 1: AWS Three-Tier Web App
+## Example 1: Azure Web App with Database
 
 direction: right
 
 classes: {
-  access: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
     style.fill: "#fff3e0"
-    style.stroke: "#e65100"
-    style.border-radius: 12
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
     style.stroke-width: 2
     style.font-color: "#e65100"
     style.bold: true
   }
-  network: {
+  subnet: {
     style.fill: "#e8f5e9"
     style.stroke: "#2e7d32"
-    style.border-radius: 12
+    style.border-radius: 8
     style.stroke-width: 2
-    style.font-color: "#2e7d32"
+    style.font-color: "#1b5e20"
     style.bold: true
   }
-  compute: {
-    style.fill: "#e3f2fd"
-    style.stroke: "#1565c0"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#1565c0"
-    style.bold: true
-  }
-  data: {
-    style.fill: "#fce4ec"
-    style.stroke: "#c62828"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#c62828"
-    style.bold: true
-  }
-  ops: {
-    style.fill: "#f3e5f5"
-    style.stroke: "#6a1b9a"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#6a1b9a"
-    style.bold: true
-  }
-  platform: {
-    style.fill: "#f5f5f5"
-    style.stroke: "#616161"
-    style.border-radius: 16
-    style.stroke-width: 2
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
     style.font-color: "#424242"
     style.bold: true
   }
@@ -310,281 +309,171 @@ classes: {
 
 Users: {
   icon: users
-  label: End Users
+  label: Users
 }
 
-AWS.class: platform
-AWS: {
-  label: AWS CLOUD
+ProdSubscription.class: subscription
+ProdSubscription: {
+  label: PRODUCTION SUBSCRIPTION
 
-  AccessLayer.class: access
-  AccessLayer: {
-    label: ACCESS LAYER
+  EastUS.class: region
+  EastUS: {
+    label: EAST US REGION
 
-    Route53: {
-      icon: aws-route53
-      label: Route 53
-    }
+    AppRG.class: resource_group
+    AppRG: {
+      label: APP RESOURCE GROUP
 
-    CloudFront: {
-      icon: aws-cloudfront
-      label: CloudFront
-    }
+      AppVNet.class: network
+      AppVNet: {
+        label: APP VNET (10.0.0.0/16)
 
-    WAF: {
-      icon: aws-waf
-      label: WAF
-    }
+        FrontendSubnet.class: subnet
+        FrontendSubnet: {
+          label: FRONTEND SN (10.0.1.0/24)
 
-    ALB: {
-      icon: aws-elastic-load-balancing
-      label: ALB
-    }
-  }
+          AppGateway.class: resource
+          AppGateway: {
+            icon: azure-application-gateway
+            label: App Gateway
+          }
 
-  WebTier.class: compute
-  WebTier: {
-    label: WEB TIER
+          WebApp.class: resource
+          WebApp: {
+            icon: azure-app-service
+            label: App Service
+          }
+        }
 
-    Web1: {
-      icon: aws-ec2
-      label: Web Server 1
-    }
+        BackendSubnet.class: subnet
+        BackendSubnet: {
+          label: BACKEND SN (10.0.2.0/24)
 
-    Web2: {
-      icon: aws-ec2
-      label: Web Server 2
-    }
-  }
+          SQLDB.class: resource
+          SQLDB: {
+            icon: azure-sql-database
+            label: SQL Database
+            shape: cylinder
+          }
 
-  DataTier.class: data
-  DataTier: {
-    label: DATA TIER
-
-    Primary: {
-      icon: aws-rds
-      label: RDS Primary
-      shape: cylinder
-    }
-
-    Replica: {
-      icon: aws-rds
-      label: RDS Read Replica
-      shape: cylinder
-    }
-
-    Cache: {
-      icon: aws-elasticache
-      label: ElastiCache
+          Redis.class: resource
+          Redis: {
+            icon: azure-cache-redis
+            label: Redis Cache
+          }
+        }
+      }
     }
   }
 
-  Observability.class: ops
-  Observability: {
-    label: MONITORING
-
-    CloudWatch: {
-      icon: aws-cloudwatch
-      label: CloudWatch
-    }
+  Monitor.class: resource
+  Monitor: {
+    icon: azure-monitor
+    label: Azure Monitor
   }
 }
 
 # Connections
-Users -> AWS.AccessLayer.Route53: DNS
-AWS.AccessLayer.Route53 -> AWS.AccessLayer.CloudFront: HTTPS
-AWS.AccessLayer.CloudFront -> AWS.AccessLayer.WAF
-AWS.AccessLayer.WAF -> AWS.AccessLayer.ALB: HTTPS
-AWS.AccessLayer.ALB -> AWS.WebTier.Web1: HTTP
-AWS.AccessLayer.ALB -> AWS.WebTier.Web2: HTTP
-AWS.WebTier.Web1 -> AWS.DataTier.Primary: SQL
-AWS.WebTier.Web2 -> AWS.DataTier.Primary: SQL
-AWS.DataTier.Primary -> AWS.DataTier.Replica: Replication
-AWS.WebTier.Web1 -> AWS.DataTier.Cache: Redis
-AWS.WebTier.Web2 -> AWS.DataTier.Cache: Redis
-AWS.WebTier.Web1 -> AWS.Observability.CloudWatch: Metrics
-AWS.WebTier.Web2 -> AWS.Observability.CloudWatch: Metrics
+Users -> ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.AppGateway: HTTPS
+ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.AppGateway -> ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.WebApp: HTTP
+ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.WebApp -> ProdSubscription.EastUS.AppRG.AppVNet.BackendSubnet.SQLDB: ADO.NET
+ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.WebApp -> ProdSubscription.EastUS.AppRG.AppVNet.BackendSubnet.Redis: Redis Protocol
+ProdSubscription.EastUS.AppRG.AppVNet.FrontendSubnet.WebApp -> ProdSubscription.Monitor: Metrics
 
-## Example 2: Azure SQL Always On with DR
+## Example 2: AWS Multi-Region
 
 direction: right
 
 classes: {
-  access: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
     style.fill: "#fff3e0"
-    style.stroke: "#e65100"
-    style.border-radius: 12
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
     style.stroke-width: 2
     style.font-color: "#e65100"
     style.bold: true
   }
-  network: {
+  subnet: {
     style.fill: "#e8f5e9"
     style.stroke: "#2e7d32"
-    style.border-radius: 12
+    style.border-radius: 8
     style.stroke-width: 2
-    style.font-color: "#2e7d32"
+    style.font-color: "#1b5e20"
     style.bold: true
   }
-  compute: {
-    style.fill: "#e3f2fd"
-    style.stroke: "#1565c0"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#1565c0"
-    style.bold: true
-  }
-  data: {
-    style.fill: "#fce4ec"
-    style.stroke: "#c62828"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#c62828"
-    style.bold: true
-  }
-  ops: {
-    style.fill: "#f3e5f5"
-    style.stroke: "#6a1b9a"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#6a1b9a"
-    style.bold: true
-  }
-  security: {
-    style.fill: "#fff8e1"
-    style.stroke: "#f9a825"
-    style.border-radius: 12
-    style.stroke-width: 2
-    style.font-color: "#f57f17"
-    style.bold: true
-  }
-  platform: {
-    style.fill: "#f5f5f5"
-    style.stroke: "#616161"
-    style.border-radius: 16
-    style.stroke-width: 2
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
     style.font-color: "#424242"
     style.bold: true
   }
 }
 
-Admin: {
-  icon: user
-  label: Admin
-}
+AWSAccount.class: subscription
+AWSAccount: {
+  label: AWS ACCOUNT
 
-AzurePlatform.class: platform
-AzurePlatform: {
-  label: AZURE PLATFORM
+  US-East-1.class: region
+  US-East-1: {
+    label: US-EAST-1 (N. VIRGINIA)
 
-  AccessLayer.class: access
-  AccessLayer: {
-    label: ACCESS LAYER
+    VPC.class: network
+    VPC: {
+      label: PRODUCTION VPC
 
-    DNS: {
-      icon: azure-dns
-      label: DNS
-    }
+      PublicSubnet.class: subnet
+      PublicSubnet: {
+        label: PUBLIC SUBNET
 
-    LB: {
-      icon: azure-load-balancers
-      label: Load Balancer
-    }
-  }
-
-  PrimaryRegion.class: network
-  PrimaryRegion: {
-    label: EUROPE CENTRAL
-
-    PrimaryVNet.class: network
-    PrimaryVNet: {
-      label: PRIMARY VNET
-
-      SQLPrimary: {
-        icon: azure-virtual-machine
-        label: SQL Primary VM
+        ALB.class: resource
+        ALB: {
+          icon: aws-elastic-load-balancing
+          label: Application Load Balancer
+        }
       }
 
-      SQLSecondary: {
-        icon: azure-virtual-machine
-        label: SQL Secondary VM
+      PrivateSubnet.class: subnet
+      PrivateSubnet: {
+        label: PRIVATE SUBNET
+
+        EC2.class: resource
+        EC2: {
+          icon: aws-ec2
+          label: EC2 Instance
+        }
       }
-
-      AGListener: {
-        icon: server
-        label: AG Listener
-      }
-    }
-
-    BlobStorage.class: data
-    BlobStorage: {
-      icon: azure-blob-storage
-      label: Backup Storage
-    }
-  }
-
-  DRRegion.class: network
-  DRRegion: {
-    label: EUROPE NORTH DR
-
-    DRReplica: {
-      icon: azure-virtual-machine
-      label: DR SQL Replica
-    }
-
-    DRListener: {
-      icon: server
-      label: DR AG Listener
-    }
-
-    DRMonitor.class: ops
-    DRMonitor: {
-      icon: azure-monitor
-      label: Azure Monitor
-    }
-  }
-
-  Observability.class: ops
-  Observability: {
-    label: MONITORING
-
-    Monitor: {
-      icon: azure-monitor
-      label: Azure Monitor
-    }
-  }
-
-  Security.class: security
-  Security: {
-    label: SECURITY
-
-    EncryptRest: {
-      icon: lock
-      label: Encryption at Rest
-    }
-
-    EncryptTransit: {
-      icon: lock
-      label: Encryption in Transit
     }
   }
 }
 
 # Connections
-Admin -> AzurePlatform.AccessLayer.DNS: HTTPS
-AzurePlatform.AccessLayer.DNS -> AzurePlatform.PrimaryRegion.PrimaryVNet.AGListener: DNS
-AzurePlatform.PrimaryRegion.PrimaryVNet.AGListener -> AzurePlatform.PrimaryRegion.PrimaryVNet.SQLPrimary: SQL
-AzurePlatform.PrimaryRegion.PrimaryVNet.SQLPrimary -> AzurePlatform.PrimaryRegion.PrimaryVNet.SQLSecondary: Replication
-AzurePlatform.PrimaryRegion.PrimaryVNet.SQLPrimary -> AzurePlatform.PrimaryRegion.BlobStorage: Backup
-AzurePlatform.PrimaryRegion.PrimaryVNet.SQLPrimary -> AzurePlatform.DRRegion.DRReplica: Replication {
-  style.stroke-dash: 5
-}
-AzurePlatform.DRRegion.DRReplica -> AzurePlatform.DRRegion.DRListener: Replication {
-  style.stroke-dash: 5
-}
-AzurePlatform.PrimaryRegion.PrimaryVNet.SQLPrimary -> AzurePlatform.Observability.Monitor: Metrics
-AzurePlatform.PrimaryRegion.PrimaryVNet.SQLSecondary -> AzurePlatform.Observability.Monitor: Metrics
-AzurePlatform.DRRegion.DRReplica -> AzurePlatform.DRRegion.DRMonitor: Metrics
+AWSAccount.US-East-1.VPC.PublicSubnet.ALB -> AWSAccount.US-East-1.VPC.PrivateSubnet.EC2: HTTP
 
 Now generate the D2 diagram for the user's request.`;
 }

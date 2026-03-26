@@ -42,6 +42,7 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState("gpt-5.2-chat");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [autoRefine, setAutoRefine] = useState(true);
+  const [maxIterations, setMaxIterations] = useState(1);
   const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -187,7 +188,7 @@ export default function Home() {
       setRefinementStatus({
         phase: "generating",
         iteration: 1,
-        maxIterations: autoRefine ? MAX_REFINE_ITERATIONS : 1,
+        maxIterations: autoRefine ? maxIterations : 1,
       });
 
       try {
@@ -204,7 +205,7 @@ export default function Home() {
         }
 
         // Step 2: Iterative refinement loop
-        for (let i = 0; i < MAX_REFINE_ITERATIONS; i++) {
+        for (let i = 0; i < maxIterations; i++) {
           if (controller.signal.aborted) break;
 
           // 2a: Render to SVG
@@ -212,7 +213,7 @@ export default function Home() {
           setRefinementStatus({
             phase: "rendering",
             iteration: i + 1,
-            maxIterations: MAX_REFINE_ITERATIONS,
+            maxIterations: maxIterations,
           });
 
 
@@ -227,7 +228,7 @@ export default function Home() {
             setRefinementStatus({
               phase: "refining",
               iteration: i + 1,
-              maxIterations: MAX_REFINE_ITERATIONS,
+              maxIterations: maxIterations,
               issues: [`Render error: ${renderErr.message}`],
             });
 
@@ -242,7 +243,7 @@ export default function Home() {
           setRefinementStatus({
             phase: "assessing",
             iteration: i + 1,
-            maxIterations: MAX_REFINE_ITERATIONS,
+            maxIterations: maxIterations,
           });
 
           let assessment: { score: number; pass: boolean; issues: string[]; suggestions: string[] };
@@ -256,7 +257,7 @@ export default function Home() {
           setRefinementStatus({
             phase: "assessing",
             iteration: i + 1,
-            maxIterations: MAX_REFINE_ITERATIONS,
+            maxIterations: maxIterations,
             score: assessment.score,
             issues: assessment.issues,
           });
@@ -270,7 +271,7 @@ export default function Home() {
                 content: `Diagram generated and verified (score: ${assessment.score}/10 after ${i + 1} iteration${i > 0 ? "s" : ""}).`,
               },
             ]);
-            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: MAX_REFINE_ITERATIONS, score: assessment.score });
+            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: maxIterations, score: assessment.score });
             doneTimerRef.current = setTimeout(() => {
               setRefinementStatus(null);
               doneTimerRef.current = null;
@@ -284,7 +285,7 @@ export default function Home() {
           setRefinementStatus({
             phase: "refining",
             iteration: i + 1,
-            maxIterations: MAX_REFINE_ITERATIONS,
+            maxIterations: maxIterations,
             score: assessment.score,
             issues: assessment.issues,
           });
@@ -310,7 +311,7 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
           ...prev,
           {
             role: "assistant",
-            content: `Diagram generated with ${MAX_REFINE_ITERATIONS} refinement iterations.`,
+            content: `Diagram generated with ${maxIterations} refinement iterations.`,
           },
         ]);
         setRefinementStatus(null);
@@ -334,7 +335,7 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         }
       }
     },
-    [selectedModel, autoRefine, streamGenerate, renderToSvg, assessDiagram]
+    [selectedModel, autoRefine, maxIterations, streamGenerate, renderToSvg, assessDiagram]
   );
 
   // Fetch clarifying questions for a new diagram prompt
@@ -663,6 +664,22 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
               />
             </button>
           </label>
+
+          {/* Iterations input */}
+          {autoRefine && (
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-500 dark:text-gray-400">Iterations:</label>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={maxIterations}
+                onChange={(e) => setMaxIterations(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
+                disabled={isGenerating}
+                className="w-12 px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
 
           {/* Model picker */}
           <div className="flex items-center gap-2">
