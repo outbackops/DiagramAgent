@@ -83,7 +83,7 @@ export function findD2Element(target: Element): { element: Element; path: string
 export function parseConnectionPath(path: string): { from: string; to: string } | null {
   const match = path.match(/^\((.+?)\s*->\s*(.+?)\)\[/);
   if (!match) return null;
-  return { from: match[1], to: match[2] };
+  return { from: match[1].trim(), to: match[2].trim() };
 }
 
 /**

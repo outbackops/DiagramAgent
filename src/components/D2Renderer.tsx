@@ -317,43 +317,31 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   }, [svg]);
 
   const exportPng = useCallback(async () => {
-    if (!svg || typeof svg !== "string") return;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!svg) return;
+    try {
+      const resp = await fetch("/api/export/png", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ svg }),
+      });
 
-    const img = new Image();
-    const fullSvg = svg.startsWith("<svg") || svg.startsWith("<?xml")
-      ? (svg.startsWith("<?xml") ? svg : `<?xml version="1.0" encoding="utf-8"?>${svg}`)
-      : svg;
-    const svgBlob = new Blob([fullSvg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+      if (!resp.ok) {
+        throw new Error(`Export failed: ${resp.statusText}`);
+      }
 
-    img.onerror = () => {
-      console.warn("PNG export: failed to load SVG as image");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "diagram.png";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    };
-    img.onload = () => {
-      const s = 2;
-      canvas.width = img.width * s;
-      canvas.height = img.height * s;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const pngUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = pngUrl;
-        a.download = "diagram.png";
-        a.click();
-        URL.revokeObjectURL(pngUrl);
-      }, "image/png");
-
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+    } catch (err: any) {
+      console.error("Failed to export PNG:", err);
+      alert(`Failed to export PNG: ${err.message}`);
+    }
   }, [svg]);
 
   const [exportingVsdx, setExportingVsdx] = useState(false);

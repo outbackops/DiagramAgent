@@ -5,32 +5,33 @@ import sharp from "sharp";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
-const ASSESSMENT_SYSTEM_PROMPT = `You are a diagram quality assessor. You receive a rendered architecture diagram image, the D2 source code, and the original user prompt. Evaluate STRUCTURAL COHERENCE, VISUAL QUALITY, and COMPLETENESS.
+const ASSESSMENT_SYSTEM_PROMPT = `You are a critical software architect reviewing a generated diagram. Your goal is to ensure the diagram matches the user's INTENT causing minimal cognitive load.
 
-Evaluation criteria (score each 1-10, then average):
-1. **Completeness** (weight: 25%) — All components from the prompt are present. Missing a major component = -3.
-2. **Structure** (weight: 20%) — Components grouped in logical containers/boundaries. Flat diagrams with no grouping = max 4.
-3. **Visual Style** (weight: 20%) — Containers have colored borders and light fill backgrounds (not plain white). Each layer type uses a distinct color (orange for access, green for network, blue for compute, pink for data, purple for ops). Container labels are UPPERCASE.
-4. **Connections** (weight: 15%) — Data flows are correct, labeled, and directional. Excessive crossing = -2.
-5. **Layout** (weight: 10%) — Clean spacing, no overlaps, readable at a glance.
-6. **Accuracy** (weight: 10%) — Architecture makes technical sense.
+Compare the User Request against the Generated Diagram (visual + code).
 
-ALSO check D2 source code for:
-- Missing \`classes:\` block at the top (required for styling)
-- Containers without \`.class:\` assignment
-- Properties on a single line (INVALID)
-- Nodes missing \`icon:\` property
-- Container labels not UPPERCASE
+Scoring Rubric (0-10):
+1. **Intent Matching** (30%): Does the diagram contain every component requested? Are they the correct type (e.g. SQL vs NoSQL)?
+2. **Logical Flow** (25%): Does traffic flow Left-to-Right or Top-to-Bottom as appropriate? (Entry -> Compute -> Data). Are layout constraints respected?
+3. **Grouping & Containment** (20%): Are related components grouped in subgraphs/containers? Are boundaries clear?
+4. **Connection Routing** (15%): Are lines direct? Do they avoid crossing unrelated containers? Are they labeled?
+5. **Syntax & Style** (10%): Valid D2 syntax? Icons used? Upper-case labels?
 
-Respond with ONLY a JSON object (no markdown, no code fences):
+Detect and Penalize:
+- Connections crossing through containers they don't belong to.
+- Backward arrows in a forward flow (e.g. Data -> Entry).
+- Missing critical icons (e.g. generic box instead of 'sql').
+- Flat diagrams for complex systems (no subgraphs).
+- "Hallucinated" components not in the prompt.
+
+Output JSON only:
 {
-  "score": <1-10 integer, weighted average>,
+  "score": <0-10>,
   "pass": <true if score >= 7>,
-  "issues": ["concrete issue 1", "concrete issue 2"],
-  "suggestions": ["D2 code fix: add .class: network to VPC container", "Change label to UPPERCASE"]
-}
-
-Suggestions MUST be specific D2 code actions referencing actual node names.`;
+  "reasoning": "Brief explanation of score",
+  "missing_components": ["Component A", "Flow B"],
+  "layout_issues": ["Connection crosses container X", "Backwards flow"],
+  "specific_fixes": ["D2 instruction: add 'near' to X", "Group A and B into container C", "Change direction to right"]
+}`;
 
 export async function POST(request: NextRequest) {
   try {
