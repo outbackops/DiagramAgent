@@ -11,12 +11,15 @@ Compare the User Request against the Generated Diagram (visual + code).
 
 Scoring Rubric (0-10):
 1. **Intent Matching** (30%): Does the diagram contain every component requested? Are they the correct type (e.g. SQL vs NoSQL)?
-2. **Logical Flow** (25%): Does traffic flow Left-to-Right or Top-to-Bottom as appropriate? (Entry -> Compute -> Data). Are layout constraints respected?
-3. **Grouping & Containment** (20%): Are related components grouped in subgraphs/containers? Are boundaries clear?
-4. **Connection Routing** (15%): Are lines direct? Do they avoid crossing unrelated containers? Are they labeled?
+2. **Logical Flow & Symmetry** (25%): Does traffic flow Left-to-Right or Top-to-Bottom? **For HA/DR requests, are Primary and Secondary structures visually mirrored?**
+3. **Grouping, Alignment & Aspect Ratio** (20%): Are containers flush-aligned? Is the diagram roughly 16:9 (not extremely tall/wide)? Are boundaries clear?
+4. **Connection Routing & Whitespace** (15%): Are lines direct? Is whitespace minimized? Do lines avoid crossing unrelated containers?
 5. **Syntax & Style** (10%): Valid D2 syntax? Icons used? Upper-case labels?
 
 Detect and Penalize:
+- **Asymmetry in HA/DR diagrams (Primary vs DR not identical).**
+- **Extreme aspect ratios (long horizontal strip or tall vertical tower).**
+- **Misaligned sibling containers (e.g. Region A higher than Region B).**
 - Connections crossing through containers they don't belong to.
 - Backward arrows in a forward flow (e.g. Data -> Entry).
 - Missing critical icons (e.g. generic box instead of 'sql').

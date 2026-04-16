@@ -195,7 +195,29 @@ Source -> Target: Replication {
 }
 \`\`\`
 
-## 5. Generation Strategy
+## 5. Layout & Symmetry Rules (MANDATORY)
+
+### 1. Mirror Rule for HA/DR
+When creating High Availability (HA) or Disaster Recovery (DR) diagrams (e.g., Primary & Secondary regions):
+- **Identical Structure**: The internal structure of the Secondary/DR container MUST match the Primary container EXACTLY.
+- **Same Nesting**: Use the exact same hierarchy (VNet -> Subnet -> Resource).
+- **Same Order**: Declare components in the same order in both containers to force the layout engine to align them.
+
+### 2. Flush Alignment Rule
+- Sibling containers (e.g., Region A, Region B) MUST be at the same hierarchy level.
+- Do NOT nest peers inside each other (e.g., do NOT put Region B inside Region A).
+- Define them sequentially to ensure they align side-by-side or top-to-bottom based on the global direction.
+
+### 3. Aspect Ratio & Compaction
+- **Target 16:9 Ratio**: Avoid extremely tall or extremely wide diagrams.
+- **Vertical Stacking**: If a container has > 5 items, use vertical groups or sub-containers to stack them.
+- **Compactness**: Keep edge connection lengths short by grouping related items close together.
+
+### 4. Component Anchoring
+- Place shared components (Traffic Manager, Global DNS, CDN) outside and *between* or *above* the regional containers.
+- Identical components (e.g., SQL MI in Primary and Secondary) should be named similarly (e.g., \`SQL_Primary\`, \`SQL_Secondary\`) to help logical pairing.
+
+## 6. Generation Strategy
 
 Before generating, plan:
 1. Detect provider targeting mode
