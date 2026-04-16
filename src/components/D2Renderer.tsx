@@ -345,8 +345,9 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   }, [svg]);
 
   const [exportingVsdx, setExportingVsdx] = useState(false);
+  const [exportingVisio, setExportingVisio] = useState(false);
 
-  const exportVsdx = useCallback(async () => {
+  const exportDrawio = useCallback(async () => {
     if (!code || typeof code !== "string") return;
     setExportingVsdx(true);
     try {
@@ -363,7 +364,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
         } catch {
           // response wasn't JSON
         }
-        console.error("VSDX export error:", errorMsg);
+        console.error("Draw.io export error:", errorMsg);
         return;
       }
       const blob = await res.blob();
@@ -374,9 +375,41 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("VSDX export error:", err);
+      console.error("Draw.io export error:", err);
     } finally {
       setExportingVsdx(false);
+    }
+  }, [code]);
+
+  const exportVisio = useCallback(async () => {
+    if (!code || typeof code !== "string") return;
+    setExportingVisio(true);
+    try {
+      const res = await fetch("/api/export/visio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ d2Code: code, title: "Architecture Diagram" }),
+      });
+      if (!res.ok) {
+        let errorMsg = "Export failed";
+        try {
+          const err = await res.json();
+          errorMsg = err.error || errorMsg;
+        } catch {}
+        console.error("Visio export error:", errorMsg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "diagram.vsdx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Visio export error:", err);
+    } finally {
+      setExportingVisio(false);
     }
   }, [code]);
 
@@ -446,12 +479,21 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
           PNG
         </button>
         <button
-          onClick={exportVsdx}
+          onClick={exportDrawio}
           disabled={!code || exportingVsdx}
-          className="px-2 py-1 text-xs rounded bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-          title="Export as draw.io file (opens in draw.io, Visio via draw.io export)"
+          className="px-2 py-1 text-xs rounded bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-600 dark:text-green-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+          title="Export as draw.io file with native editable shapes"
         >
-          {exportingVsdx && <div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />}
+          {exportingVsdx && <div className="w-3 h-3 border-2 border-green-300 border-t-green-600 rounded-full animate-spin" />}
+          draw.io
+        </button>
+        <button
+          onClick={exportVisio}
+          disabled={!code || exportingVisio}
+          className="px-2 py-1 text-xs rounded bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+          title="Export as native Microsoft Visio (.vsdx) file"
+        >
+          {exportingVisio && <div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />}
           Visio
         </button>
       </div>
