@@ -5,6 +5,7 @@ import { useState, useCallback } from "react";
 export interface ClarifyQuestion {
   id: string;
   question: string;
+  rationale?: string;
   type: "single" | "multi" | "freetext";
   options: { label: string; value: string }[];
 }
@@ -119,6 +120,11 @@ export default function ClarifyPanel({
             <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
               {idx + 1}. {q.question}
             </p>
+            {q.rationale && (
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 italic mt-0.5">
+                💡 {q.rationale}
+              </p>
+            )}
 
             {q.type === "single" && (
               <div className="space-y-1.5">

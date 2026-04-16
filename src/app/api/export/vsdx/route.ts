@@ -1,23 +1,20 @@
 import { NextRequest } from "next/server";
-import sharp from "sharp";
+import { d2ToDrawio } from "@/lib/d2-to-drawio";
 
 /**
  * Export a diagram as a draw.io/diagrams.net XML file (.drawio).
- * 
- * This format can be:
- * - Opened directly in draw.io (desktop or web)
- * - Imported into Microsoft Visio via draw.io's Visio export
- * - Opened in any tool that supports draw.io format
- * 
- * The diagram is embedded as a high-resolution PNG image that
- * can be further edited in draw.io or converted to native Visio shapes.
+ *
+ * Creates native editable mxGraph shapes from D2 source code — NOT an
+ * embedded image. The resulting file opens in draw.io with fully
+ * selectable, movable, and connectable shapes that can be further
+ * exported to Visio (.vsdx) from draw.io's File → Export menu.
  */
 export async function POST(request: NextRequest) {
   try {
-    const { svg, title } = await request.json();
+    const { d2Code, title } = await request.json();
 
-    if (!svg || typeof svg !== "string") {
-      return new Response(JSON.stringify({ error: "SVG content is required" }), {
+    if (!d2Code || typeof d2Code !== "string") {
+      return new Response(JSON.stringify({ error: "D2 code is required" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -25,43 +22,8 @@ export async function POST(request: NextRequest) {
 
     const diagramTitle = title || "Architecture Diagram";
 
-    // Convert SVG to PNG for embedding
-    let pngBase64: string;
-    let imgW = 800;
-    let imgH = 600;
-    try {
-      const pngBuffer = await sharp(Buffer.from(svg, "utf-8"), { density: 150 })
-        .resize({ width: 3200, height: 2400, fit: "inside", withoutEnlargement: true })
-        .png()
-        .toBuffer();
-      const metadata = await sharp(pngBuffer).metadata();
-      imgW = metadata.width || 800;
-      imgH = metadata.height || 600;
-      pngBase64 = pngBuffer.toString("base64");
-    } catch {
-      // Fallback placeholder
-      const buf = await sharp({
-        create: { width: 800, height: 600, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
-      }).png().toBuffer();
-      pngBase64 = buf.toString("base64");
-    }
-
-    // Build draw.io XML
-    // draw.io uses mxGraph XML format — an image shape with the PNG embedded as data URI
-    const drawioXml = `<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="DiagramAgent" modified="${new Date().toISOString()}" agent="DiagramAgent/0.1" version="24.0.0" type="device">
-  <diagram id="diagram-1" name="${escapeXml(diagramTitle)}">
-    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="${Math.max(imgW + 100, 1169)}" pageHeight="${Math.max(imgH + 100, 827)}" math="0" shadow="0">
-      <root>
-        <mxCell id="0"/>
-        <mxCell id="1" parent="0"/>
-        <mxCell id="2" value="" style="shape=image;verticalLabelPosition=bottom;labelBackgroundColor=default;verticalAlign=top;aspect=fixed;imageAspect=0;image=data:image/png,${pngBase64};" vertex="1" parent="1">
-          <mxGeometry x="50" y="50" width="${imgW}" height="${imgH}" as="geometry"/>
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
-</mxfile>`;
+    // Convert D2 code to native draw.io XML with editable shapes
+    const drawioXml = d2ToDrawio(d2Code, diagramTitle);
 
     const buffer = Buffer.from(drawioXml, "utf-8");
 
@@ -79,10 +41,6 @@ export async function POST(request: NextRequest) {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
-}
-
-function escapeXml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function sanitizeFilename(str: string): string {

@@ -347,13 +347,13 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
   const [exportingVsdx, setExportingVsdx] = useState(false);
 
   const exportVsdx = useCallback(async () => {
-    if (!svg || typeof svg !== "string") return;
+    if (!code || typeof code !== "string") return;
     setExportingVsdx(true);
     try {
       const res = await fetch("/api/export/vsdx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ svg, title: "Architecture Diagram" }),
+        body: JSON.stringify({ d2Code: code, title: "Architecture Diagram" }),
       });
       if (!res.ok) {
         let errorMsg = "Export failed";
@@ -378,7 +378,7 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
     } finally {
       setExportingVsdx(false);
     }
-  }, [svg]);
+  }, [code]);
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
@@ -447,9 +447,9 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
         </button>
         <button
           onClick={exportVsdx}
-          disabled={!svg || exportingVsdx}
+          disabled={!code || exportingVsdx}
           className="px-2 py-1 text-xs rounded bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-          title="Export as draw.io file (opens in draw.io, Visio, Lucidchart)"
+          title="Export as draw.io file (opens in draw.io, Visio via draw.io export)"
         >
           {exportingVsdx && <div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />}
           Visio

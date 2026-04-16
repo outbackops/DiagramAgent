@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       .png()
       .toBuffer();
 
-    return new Response(pngBuffer, {
+    return new Response(new Uint8Array(pngBuffer), {
       status: 200,
       headers: {
         "Content-Type": "image/png",

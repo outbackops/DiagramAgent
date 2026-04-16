@@ -56,6 +56,16 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     supportsStreaming: true,
   },
   {
+    id: "gpt-5.4",
+    label: "GPT-5.4",
+    description: "Expert planner — architecture analysis & critique (requires deployment)",
+    apiVersion: "2025-04-01-preview",
+    useMaxCompletionTokens: true,
+    maxTokens: 32000,
+    supportsTemperature: false,
+    supportsStreaming: true,
+  },
+  {
     id: "o3-mini",
     label: "o3-mini",
     description: "Reasoning model — deep thinking, slower",

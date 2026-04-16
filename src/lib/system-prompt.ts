@@ -219,13 +219,51 @@ When creating High Availability (HA) or Disaster Recovery (DR) diagrams (e.g., P
 
 ## 6. Generation Strategy
 
-Before generating, plan:
+Before generating, you MUST follow this process:
+
+### If an Architecture Plan is provided (prefixed with "ARCHITECTURE PLAN:"):
+Follow the plan EXACTLY:
+1. Create components in the order specified by the hierarchy tree
+2. Place components in their assigned zones (ZONE-ENTRY → ZONE-COMPUTE → ZONE-DATA → ZONE-OPS)
+3. Respect ALL overlap rules — never place forbidden co-locations
+4. Use the exact connection topology from the plan (solid vs dashed, labels)
+5. Apply the plan's critique suggestions if they improve the diagram
+6. If the plan identifies HA/DR mirroring, ensure IDENTICAL internal structure in both regions
+
+### If no plan is provided (direct generation):
 1. Detect provider targeting mode
 2. Determine the outermost boundary (platform/subscription)
 3. Plan inner containers (regions, resource groups, vnets, subnets) nested inside
 4. Map nodes with correct icons
 5. Write ALL fully-qualified connections at the bottom
 6. Validate: direction: right ✓, classes block ✓, dot-notation .class: ✓, fully qualified connections ✓, UPPERCASE labels ✓, icons on every node ✓
+
+### Component Placement Zones (Left-to-Right)
+- **ZONE-ENTRY** (leftmost): Users, DNS, CDN, Traffic Manager, API Gateway, WAF
+- **ZONE-COMPUTE** (center-left): App Services, VMs, Functions, Containers, Kubernetes
+- **ZONE-DATA** (center-right): Databases, Caches, Message Queues, Storage Accounts
+- **ZONE-OPS** (rightmost or floating): Monitoring, Logging, Backup, Key Vault
+- **ZONE-GLOBAL** (above regions): Cross-cutting services spanning multiple regions
+
+### Component Overlap & Isolation Rules
+
+**Acceptable co-locations (same container):**
+- Multiple app services/VMs in one subnet
+- Database + read replica in same data subnet (same region)
+- Microservices in a shared compute container
+- Cache alongside the app consuming it
+
+**Forbidden co-locations (MUST be separate):**
+- Primary and DR replicas in the same region container
+- Public and private resources in the same subnet
+- External users/clients inside any cloud boundary
+- Production and non-production in the same resource group
+
+**Cross-cutting services:**
+- Monitoring (Azure Monitor, CloudWatch) → OUTSIDE regional containers, connected with dashed lines
+- DNS/Traffic Manager/CDN → ABOVE or BEFORE all regional containers
+- Key Vault/IAM → alongside or outside the resources they protect
+- Backup → same region as source, but can be outside the VNet
 
 ## D2 Syntax Reference
 

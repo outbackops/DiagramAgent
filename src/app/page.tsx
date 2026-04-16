@@ -51,6 +51,7 @@ export default function Home() {
   const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
   const [clarifyPrompt, setClarifyPrompt] = useState<string>(""); // the original prompt waiting for clarification
   const [isClarifying, setIsClarifying] = useState(false);
+  const [clarifyAnalysis, setClarifyAnalysis] = useState<Record<string, unknown> | null>(null);
 
   // Diagram interaction state
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
@@ -73,13 +74,19 @@ export default function Home() {
       prompt: string,
       existingCode: string,
       history: ChatMessage[],
-      signal?: AbortSignal
+      signal?: AbortSignal,
+      architecturePlan?: Record<string, unknown> | null
     ): Promise<string> => {
+      // If an architecture plan is provided, prefix it to the prompt
+      const finalPrompt = architecturePlan
+        ? `ARCHITECTURE PLAN:\n${JSON.stringify(architecturePlan, null, 2)}\n\nUSER REQUEST:\n${prompt}`
+        : prompt;
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt,
+          prompt: finalPrompt,
           existingCode,
           history,
           model: selectedModel,
@@ -157,7 +164,16 @@ export default function Home() {
       prompt: string,
       code: string,
       signal?: AbortSignal
-    ): Promise<{ score: number; pass: boolean; issues: string[]; suggestions: string[] }> => {
+    ): Promise<{
+      score: number;
+      pass: boolean;
+      reasoning?: string;
+      issues?: string[];
+      suggestions?: string[];
+      missing_components?: string[];
+      layout_issues?: string[];
+      specific_fixes?: string[];
+    }> => {
       const res = await fetch("/api/assess", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,9 +187,30 @@ export default function Home() {
     []
   );
 
+  // Fetch architecture plan from the planning API
+  const fetchArchitecturePlan = useCallback(
+    async (prompt: string, analysis?: Record<string, unknown> | null): Promise<Record<string, unknown> | null> => {
+      try {
+        const res = await fetch("/api/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, analysis }),
+        });
+        const data = await res.json();
+        if (res.ok && data.plan) {
+          return data.plan;
+        }
+      } catch (err) {
+        console.error("Architecture planning failed, proceeding without plan:", err);
+      }
+      return null;
+    },
+    []
+  );
+
   // Full generate + refine loop
   const generateWithRefinement = useCallback(
-    async (prompt: string, existingCode: string, history: ChatMessage[]) => {
+    async (prompt: string, existingCode: string, history: ChatMessage[], analysis?: Record<string, unknown> | null) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -185,6 +222,28 @@ export default function Home() {
         clearTimeout(doneTimerRef.current);
         doneTimerRef.current = null;
       }
+
+      // Phase 0: Architecture Planning (for new diagrams only)
+      let architecturePlan: Record<string, unknown> | null = null;
+      if (!existingCode) {
+        setRefinementStatus({
+          phase: "generating",
+          iteration: 0,
+          maxIterations: autoRefine ? maxIterations : 1,
+        });
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "🏗️ Planning architecture layout..." },
+        ]);
+        architecturePlan = await fetchArchitecturePlan(prompt, analysis);
+        if (architecturePlan) {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "✅ Architecture plan ready. Generating D2 code..." },
+          ]);
+        }
+      }
+
       setRefinementStatus({
         phase: "generating",
         iteration: 1,
@@ -192,8 +251,8 @@ export default function Home() {
       });
 
       try {
-        // Step 1: Initial generation
-        let currentCode = await streamGenerate(prompt, existingCode, history, controller.signal);
+        // Step 1: Initial generation (with architecture plan if available)
+        let currentCode = await streamGenerate(prompt, existingCode, history, controller.signal, architecturePlan);
 
         if (!autoRefine || controller.signal.aborted) {
           setChatMessages((prev) => [
@@ -220,7 +279,6 @@ export default function Home() {
           let svg: string;
           try {
             svg = await renderToSvg(currentCode);
-            setSvg(svg); // Update the displayed diagram
             console.log(`[Client] Render complete, length: ${svg?.length}`);
           } catch (renderErr: any) {
             console.error("[Client] Render error:", renderErr);
@@ -246,7 +304,16 @@ export default function Home() {
             maxIterations: maxIterations,
           });
 
-          let assessment: { score: number; pass: boolean; issues: string[]; suggestions: string[] };
+          let assessment: {
+            score: number;
+            pass: boolean;
+            reasoning?: string;
+            issues?: string[];
+            suggestions?: string[];
+            missing_components?: string[];
+            layout_issues?: string[];
+            specific_fixes?: string[];
+          };
           try {
             assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
           } catch (assessErr: any) {
@@ -259,7 +326,7 @@ export default function Home() {
             iteration: i + 1,
             maxIterations: maxIterations,
             score: assessment.score,
-            issues: assessment.issues,
+            issues: assessment.issues || assessment.layout_issues || [],
           });
 
           // 2c: If passing, we're done
@@ -281,17 +348,22 @@ export default function Home() {
 
           if (controller.signal.aborted) break;
 
+          const issues: string[] = assessment.issues || assessment.layout_issues || [];
+          const missingComponents: string[] = assessment.missing_components || [];
+          const suggestions: string[] = assessment.suggestions || assessment.specific_fixes || [];
+          const allIssues = [...missingComponents.map((c: string) => `Missing: ${c}`), ...issues];
+
           // 2d: Refine based on assessment feedback
           setRefinementStatus({
             phase: "refining",
             iteration: i + 1,
             maxIterations: maxIterations,
             score: assessment.score,
-            issues: assessment.issues,
+            issues: allIssues,
           });
 
-          const issuesList = assessment.issues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
-          const suggestionsList = assessment.suggestions.map((s, idx) => `${idx + 1}. ${s}`).join("\n");
+          const issuesList = allIssues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
+          const suggestionsList = suggestions.map((s, idx) => `${idx + 1}. ${s}`).join("\n");
 
           const refinePrompt = `A vision-based assessment of the rendered diagram found these issues (score ${assessment.score}/10):
 
@@ -335,7 +407,7 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         }
       }
     },
-    [selectedModel, autoRefine, maxIterations, streamGenerate, renderToSvg, assessDiagram]
+    [selectedModel, autoRefine, maxIterations, streamGenerate, renderToSvg, assessDiagram, fetchArchitecturePlan]
   );
 
   // Fetch clarifying questions for a new diagram prompt
@@ -356,18 +428,32 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         });
         const data = await res.json();
 
-        if (res.ok && data.questions && data.questions.length > 0) {
+        // Store analysis from the expert intent review
+        const analysis = data.analysis || null;
+        setClarifyAnalysis(analysis);
+
+        if (res.ok && data.skipClarification) {
+          // Request is comprehensive enough — skip questions, go straight to planning + generation
+          setClarifyQuestions(null);
+          setClarifyPrompt("");
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "Request is detailed enough — skipping clarification." },
+          ]);
+          generateWithRefinement(prompt, "", [], analysis);
+        } else if (res.ok && data.questions && data.questions.length > 0) {
           setClarifyQuestions(data.questions);
         } else {
           // Clarify failed — generate directly
           setClarifyQuestions(null);
           setClarifyPrompt("");
-          generateWithRefinement(prompt, "", []);
+          generateWithRefinement(prompt, "", [], analysis);
         }
       } catch {
         // Fallback: generate directly
         setClarifyQuestions(null);
         setClarifyPrompt("");
+        setClarifyAnalysis(null);
         generateWithRefinement(prompt, "", []);
       } finally {
         setIsClarifying(false);
@@ -445,12 +531,12 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         ]);
       }
 
-      // Clear clarify state and generate
+      // Clear clarify state and generate with planning
       setClarifyQuestions(null);
       setClarifyPrompt("");
-      generateWithRefinement(enhancedPrompt, "", []);
+      generateWithRefinement(enhancedPrompt, "", [], clarifyAnalysis);
     },
-    [clarifyQuestions, clarifyPrompt, buildEnhancedPrompt, generateWithRefinement]
+    [clarifyQuestions, clarifyPrompt, clarifyAnalysis, buildEnhancedPrompt, generateWithRefinement]
   );
 
   // Skip clarification and generate directly
