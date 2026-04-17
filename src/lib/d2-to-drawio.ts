@@ -6,6 +6,8 @@
  * shapes — not a single embedded image.
  */
 
+import { resolveIconUrl } from "./icon-registry";
+
 // ── D2 Parsed Types ─────────────────────────────────────────────────
 
 interface D2Node {
@@ -353,14 +355,15 @@ function layoutTree(nodes: D2Node[], parentPath: string = ""): LayoutRect[] {
 
       rects.push(rect);
     } else {
-      // Leaf node
+      // Leaf node — taller if it has an icon
+      const hasIcon = !!node.icon && !!resolveIconUrl(node.icon);
       rects.push({
         id: node.id,
         fullPath,
         x: 0,
         y: 0,
         w: NODE_W,
-        h: NODE_H,
+        h: hasIcon ? 60 : NODE_H,
         node,
         children: [],
       });
@@ -422,7 +425,7 @@ function buildContainerStyle(classDef: D2ClassDef): string {
   return parts.join(";") + ";";
 }
 
-function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string): string {
+function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string, iconUrl?: string): string {
   const cd = classDef || DEFAULT_CLASSES.resource;
   const parts = [
     "rounded=1",
@@ -437,6 +440,17 @@ function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string): strin
     "verticalAlign=middle",
     "align=center",
   ];
+
+  if (iconUrl) {
+    parts.push("shape=label");
+    parts.push(`image=${iconUrl}`);
+    parts.push("imageWidth=24");
+    parts.push("imageHeight=24");
+    parts.push("imageAlign=center");
+    parts.push("imageVerticalAlign=top");
+    parts.push("spacingTop=28");
+    parts.push("verticalAlign=bottom");
+  }
 
   if (shape === "cylinder") {
     parts[0] = "shape=cylinder3";
@@ -493,9 +507,11 @@ function generateCells(
       // Recursively generate children, relative to this container
       xml += generateCells(rect.children, classes, mxId, 0, 0, cellMap);
     } else {
-      const style = buildNodeStyle(classDef, rect.node.shape);
+      const iconUrl = rect.node.icon ? resolveIconUrl(rect.node.icon) : undefined;
+      const style = buildNodeStyle(classDef, rect.node.shape, iconUrl);
+      const cellH = iconUrl ? Math.max(rect.h, 60) : rect.h;
       xml += `        <mxCell id="${mxId}" value="${escapeXml(rect.node.label)}" style="${style}" vertex="1" parent="${parentMxId}">
-          <mxGeometry x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}" as="geometry"/>
+          <mxGeometry x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${cellH}" as="geometry"/>
         </mxCell>\n`;
     }
   }

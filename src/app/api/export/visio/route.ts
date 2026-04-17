@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     const diagramTitle = title || "Architecture Diagram";
 
-    const vsdxBuffer = await d2ToVsdx(d2Code, diagramTitle);
+    const vsdxBuffer = await d2ToVsdx(d2Code);
 
     return new Response(new Uint8Array(vsdxBuffer), {
       headers: {

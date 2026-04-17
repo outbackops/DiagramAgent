@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -13,6 +13,16 @@ interface CodeEditorProps {
 }
 
 export default function CodeEditor({ code, onChange, readOnly = false, className = "" }: CodeEditorProps) {
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setIsDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
       onChange(value || "");
@@ -47,7 +57,7 @@ export default function CodeEditor({ code, onChange, readOnly = false, className
         <MonacoEditor
           height="100%"
           language="plaintext"
-          theme="vs-dark"
+          theme={isDark ? "vs-dark" : "vs"}
           value={code}
           onChange={handleEditorChange}
           options={{
