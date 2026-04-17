@@ -282,6 +282,67 @@ export function parseD2(code: string): D2ParseResult {
   return { nodes: rootNodes, connections, classes };
 }
 
+// ── Icon Fetching & Embedding ────────────────────────────────────────
+
+/**
+ * Fetch an SVG icon from a URL and return it as a base64 data URI.
+ * Caches results in-memory to avoid re-fetching within the same process.
+ */
+const iconCache = new Map<string, string | null>();
+
+async function fetchIconAsDataUri(url: string): Promise<string | null> {
+  if (iconCache.has(url)) return iconCache.get(url)!;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      iconCache.set(url, null);
+      return null;
+    }
+
+    const contentType = res.headers.get("content-type") || "image/svg+xml";
+    const buffer = await res.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString("base64");
+    const mimeType = contentType.includes("svg") ? "image/svg+xml" : contentType;
+    const dataUri = `data:${mimeType};base64,${base64}`;
+    iconCache.set(url, dataUri);
+    return dataUri;
+  } catch {
+    iconCache.set(url, null);
+    return null;
+  }
+}
+
+/**
+ * Pre-fetch all icons used in the node tree and return a map of
+ * icon key -> data URI.
+ */
+async function prefetchIcons(nodes: D2Node[]): Promise<Map<string, string>> {
+  const iconKeys = new Set<string>();
+  function collectIcons(nodeList: D2Node[]) {
+    for (const node of nodeList) {
+      if (node.icon) iconKeys.add(node.icon);
+      if (node.children.length > 0) collectIcons(node.children);
+    }
+  }
+  collectIcons(nodes);
+
+  const iconMap = new Map<string, string>();
+  const entries = Array.from(iconKeys).map(async (key) => {
+    const url = resolveIconUrl(key);
+    if (!url) return;
+    const dataUri = await fetchIconAsDataUri(url);
+    if (dataUri) iconMap.set(key, dataUri);
+  });
+
+  await Promise.all(entries);
+  return iconMap;
+}
+
 // ── Layout Engine ────────────────────────────────────────────────────
 
 interface LayoutRect {
@@ -425,7 +486,7 @@ function buildContainerStyle(classDef: D2ClassDef): string {
   return parts.join(";") + ";";
 }
 
-function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string, iconUrl?: string): string {
+function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string, iconDataUri?: string): string {
   const cd = classDef || DEFAULT_CLASSES.resource;
   const parts = [
     "rounded=1",
@@ -441,9 +502,9 @@ function buildNodeStyle(classDef: D2ClassDef | undefined, shape?: string, iconUr
     "align=center",
   ];
 
-  if (iconUrl) {
+  if (iconDataUri) {
     parts.push("shape=label");
-    parts.push(`image=${iconUrl}`);
+    parts.push(`image=${iconDataUri}`);
     parts.push("imageWidth=24");
     parts.push("imageHeight=24");
     parts.push("imageAlign=center");
@@ -486,7 +547,8 @@ function generateCells(
   parentMxId: string,
   offsetX: number,
   offsetY: number,
-  cellMap: Map<string, string>
+  cellMap: Map<string, string>,
+  iconMap: Map<string, string>
 ): string {
   let xml = "";
 
@@ -505,11 +567,11 @@ function generateCells(
         </mxCell>\n`;
 
       // Recursively generate children, relative to this container
-      xml += generateCells(rect.children, classes, mxId, 0, 0, cellMap);
+      xml += generateCells(rect.children, classes, mxId, 0, 0, cellMap, iconMap);
     } else {
-      const iconUrl = rect.node.icon ? resolveIconUrl(rect.node.icon) : undefined;
-      const style = buildNodeStyle(classDef, rect.node.shape, iconUrl);
-      const cellH = iconUrl ? Math.max(rect.h, 60) : rect.h;
+      const iconDataUri = rect.node.icon ? iconMap.get(rect.node.icon) : undefined;
+      const style = buildNodeStyle(classDef, rect.node.shape, iconDataUri);
+      const cellH = iconDataUri ? Math.max(rect.h, 60) : rect.h;
       xml += `        <mxCell id="${mxId}" value="${escapeXml(rect.node.label)}" style="${style}" vertex="1" parent="${parentMxId}">
           <mxGeometry x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${cellH}" as="geometry"/>
         </mxCell>\n`;
@@ -535,18 +597,23 @@ function resolveNodeId(path: string, cellMap: Map<string, string>): string | und
 
 // ── Main Export Function ─────────────────────────────────────────────
 
-export function d2ToDrawio(d2Code: string, title: string = "Architecture Diagram"): string {
+export async function d2ToDrawio(d2Code: string, title: string = "Architecture Diagram"): Promise<string> {
   // Reset ID counter for each export
   cellIdCounter = 2;
 
   const { nodes, connections, classes } = parseD2(d2Code);
+
+  // Pre-fetch all icons and embed as data URIs
+  const iconMap = await prefetchIcons(nodes);
+  console.log(`[Export] Fetched ${iconMap.size} icons as data URIs`);
+
   const layoutRects = layoutTree(nodes);
   const { rects, totalW, totalH } = positionRoots(layoutRects);
 
   const cellMap = new Map<string, string>();
 
   // Generate node cells
-  const nodeCells = generateCells(rects, classes, "1", 0, 0, cellMap);
+  const nodeCells = generateCells(rects, classes, "1", 0, 0, cellMap, iconMap);
 
   // Generate connection cells
   let edgeCells = "";

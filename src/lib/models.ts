@@ -10,8 +10,8 @@ export interface ModelConfig {
   supportsVision?: boolean;
 }
 
-// Vision model used for diagram assessment (must support image inputs)
-export const VISION_MODEL_ID = "gpt-4o";
+// Vision model used for diagram assessment
+export const VISION_MODEL_ID = "gpt-5.2-chat";
 
 export const AVAILABLE_MODELS: ModelConfig[] = [
   {

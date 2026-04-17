@@ -110,21 +110,34 @@ export async function POST(request: NextRequest) {
 
     const authHeaders = await getAuthHeaders();
 
-    const requestBody = {
+    const requestBody: Record<string, unknown> = {
       model: VISION_MODEL_ID,
       messages,
-      max_completion_tokens: 1500,
-      temperature: 0.2,
+      max_completion_tokens: 4000,
     };
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-      body: JSON.stringify(requestBody),
-    });
+    // Only set temperature for models that support it
+    if (visionConfig.supportsTemperature) {
+      requestBody.temperature = 0.2;
+    }
+
+    const assessController = new AbortController();
+    const timeout = setTimeout(() => assessController.abort(), 60000); // 60s timeout
+
+    let response: globalThis.Response;
+    try {
+      response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify(requestBody),
+        signal: assessController.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -153,8 +166,10 @@ export async function POST(request: NextRequest) {
           assessment: {
             score: 5,
             pass: false,
-            issues: ["Could not parse assessment"],
-            suggestions: [],
+            reasoning: "Could not parse assessment response",
+            missing_components: [],
+            layout_issues: ["Assessment JSON parsing failed"],
+            specific_fixes: ["Re-generate the diagram"],
             raw: content,
           },
         }),

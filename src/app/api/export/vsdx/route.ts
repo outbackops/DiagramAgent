@@ -22,8 +22,8 @@ export async function POST(request: NextRequest) {
 
     const diagramTitle = title || "Architecture Diagram";
 
-    // Convert D2 code to native draw.io XML with editable shapes
-    const drawioXml = d2ToDrawio(d2Code, diagramTitle);
+    // Convert D2 code to native draw.io XML with editable shapes and embedded icons
+    const drawioXml = await d2ToDrawio(d2Code, diagramTitle);
 
     const buffer = Buffer.from(drawioXml, "utf-8");
 

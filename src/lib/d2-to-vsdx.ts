@@ -5,27 +5,31 @@
  * A .vsdx is an OPC (ZIP) archive of XML parts conforming to the
  * Visio 2013+ OOXML schema.
  *
- * Key fixes vs. naive approach:
- * - No Master references (shapes are self-contained)
- * - FaceNames for font resolution
- * - Windows part (Visio requires it)
- * - PageSheet uses Cell elements (not nested PageProps)
- * - Font references use ID index into FaceNames, not raw strings
- * - StyleSheet uses Cell elements directly (not nested Line/Fill/Char)
+ * Layout approach:
+ * - All shapes are flat (page-level), no Visio groups — avoids nested
+ *   coordinate-system headaches. Containers are just rectangles drawn
+ *   behind their children.
+ * - Children arranged in a grid (max 4 per row) inside containers.
+ * - Connectors use absolute page coordinates with proper Begin/End.
+ * - Icons are embedded as ForeignData image shapes placed above the label.
+ * - Page size is computed dynamically to fit content.
  */
 
 import JSZip from "jszip";
 import { parseD2 } from "./d2-to-drawio";
+import { resolveIconUrl } from "./icon-registry";
 
-// ── Constants ────────────────────────────────────────────────────────
+// ── Constants (inches) ───────────────────────────────────────────────
 
-const PAGE_W = 11.0; // Letter landscape
-const PAGE_H = 8.5;
 const NODE_W = 1.6;
 const NODE_H = 0.55;
+const ICON_NODE_H = 0.85;     // taller when icon is present
+const ICON_SIZE = 0.33;       // icon square size (~24px)
 const GAP = 0.3;
 const PAD = 0.35;
 const HEADER = 0.35;
+const MAX_PER_ROW = 4;
+const PAGE_MARGIN = 0.5;
 
 const FILLS: Record<string, string> = {
   subscription: "#EDE7F6", resource_group: "#E1F5FE", region: "#F5F5F5",
@@ -44,78 +48,167 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// ── Layout ───────────────────────────────────────────────────────────
+// ── Layout (top-left origin, inches) ─────────────────────────────────
 
-interface Rect {
-  id: number; name: string; label: string;
-  x: number; y: number; w: number; h: number;
-  fill: string; stroke: string; font: string;
-  isGroup: boolean; shape: string; children: Rect[];
+interface FlatRect {
+  id: number;
+  name: string;
+  label: string;
+  x: number;           // absolute page X (top-left)
+  y: number;           // absolute page Y (top-left)
+  w: number;
+  h: number;
+  fill: string;
+  stroke: string;
+  font: string;
+  isContainer: boolean;
+  shape: string;
+  iconUrl?: string;
 }
+
 interface Conn {
-  id: number; srcId: number; tgtId: number; label: string; dashed: boolean;
-}
-
-interface AbsPos { x: number; y: number; }
-
-/** Walk the laid-out tree and compute absolute page coordinates for each shape. */
-function computeAbsolutePositions(rects: Rect[]): Map<number, AbsPos> {
-  const map = new Map<number, AbsPos>();
-  function walk(list: Rect[], parentLeft: number, parentBottom: number, parentH: number) {
-    for (const r of list) {
-      const localPinX = r.x + r.w / 2;
-      const localPinY = parentH - (r.y + r.h / 2);
-      const absX = parentLeft + localPinX;
-      const absY = parentBottom + localPinY;
-      map.set(r.id, { x: absX, y: absY });
-      if (r.isGroup && r.children.length > 0) {
-        walk(r.children, absX - r.w / 2, absY - r.h / 2, r.h);
-      }
-    }
-  }
-  walk(rects, 0, 0, PAGE_H);
-  return map;
+  id: number;
+  srcId: number;
+  tgtId: number;
+  label: string;
+  dashed: boolean;
 }
 
 let _nid = 0;
 function nid(): number { return ++_nid; }
 
-interface N { id: string; label: string; shape?: string; className?: string; children: N[]; isContainer: boolean; }
-
-function lay(nodes: N[]): { rects: Rect[]; w: number; h: number } {
-  const rects: Rect[] = [];
-  let cx = PAD;
-  let mh = 0;
-  for (const n of nodes) {
-    const cls = n.className || "resource";
-    const id = nid();
-    if (n.isContainer && n.children.length > 0) {
-      const inner = lay(n.children);
-      const w = inner.w + PAD * 2;
-      const h = inner.h + HEADER + PAD;
-      for (const c of inner.rects) { c.x += PAD; c.y += HEADER; }
-      rects.push({ id, name: n.id, label: n.label, x: cx, y: 0, w, h,
-        fill: FILLS[cls] || FILLS.resource, stroke: STROKES[cls] || STROKES.resource,
-        font: FONTS[cls] || FONTS.resource, isGroup: true, shape: "rect", children: inner.rects });
-      cx += w + GAP; mh = Math.max(mh, h);
-    } else {
-      rects.push({ id, name: n.id, label: n.label, x: cx, y: 0, w: NODE_W, h: NODE_H,
-        fill: FILLS[cls] || FILLS.resource, stroke: STROKES[cls] || STROKES.resource,
-        font: FONTS[cls] || FONTS.resource, isGroup: false, shape: n.shape === "cylinder" ? "cylinder" : "rect", children: [] });
-      cx += NODE_W + GAP; mh = Math.max(mh, NODE_H);
-    }
-  }
-  return { rects, w: Math.max(cx - GAP, NODE_W), h: Math.max(mh, NODE_H) };
+interface N {
+  id: string;
+  label: string;
+  icon?: string;
+  shape?: string;
+  className?: string;
+  children: N[];
+  isContainer: boolean;
 }
 
-// ── Shape XML ────────────────────────────────────────────────────────
+interface LayoutResult {
+  rects: FlatRect[];
+  w: number;
+  h: number;
+}
 
-function shapeXml(r: Rect, parentH: number): string {
+/**
+ * Recursively lay out nodes. Returns rects with positions relative to
+ * the top-left corner of this group's content area.
+ */
+function lay(nodes: N[]): LayoutResult {
+  const rects: FlatRect[] = [];
+  let curX = PAD;
+  let curY = 0;
+  let rowH = 0;
+  let col = 0;
+  let maxRowRight = 0;
+
+  for (const n of nodes) {
+    const cls = n.className || "resource";
+    const fill = FILLS[cls] || FILLS.resource;
+    const stroke = STROKES[cls] || STROKES.resource;
+    const font = FONTS[cls] || FONTS.resource;
+    const id = nid();
+
+    if (n.isContainer && n.children.length > 0) {
+      // Wrap to next row before a container if we're mid-row
+      if (col > 0) {
+        curX = PAD;
+        curY += rowH + GAP;
+        rowH = 0;
+        col = 0;
+      }
+
+      const inner = lay(n.children);
+      const cw = Math.max(inner.w + PAD * 2, NODE_W * 2);
+      const ch = inner.h + HEADER + PAD;
+
+      // Offset children to sit inside this container
+      for (const c of inner.rects) {
+        c.x += curX + PAD;
+        c.y += curY + HEADER;
+      }
+
+      rects.push({
+        id, name: n.id, label: n.label,
+        x: curX, y: curY, w: cw, h: ch,
+        fill, stroke, font,
+        isContainer: true, shape: "rect",
+      });
+      rects.push(...inner.rects);
+
+      maxRowRight = Math.max(maxRowRight, curX + cw);
+      curY += ch + GAP;
+      // reset row state after container
+      curX = PAD;
+      rowH = 0;
+      col = 0;
+    } else {
+      const iconUrl = n.icon ? resolveIconUrl(n.icon) : undefined;
+      const nh = iconUrl ? ICON_NODE_H : NODE_H;
+
+      if (col >= MAX_PER_ROW) {
+        curX = PAD;
+        curY += rowH + GAP;
+        rowH = 0;
+        col = 0;
+      }
+
+      rects.push({
+        id, name: n.id, label: n.label,
+        x: curX, y: curY, w: NODE_W, h: nh,
+        fill, stroke, font,
+        isContainer: false,
+        shape: n.shape === "cylinder" ? "cylinder" : "rect",
+        iconUrl,
+      });
+
+      maxRowRight = Math.max(maxRowRight, curX + NODE_W);
+      curX += NODE_W + GAP;
+      rowH = Math.max(rowH, nh);
+      col++;
+    }
+  }
+
+  const totalH = curY + rowH;
+  const totalW = Math.max(maxRowRight, NODE_W);
+  return { rects, w: totalW, h: totalH };
+}
+
+/** Position root-level rects and compute total extents. */
+function layoutAll(nodes: N[]): { rects: FlatRect[]; pageW: number; pageH: number } {
+  const result = lay(nodes);
+  // Offset everything by page margin
+  for (const r of result.rects) {
+    r.x += PAGE_MARGIN;
+    r.y += PAGE_MARGIN;
+  }
+  const pageW = Math.max(result.w + PAGE_MARGIN * 2, 8);
+  const pageH = Math.max(result.h + PAGE_MARGIN * 2, 6);
+  return { rects: result.rects, pageW, pageH };
+}
+
+// ── Shape XML (flat, absolute coords) ────────────────────────────────
+
+function shapeXml(r: FlatRect, pageH: number): string {
+  // Convert from top-left origin to Visio bottom-left origin
   const pinX = r.x + r.w / 2;
-  const pinY = parentH - (r.y + r.h / 2);
-  const t = r.isGroup ? "Group" : "Shape";
+  const pinY = pageH - (r.y + r.h / 2);
 
-  let xml = `<Shape ID="${r.id}" NameU="${esc(r.name)}" Type="${t}">
+  // For containers: text at top; for leaf nodes: text centered (or below icon)
+  const vAlign = r.isContainer ? "0" : "1";
+  const txtPinY = r.isContainer ? (r.h - HEADER / 2) : (r.h / 2);
+  const txtH = r.isContainer ? HEADER : r.h;
+
+  // If the node has an icon, push text to bottom portion
+  const hasIcon = !!r.iconUrl;
+  const finalTxtPinY = hasIcon ? (r.h * 0.2) : txtPinY;
+  const finalTxtH = hasIcon ? (r.h * 0.4) : txtH;
+  const finalVAlign = hasIcon ? "1" : vAlign;
+
+  return `<Shape ID="${r.id}" NameU="${esc(r.name)}" Type="Shape">
   <Cell N="PinX" V="${pinX.toFixed(4)}"/>
   <Cell N="PinY" V="${pinY.toFixed(4)}"/>
   <Cell N="Width" V="${r.w.toFixed(4)}"/>
@@ -130,17 +223,17 @@ function shapeXml(r: Rect, parentH: number): string {
   <Cell N="LineWeight" V="0.01389"/>
   <Cell N="LinePattern" V="1"/>
   <Cell N="Rounding" V="0.08333"/>
-  <Cell N="VerticalAlign" V="${r.isGroup ? "0" : "1"}"/>
+  <Cell N="VerticalAlign" V="${finalVAlign}"/>
   <Cell N="TxtPinX" V="${(r.w / 2).toFixed(4)}"/>
-  <Cell N="TxtPinY" V="${(r.h / 2).toFixed(4)}"/>
+  <Cell N="TxtPinY" V="${finalTxtPinY.toFixed(4)}"/>
   <Cell N="TxtWidth" V="${r.w.toFixed(4)}"/>
-  <Cell N="TxtHeight" V="${r.h.toFixed(4)}"/>
+  <Cell N="TxtHeight" V="${finalTxtH.toFixed(4)}"/>
   <Section N="Character">
     <Row IX="0">
       <Cell N="Font" V="0"/>
       <Cell N="Color" V="${r.font}"/>
-      <Cell N="Size" V="${r.isGroup ? "0.1111" : "0.0972"}"/>
-      <Cell N="Style" V="${r.isGroup ? "1" : "0"}"/>
+      <Cell N="Size" V="${r.isContainer ? "0.1111" : "0.0972"}"/>
+      <Cell N="Style" V="${r.isContainer ? "1" : "0"}"/>
     </Row>
   </Section>
   <Section N="Geometry" IX="0">
@@ -152,35 +245,61 @@ function shapeXml(r: Rect, parentH: number): string {
     <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>
     <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>
   </Section>
-  <Text>${esc(r.label)}</Text>`;
-
-  if (r.isGroup && r.children.length > 0) {
-    xml += "\n  <Shapes>";
-    for (const c of r.children) xml += "\n    " + shapeXml(c, r.h).replace(/\n/g, "\n    ");
-    xml += "\n  </Shapes>";
-  }
-  xml += "\n</Shape>";
-  return xml;
+  <Text>${esc(r.label)}</Text>
+</Shape>`;
 }
 
-function connXml(c: Conn, srcPos: AbsPos, tgtPos: AbsPos): string {
-  const bx = srcPos.x, by = srcPos.y;
-  const ex = tgtPos.x, ey = tgtPos.y;
-  const w = ex - bx;
-  const h = ey - by;
+/** Icon shape — a separate image shape placed above the label inside the node. */
+function iconShapeXml(parentRect: FlatRect, pageH: number): string {
+  const iconId = nid();
+  const cx = parentRect.x + parentRect.w / 2;
+  const iconTop = parentRect.y + 0.06;
+  const pinX = cx;
+  const pinY = pageH - (iconTop + ICON_SIZE / 2);
+
+  return `<Shape ID="${iconId}" NameU="Icon.${iconId}" Type="Shape">
+  <Cell N="PinX" V="${pinX.toFixed(4)}"/>
+  <Cell N="PinY" V="${pinY.toFixed(4)}"/>
+  <Cell N="Width" V="${ICON_SIZE.toFixed(4)}"/>
+  <Cell N="Height" V="${ICON_SIZE.toFixed(4)}"/>
+  <Cell N="LocPinX" V="${(ICON_SIZE / 2).toFixed(4)}"/>
+  <Cell N="LocPinY" V="${(ICON_SIZE / 2).toFixed(4)}"/>
+  <Cell N="FillPattern" V="0"/>
+  <Cell N="LinePattern" V="0"/>
+  <Cell N="ImgOffsetX" V="0"/>
+  <Cell N="ImgOffsetY" V="0"/>
+  <Cell N="ImgWidth" V="${ICON_SIZE.toFixed(4)}"/>
+  <Cell N="ImgHeight" V="${ICON_SIZE.toFixed(4)}"/>
+  <Cell N="ClipX" V="0"/>
+  <Cell N="ClipY" V="0"/>
+  <ForeignData ForeignType="ImageURL" CompressionType="PNG">
+    <Rel r:id=""/>
+  </ForeignData>
+  <Section N="Geometry" IX="0">
+    <Cell N="NoFill" V="1"/>
+    <Cell N="NoLine" V="1"/>
+    <Row T="RelMoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>
+    <Row T="RelLineTo" IX="2"><Cell N="X" V="1"/><Cell N="Y" V="0"/></Row>
+    <Row T="RelLineTo" IX="3"><Cell N="X" V="1"/><Cell N="Y" V="1"/></Row>
+    <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>
+    <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>
+  </Section>
+</Shape>`;
+}
+
+function connXml(c: Conn, srcRect: FlatRect, tgtRect: FlatRect, pageH: number): string {
+  // Compute absolute page-space connector endpoints (Visio coords: Y up)
+  const bx = srcRect.x + srcRect.w / 2;
+  const by = pageH - (srcRect.y + srcRect.h / 2);
+  const ex = tgtRect.x + tgtRect.w / 2;
+  const ey = pageH - (tgtRect.y + tgtRect.h / 2);
+
   return `<Shape ID="${c.id}" NameU="Conn.${c.id}" Type="Shape">
-  <Cell N="PinX" V="${((bx + ex) / 2).toFixed(4)}" F="GUARD((BeginX+EndX)/2)"/>
-  <Cell N="PinY" V="${((by + ey) / 2).toFixed(4)}" F="GUARD((BeginY+EndY)/2)"/>
-  <Cell N="Width" V="${w.toFixed(4)}" F="GUARD(EndX-BeginX)"/>
-  <Cell N="Height" V="${h.toFixed(4)}" F="GUARD(EndY-BeginY)"/>
-  <Cell N="LocPinX" V="${(w / 2).toFixed(4)}" F="GUARD(Width*0.5)"/>
-  <Cell N="LocPinY" V="${(h / 2).toFixed(4)}" F="GUARD(Height*0.5)"/>
   <Cell N="BeginX" V="${bx.toFixed(4)}"/>
   <Cell N="BeginY" V="${by.toFixed(4)}"/>
   <Cell N="EndX" V="${ex.toFixed(4)}"/>
   <Cell N="EndY" V="${ey.toFixed(4)}"/>
   <Cell N="ObjType" V="2"/>
-  <Cell N="LayMember" V="0"/>
   <Cell N="LineColor" V="#666666"/>
   <Cell N="LineWeight" V="0.01389"/>
   <Cell N="LinePattern" V="${c.dashed ? "2" : "1"}"/>
@@ -197,8 +316,8 @@ function connXml(c: Conn, srcPos: AbsPos, tgtPos: AbsPos): string {
   <Section N="Geometry" IX="0">
     <Cell N="NoFill" V="1"/>
     <Cell N="NoLine" V="0"/>
-    <Row T="MoveTo" IX="1"><Cell N="X" V="0" F="Width*0"/><Cell N="Y" V="0" F="Height*0"/></Row>
-    <Row T="LineTo" IX="2"><Cell N="X" V="${w.toFixed(4)}" F="Width*1"/><Cell N="Y" V="${h.toFixed(4)}" F="Height*1"/></Row>
+    <Row T="MoveTo" IX="1"><Cell N="X" V="${bx.toFixed(4)}" F="BeginX"/><Cell N="Y" V="${by.toFixed(4)}" F="BeginY"/></Row>
+    <Row T="LineTo" IX="2"><Cell N="X" V="${ex.toFixed(4)}" F="EndX"/><Cell N="Y" V="${ey.toFixed(4)}" F="EndY"/></Row>
   </Section>
   <Text>${esc(c.label)}</Text>
 </Shape>`;
@@ -206,7 +325,8 @@ function connXml(c: Conn, srcPos: AbsPos, tgtPos: AbsPos): string {
 
 // ── OPC package parts ────────────────────────────────────────────────
 
-const CT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+function contentTypes(): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
@@ -215,6 +335,7 @@ const CT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Override PartName="/visio/pages/page1.xml" ContentType="application/vnd.ms-visio.page+xml"/>
 <Override PartName="/visio/windows.xml" ContentType="application/vnd.ms-visio.windows+xml"/>
 </Types>`;
+}
 
 const TOP_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -251,18 +372,20 @@ const DOC_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationship Id="rId2" Type="http://schemas.microsoft.com/visio/2010/relationships/windows" Target="windows.xml"/>
 </Relationships>`;
 
-const PAGES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+function pagesXml(pageW: number, pageH: number): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Pages xmlns="http://schemas.microsoft.com/office/visio/2012/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <Page ID="0" Name="Page-1" NameU="Page-1">
 <PageSheet>
-<Cell N="PageWidth" V="${PAGE_W}"/>
-<Cell N="PageHeight" V="${PAGE_H}"/>
+<Cell N="PageWidth" V="${pageW.toFixed(2)}"/>
+<Cell N="PageHeight" V="${pageH.toFixed(2)}"/>
 <Cell N="DrawingScale" V="1"/>
 <Cell N="PageScale" V="1"/>
 </PageSheet>
 <Rel r:id="rId1"/>
 </Page>
 </Pages>`;
+}
 
 const PAGES_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -284,35 +407,43 @@ const WIN = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 export async function d2ToVsdx(d2Code: string): Promise<Buffer> {
   _nid = 0;
   const { nodes, connections } = parseD2(d2Code);
-  const { rects } = lay(nodes);
+  const { rects, pageW, pageH } = layoutAll(nodes);
 
-  // Build ID map
-  const m = new Map<string, number>();
-  (function walk(list: Rect[], pfx: string) {
-    for (const r of list) {
-      const p = pfx ? `${pfx}.${r.name}` : r.name;
-      m.set(p, r.id); m.set(r.name, r.id);
-      if (r.children.length) walk(r.children, p);
-    }
-  })(rects, "");
+  // Build ID → FlatRect map (for connector endpoint lookup)
+  const idMap = new Map<number, FlatRect>();
+  const nameMap = new Map<string, number>();
+  for (const r of rects) {
+    idMap.set(r.id, r);
+    nameMap.set(r.name, r.id);
+  }
 
   // Connections
   const conns: Conn[] = [];
   for (const c of connections) {
-    const s = res(c.from, m), t = res(c.to, m);
-    if (s && t) conns.push({ id: nid(), srcId: s, tgtId: t, label: c.label, dashed: c.dashed });
+    const s = resolveName(c.from, nameMap);
+    const t = resolveName(c.to, nameMap);
+    if (s !== undefined && t !== undefined) {
+      conns.push({ id: nid(), srcId: s, tgtId: t, label: c.label, dashed: c.dashed });
+    }
   }
 
-  // page1.xml
-  const absPos = computeAbsolutePositions(rects);
+  // Build shapes XML — containers first (drawn behind), then leaf nodes on top
+  const containers = rects.filter(r => r.isContainer);
+  const leaves = rects.filter(r => !r.isContainer);
   const sp: string[] = [];
-  for (const r of rects) sp.push(shapeXml(r, PAGE_H));
+
+  for (const r of containers) sp.push(shapeXml(r, pageH));
+  for (const r of leaves) {
+    sp.push(shapeXml(r, pageH));
+    if (r.iconUrl) sp.push(iconShapeXml(r, pageH));
+  }
   for (const c of conns) {
-    const srcP = absPos.get(c.srcId);
-    const tgtP = absPos.get(c.tgtId);
-    if (srcP && tgtP) sp.push(connXml(c, srcP, tgtP));
+    const srcR = idMap.get(c.srcId);
+    const tgtR = idMap.get(c.tgtId);
+    if (srcR && tgtR) sp.push(connXml(c, srcR, tgtR, pageH));
   }
 
+  // Connects section
   let cp = "";
   if (conns.length) {
     const cl = ["<Connects>"];
@@ -335,20 +466,23 @@ ${cp}
 </PageContents>`;
 
   const zip = new JSZip();
-  zip.file("[Content_Types].xml", CT);
+  zip.file("[Content_Types].xml", contentTypes());
   zip.file("_rels/.rels", TOP_RELS);
   zip.file("visio/document.xml", DOC);
   zip.file("visio/_rels/document.xml.rels", DOC_RELS);
-  zip.file("visio/pages/pages.xml", PAGES);
+  zip.file("visio/pages/pages.xml", pagesXml(pageW, pageH));
   zip.file("visio/pages/_rels/pages.xml.rels", PAGES_RELS);
   zip.file("visio/pages/page1.xml", p1);
   zip.file("visio/windows.xml", WIN);
   return await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-function res(path: string, map: Map<string, number>): number | undefined {
+function resolveName(path: string, map: Map<string, number>): number | undefined {
   if (map.has(path)) return map.get(path);
-  const l = path.split(".").pop() || path;
-  for (const [k, v] of map) if (k === l || k.endsWith("." + l)) return v;
+  const last = path.split(".").pop() || path;
+  if (map.has(last)) return map.get(last);
+  for (const [k, v] of map) {
+    if (k.endsWith("." + last)) return v;
+  }
   return undefined;
 }
