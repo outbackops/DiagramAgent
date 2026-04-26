@@ -16,6 +16,9 @@ import {
   updateConnectionLabel,
   moveNodeToContainer,
 } from "@/lib/d2-editor";
+import { analyzeD2Code } from "@/lib/d2-analyzer";
+import { hashSvg } from "@/lib/svg-hash";
+
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
 const D2Renderer = dynamic(() => import("@/components/D2Renderer"), { ssr: false });
@@ -274,6 +277,18 @@ export default function Home() {
         let bestScore = -1;
         let _bestAssessment: { score: number; pass: boolean } | null = null;
         let consecutiveNonImproving = 0;
+        // Item 6: skip vision assess when SVG is identical to a prior iteration
+        let lastAssessedSvgHash: string | null = null;
+        let lastAssessment: {
+          score: number;
+          pass: boolean;
+          reasoning?: string;
+          issues?: string[];
+          suggestions?: string[];
+          missing_components?: string[];
+          layout_issues?: string[];
+          specific_fixes?: string[];
+        } | null = null;
 
         for (let i = 0; i < maxIterations; i++) {
           if (controller.signal.aborted) break;
@@ -311,12 +326,43 @@ export default function Home() {
 
           if (controller.signal.aborted) break;
 
-          // 2b: Assess with vision model
-          setRefinementStatus({
-            phase: "assessing",
-            iteration: i + 1,
-            maxIterations: maxIterations,
-          });
+          // 2b-pre: Cheap structural preflight via deterministic analyzer.
+          // If the code has hard structural problems (no connections, no
+          // containers, no direction) we refine immediately without burning
+          // a vision-model call.
+          const structural = analyzeD2Code(currentCode);
+          const hardStructuralIssues: string[] = [];
+          if (structural.connectionCount === 0) hardStructuralIssues.push("No connections in the diagram");
+          if (structural.nodeCount < 2) hardStructuralIssues.push("Diagram has fewer than 2 nodes");
+          if (!structural.hasDirection) hardStructuralIssues.push("No 'direction:' set — layout may be poor");
+
+          if (hardStructuralIssues.length > 0 && structural.codeScore < 4) {
+            console.log(`[Client] Structural preflight failed (codeScore ${structural.codeScore}), skipping vision assess`);
+            setRefinementStatus({
+              phase: "refining",
+              iteration: i + 1,
+              maxIterations: maxIterations,
+              score: structural.codeScore,
+              issues: hardStructuralIssues,
+            });
+            const allIssues = [...hardStructuralIssues, ...structural.issues];
+            const issuesList = allIssues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
+            const refinePrompt = `A deterministic structural analysis found these issues (code score ${structural.codeScore}/10):\n\nIssues:\n${issuesList}\n\nFix these issues in the D2 code. Output the COMPLETE updated D2 code.`;
+            currentCode = await streamGenerate(refinePrompt, currentCode, [], controller.signal);
+            continue;
+          }
+
+          // 2b: Assess with vision model (skip if SVG identical to last assessed iteration)
+          const svgHash = hashSvg(svg);
+          if (svgHash === lastAssessedSvgHash && lastAssessment) {
+            console.log(`[Client] SVG unchanged from last iteration — reusing assessment (score ${lastAssessment.score})`);
+          } else {
+            setRefinementStatus({
+              phase: "assessing",
+              iteration: i + 1,
+              maxIterations: maxIterations,
+            });
+          }
 
           let assessment: {
             score: number;
@@ -328,13 +374,19 @@ export default function Home() {
             layout_issues?: string[];
             specific_fixes?: string[];
           };
-          try {
-            assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
-          } catch (assessErr: unknown) {
-            const errMsg = assessErr instanceof Error ? assessErr.message : String(assessErr);
-            console.warn("Assessment failed, skipping:", errMsg);
-            setGenerationError(`Assessment failed: ${errMsg}`);
-            break;
+          if (svgHash === lastAssessedSvgHash && lastAssessment) {
+            assessment = lastAssessment;
+          } else {
+            try {
+              assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
+              lastAssessedSvgHash = svgHash;
+              lastAssessment = assessment;
+            } catch (assessErr: unknown) {
+              const errMsg = assessErr instanceof Error ? assessErr.message : String(assessErr);
+              console.warn("Assessment failed, skipping:", errMsg);
+              setGenerationError(`Assessment failed: ${errMsg}`);
+              break;
+            }
           }
 
           setRefinementStatus({
