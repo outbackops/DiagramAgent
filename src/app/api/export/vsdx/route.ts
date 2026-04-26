@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { errorMessage } from "@/lib/error-message";
 import { d2ToDrawio } from "@/lib/d2-to-drawio";
 
 /**
@@ -34,10 +35,10 @@ export async function POST(request: NextRequest) {
         "Content-Length": String(buffer.length),
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Draw.io export error:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Failed to export" }),
+      JSON.stringify({ error: errorMessage(error) || "Failed to export" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

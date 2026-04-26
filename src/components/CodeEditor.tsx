@@ -17,6 +17,9 @@ export default function CodeEditor({ code, onChange, readOnly = false, className
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    // Initial sync from media query is intentional — we read once at mount
+    // because there is no other source-of-truth for OS dark-mode preference.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsDark(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
     mq.addEventListener("change", handler);

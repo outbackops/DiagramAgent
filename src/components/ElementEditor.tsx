@@ -33,9 +33,13 @@ export default function ElementEditor({
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelValue, setLabelValue] = useState("");
 
-  // Reset editing state when selection changes
+  // Reset editing state when the parent picks a different element.
+  // The setState calls are intentional: this is the standard "reset on prop
+  // change" pattern, where the source-of-truth lives outside React.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditingLabel(false);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLabelValue(selected?.label || "");
   }, [selected]);
 

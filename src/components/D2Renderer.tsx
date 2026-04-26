@@ -80,10 +80,11 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
         setSvg(data.svg);
         setError("");
       }
-    } catch (err: any) {
-      if (err.name === "AbortError") return; // Silently ignore aborted requests
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (e.name === "AbortError") return; // Silently ignore aborted requests
       if (renderIdRef.current !== requestId) return;
-      setError(err?.message || "Network error");
+      setError(e.message || "Network error");
       setSvg("");
     } finally {
       if (renderIdRef.current === requestId) {
@@ -338,9 +339,10 @@ export default function D2Renderer({ code, isStreaming = false, onElementClick, 
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to export PNG:", err);
-      alert(`Failed to export PNG: ${err.message}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to export PNG: ${msg}`);
     }
   }, [svg]);
 

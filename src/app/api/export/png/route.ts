@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { errorMessage } from "@/lib/error-message";
 import sharp from "sharp";
 
 export async function POST(request: NextRequest) {
@@ -25,9 +26,9 @@ export async function POST(request: NextRequest) {
         "Content-Disposition": 'attachment; filename="diagram.png"',
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("PNG export error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: errorMessage(error) }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

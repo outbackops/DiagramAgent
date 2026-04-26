@@ -1,62 +1,27 @@
 {
-  "aws-ec2": {
-    "local": "/icons/aws-ec2.svg",
-    "label": "EC2",
-    "category": "aws"
+  "airflow": {
+    "local": "/icons/airflow.svg",
+    "label": "Airflow",
+    "category": "tech"
   },
-  "aws-rds": {
-    "local": "/icons/aws-rds.svg",
-    "label": "RDS",
-    "category": "aws"
+  "ansible": {
+    "local": "/icons/ansible.svg",
+    "label": "Ansible",
+    "category": "tech"
+  },
+  "api": {
+    "local": "/icons/api.svg",
+    "label": "API",
+    "category": "general"
+  },
+  "argocd": {
+    "local": "/icons/argocd.svg",
+    "label": "Argo CD",
+    "category": "tech"
   },
   "aws": {
     "local": "/icons/aws.svg",
     "label": "AWS",
-    "category": "aws"
-  },
-  "aws-lambda": {
-    "local": "/icons/aws-lambda.svg",
-    "label": "Lambda",
-    "category": "aws"
-  },
-  "aws-s3": {
-    "local": "/icons/aws-s3.svg",
-    "label": "S3",
-    "category": "aws"
-  },
-  "aws-dynamodb": {
-    "local": "/icons/aws-dynamodb.svg",
-    "label": "DynamoDB",
-    "category": "aws"
-  },
-  "aws-eks": {
-    "local": "/icons/aws-eks.svg",
-    "label": "EKS",
-    "category": "aws"
-  },
-  "aws-cloudfront": {
-    "local": "/icons/aws-cloudfront.svg",
-    "label": "CloudFront",
-    "category": "aws"
-  },
-  "aws-route53": {
-    "local": "/icons/aws-route53.svg",
-    "label": "Route 53",
-    "category": "aws"
-  },
-  "aws-vpc": {
-    "local": "/icons/aws-vpc.svg",
-    "label": "VPC",
-    "category": "aws"
-  },
-  "aws-ecs": {
-    "local": "/icons/aws-ecs.svg",
-    "label": "ECS",
-    "category": "aws"
-  },
-  "aws-sns": {
-    "local": "/icons/aws-sns.svg",
-    "label": "SNS",
     "category": "aws"
   },
   "aws-api-gateway": {
@@ -64,89 +29,9 @@
     "label": "API Gateway",
     "category": "aws"
   },
-  "aws-redshift": {
-    "local": "/icons/aws-redshift.svg",
-    "label": "Redshift",
-    "category": "aws"
-  },
-  "aws-sqs": {
-    "local": "/icons/aws-sqs.svg",
-    "label": "SQS",
-    "category": "aws"
-  },
-  "aws-elasticache": {
-    "local": "/icons/aws-elasticache.svg",
-    "label": "ElastiCache",
-    "category": "aws"
-  },
-  "aws-kinesis": {
-    "local": "/icons/aws-kinesis.svg",
-    "label": "Kinesis",
-    "category": "aws"
-  },
-  "aws-cognito": {
-    "local": "/icons/aws-cognito.svg",
-    "label": "Cognito",
-    "category": "aws"
-  },
-  "aws-cloudwatch": {
-    "local": "/icons/aws-cloudwatch.svg",
-    "label": "CloudWatch",
-    "category": "aws"
-  },
-  "aws-iam": {
-    "local": "/icons/aws-iam.svg",
-    "label": "IAM",
-    "category": "aws"
-  },
-  "aws-eventbridge": {
-    "local": "/icons/aws-eventbridge.svg",
-    "label": "EventBridge",
-    "category": "aws"
-  },
-  "aws-secrets-manager": {
-    "local": "/icons/aws-secrets-manager.svg",
-    "label": "Secrets Manager",
-    "category": "aws"
-  },
-  "aws-fargate": {
-    "local": "/icons/aws-fargate.svg",
-    "label": "Fargate",
-    "category": "aws"
-  },
-  "aws-elb": {
-    "local": "/icons/aws-elb.svg",
-    "label": "ELB",
-    "category": "aws"
-  },
-  "aws-elastic-load-balancing": {
-    "local": "/icons/aws-elastic-load-balancing.svg",
-    "label": "ELB",
-    "category": "aws"
-  },
-  "aws-step-functions": {
-    "local": "/icons/aws-step-functions.svg",
-    "label": "Step Functions",
-    "category": "aws"
-  },
-  "aws-codebuild": {
-    "local": "/icons/aws-codebuild.svg",
-    "label": "CodeBuild",
-    "category": "aws"
-  },
-  "aws-cloudformation": {
-    "local": "/icons/aws-cloudformation.svg",
-    "label": "CloudFormation",
-    "category": "aws"
-  },
   "aws-athena": {
     "local": "/icons/aws-athena.svg",
     "label": "Athena",
-    "category": "aws"
-  },
-  "aws-codepipeline": {
-    "local": "/icons/aws-codepipeline.svg",
-    "label": "CodePipeline",
     "category": "aws"
   },
   "aws-aurora": {
@@ -154,59 +39,19 @@
     "label": "Aurora",
     "category": "aws"
   },
-  "aws-elastic-beanstalk": {
-    "local": "/icons/aws-elastic-beanstalk.svg",
-    "label": "Elastic Beanstalk",
-    "category": "aws"
-  },
-  "aws-glue": {
-    "local": "/icons/aws-glue.svg",
-    "label": "Glue",
-    "category": "aws"
-  },
-  "aws-msk": {
-    "local": "/icons/aws-msk.svg",
-    "label": "MSK",
-    "category": "aws"
-  },
-  "aws-waf": {
-    "local": "/icons/aws-waf.svg",
-    "label": "WAF",
-    "category": "aws"
-  },
   "aws-batch": {
     "local": "/icons/aws-batch.svg",
     "label": "Batch",
     "category": "aws"
   },
-  "aws-shield": {
-    "local": "/icons/aws-shield.svg",
-    "label": "Shield",
+  "aws-cloudformation": {
+    "local": "/icons/aws-cloudformation.svg",
+    "label": "CloudFormation",
     "category": "aws"
   },
-  "aws-ses": {
-    "local": "/icons/aws-ses.svg",
-    "label": "SES",
-    "category": "aws"
-  },
-  "aws-xray": {
-    "local": "/icons/aws-xray.svg",
-    "label": "X-Ray",
-    "category": "aws"
-  },
-  "aws-documentdb": {
-    "local": "/icons/aws-documentdb.svg",
-    "label": "DocumentDB",
-    "category": "aws"
-  },
-  "aws-config": {
-    "local": "/icons/aws-config.svg",
-    "label": "Config",
-    "category": "aws"
-  },
-  "aws-kms": {
-    "local": "/icons/aws-kms.svg",
-    "label": "KMS",
+  "aws-cloudfront": {
+    "local": "/icons/aws-cloudfront.svg",
+    "label": "CloudFront",
     "category": "aws"
   },
   "aws-cloudtrail": {
@@ -214,99 +59,184 @@
     "label": "CloudTrail",
     "category": "aws"
   },
+  "aws-cloudwatch": {
+    "local": "/icons/aws-cloudwatch.svg",
+    "label": "CloudWatch",
+    "category": "aws"
+  },
+  "aws-codebuild": {
+    "local": "/icons/aws-codebuild.svg",
+    "label": "CodeBuild",
+    "category": "aws"
+  },
+  "aws-codepipeline": {
+    "local": "/icons/aws-codepipeline.svg",
+    "label": "CodePipeline",
+    "category": "aws"
+  },
+  "aws-cognito": {
+    "local": "/icons/aws-cognito.svg",
+    "label": "Cognito",
+    "category": "aws"
+  },
+  "aws-config": {
+    "local": "/icons/aws-config.svg",
+    "label": "Config",
+    "category": "aws"
+  },
+  "aws-documentdb": {
+    "local": "/icons/aws-documentdb.svg",
+    "label": "DocumentDB",
+    "category": "aws"
+  },
+  "aws-dynamodb": {
+    "local": "/icons/aws-dynamodb.svg",
+    "label": "DynamoDB",
+    "category": "aws"
+  },
+  "aws-ec2": {
+    "local": "/icons/aws-ec2.svg",
+    "label": "EC2",
+    "category": "aws"
+  },
+  "aws-ecs": {
+    "local": "/icons/aws-ecs.svg",
+    "label": "ECS",
+    "category": "aws"
+  },
+  "aws-eks": {
+    "local": "/icons/aws-eks.svg",
+    "label": "EKS",
+    "category": "aws"
+  },
+  "aws-elastic-beanstalk": {
+    "local": "/icons/aws-elastic-beanstalk.svg",
+    "label": "Elastic Beanstalk",
+    "category": "aws"
+  },
+  "aws-elastic-load-balancing": {
+    "local": "/icons/aws-elastic-load-balancing.svg",
+    "label": "ELB",
+    "category": "aws"
+  },
+  "aws-elasticache": {
+    "local": "/icons/aws-elasticache.svg",
+    "label": "ElastiCache",
+    "category": "aws"
+  },
+  "aws-elb": {
+    "local": "/icons/aws-elb.svg",
+    "label": "ELB",
+    "category": "aws"
+  },
+  "aws-eventbridge": {
+    "local": "/icons/aws-eventbridge.svg",
+    "label": "EventBridge",
+    "category": "aws"
+  },
+  "aws-fargate": {
+    "local": "/icons/aws-fargate.svg",
+    "label": "Fargate",
+    "category": "aws"
+  },
+  "aws-glue": {
+    "local": "/icons/aws-glue.svg",
+    "label": "Glue",
+    "category": "aws"
+  },
+  "aws-iam": {
+    "local": "/icons/aws-iam.svg",
+    "label": "IAM",
+    "category": "aws"
+  },
+  "aws-kinesis": {
+    "local": "/icons/aws-kinesis.svg",
+    "label": "Kinesis",
+    "category": "aws"
+  },
+  "aws-kms": {
+    "local": "/icons/aws-kms.svg",
+    "label": "KMS",
+    "category": "aws"
+  },
+  "aws-lambda": {
+    "local": "/icons/aws-lambda.svg",
+    "label": "Lambda",
+    "category": "aws"
+  },
+  "aws-msk": {
+    "local": "/icons/aws-msk.svg",
+    "label": "MSK",
+    "category": "aws"
+  },
+  "aws-rds": {
+    "local": "/icons/aws-rds.svg",
+    "label": "RDS",
+    "category": "aws"
+  },
+  "aws-redshift": {
+    "local": "/icons/aws-redshift.svg",
+    "label": "Redshift",
+    "category": "aws"
+  },
+  "aws-route53": {
+    "local": "/icons/aws-route53.svg",
+    "label": "Route 53",
+    "category": "aws"
+  },
+  "aws-s3": {
+    "local": "/icons/aws-s3.svg",
+    "label": "S3",
+    "category": "aws"
+  },
+  "aws-secrets-manager": {
+    "local": "/icons/aws-secrets-manager.svg",
+    "label": "Secrets Manager",
+    "category": "aws"
+  },
+  "aws-ses": {
+    "local": "/icons/aws-ses.svg",
+    "label": "SES",
+    "category": "aws"
+  },
+  "aws-shield": {
+    "local": "/icons/aws-shield.svg",
+    "label": "Shield",
+    "category": "aws"
+  },
+  "aws-sns": {
+    "local": "/icons/aws-sns.svg",
+    "label": "SNS",
+    "category": "aws"
+  },
+  "aws-sqs": {
+    "local": "/icons/aws-sqs.svg",
+    "label": "SQS",
+    "category": "aws"
+  },
+  "aws-step-functions": {
+    "local": "/icons/aws-step-functions.svg",
+    "label": "Step Functions",
+    "category": "aws"
+  },
+  "aws-vpc": {
+    "local": "/icons/aws-vpc.svg",
+    "label": "VPC",
+    "category": "aws"
+  },
+  "aws-waf": {
+    "local": "/icons/aws-waf.svg",
+    "label": "WAF",
+    "category": "aws"
+  },
+  "aws-xray": {
+    "local": "/icons/aws-xray.svg",
+    "label": "X-Ray",
+    "category": "aws"
+  },
   "azure": {
     "local": "/icons/azure.svg",
     "label": "Azure",
-    "category": "azure"
-  },
-  "azure-virtual-machine": {
-    "local": "/icons/azure-virtual-machine.svg",
-    "label": "Virtual Machine",
-    "category": "azure"
-  },
-  "azure-functions": {
-    "local": "/icons/azure-functions.svg",
-    "label": "Functions",
-    "category": "azure"
-  },
-  "azure-app-service": {
-    "local": "/icons/azure-app-service.svg",
-    "label": "App Service",
-    "category": "azure"
-  },
-  "azure-sql-server": {
-    "local": "/icons/azure-sql-server.svg",
-    "label": "SQL Server",
-    "category": "azure"
-  },
-  "azure-sql-database": {
-    "local": "/icons/azure-sql-database.svg",
-    "label": "SQL Database",
-    "category": "azure"
-  },
-  "azure-sql-managed-instance": {
-    "local": "/icons/azure-sql-managed-instance.svg",
-    "label": "SQL Managed Instance",
-    "category": "azure"
-  },
-  "azure-kubernetes-service": {
-    "local": "/icons/azure-kubernetes-service.svg",
-    "label": "AKS",
-    "category": "azure"
-  },
-  "azure-cosmos-db": {
-    "local": "/icons/azure-cosmos-db.svg",
-    "label": "Cosmos DB",
-    "category": "azure"
-  },
-  "azure-container-instances": {
-    "local": "/icons/azure-container-instances.svg",
-    "label": "Container Instances",
-    "category": "azure"
-  },
-  "azure-storage": {
-    "local": "/icons/azure-storage.svg",
-    "label": "Storage",
-    "category": "azure"
-  },
-  "azure-blob-storage": {
-    "local": "/icons/azure-blob-storage.svg",
-    "label": "Blob Storage",
-    "category": "azure"
-  },
-  "azure-container-registry": {
-    "local": "/icons/azure-container-registry.svg",
-    "label": "Container Registry",
-    "category": "azure"
-  },
-  "azure-virtual-networks": {
-    "local": "/icons/azure-virtual-networks.svg",
-    "label": "Virtual Network",
-    "category": "azure"
-  },
-  "azure-load-balancers": {
-    "local": "/icons/azure-load-balancers.svg",
-    "label": "Load Balancer",
-    "category": "azure"
-  },
-  "azure-application-gateway": {
-    "local": "/icons/azure-application-gateway.svg",
-    "label": "Application Gateway",
-    "category": "azure"
-  },
-  "azure-front-door": {
-    "local": "/icons/azure-front-door.svg",
-    "label": "Front Door",
-    "category": "azure"
-  },
-  "azure-dns": {
-    "local": "/icons/azure-dns.svg",
-    "label": "DNS",
-    "category": "azure"
-  },
-  "azure-cdn": {
-    "local": "/icons/azure-cdn.svg",
-    "label": "CDN",
     "category": "azure"
   },
   "azure-active-directory": {
@@ -314,119 +244,9 @@
     "label": "Active Directory",
     "category": "azure"
   },
-  "azure-key-vault": {
-    "local": "/icons/azure-key-vault.svg",
-    "label": "Key Vault",
-    "category": "azure"
-  },
-  "azure-monitor": {
-    "local": "/icons/azure-monitor.svg",
-    "label": "Monitor",
-    "category": "azure"
-  },
-  "azure-log-analytics": {
-    "local": "/icons/azure-log-analytics.svg",
-    "label": "Log Analytics",
-    "category": "azure"
-  },
-  "azure-devops": {
-    "local": "/icons/azure-devops.svg",
-    "label": "DevOps",
-    "category": "azure"
-  },
-  "azure-service-bus": {
-    "local": "/icons/azure-service-bus.svg",
-    "label": "Service Bus",
-    "category": "azure"
-  },
-  "azure-event-hubs": {
-    "local": "/icons/azure-event-hubs.svg",
-    "label": "Event Hubs",
-    "category": "azure"
-  },
-  "azure-cognitive-services": {
-    "local": "/icons/azure-cognitive-services.svg",
-    "label": "Cognitive Services",
-    "category": "azure"
-  },
-  "azure-logic-apps": {
-    "local": "/icons/azure-logic-apps.svg",
-    "label": "Logic Apps",
-    "category": "azure"
-  },
-  "azure-event-grid": {
-    "local": "/icons/azure-event-grid.svg",
-    "label": "Event Grid",
-    "category": "azure"
-  },
   "azure-api-management": {
     "local": "/icons/azure-api-management.svg",
     "label": "API Management",
-    "category": "azure"
-  },
-  "azure-cache-redis": {
-    "local": "/icons/azure-cache-redis.svg",
-    "label": "Azure Cache for Redis",
-    "category": "azure"
-  },
-  "azure-data-factory": {
-    "local": "/icons/azure-data-factory.svg",
-    "label": "Data Factory",
-    "category": "azure"
-  },
-  "azure-synapse-analytics": {
-    "local": "/icons/azure-synapse-analytics.svg",
-    "label": "Synapse Analytics",
-    "category": "azure"
-  },
-  "azure-vpn-gateway": {
-    "local": "/icons/azure-vpn-gateway.svg",
-    "label": "VPN Gateway",
-    "category": "azure"
-  },
-  "azure-network-security-groups": {
-    "local": "/icons/azure-network-security-groups.svg",
-    "label": "NSG",
-    "category": "azure"
-  },
-  "azure-firewall": {
-    "local": "/icons/azure-firewall.svg",
-    "label": "Firewall",
-    "category": "azure"
-  },
-  "azure-expressroute": {
-    "local": "/icons/azure-expressroute.svg",
-    "label": "ExpressRoute",
-    "category": "azure"
-  },
-  "azure-bastion": {
-    "local": "/icons/azure-bastion.svg",
-    "label": "Bastion",
-    "category": "azure"
-  },
-  "azure-vm-scale-sets": {
-    "local": "/icons/azure-vm-scale-sets.svg",
-    "label": "VM Scale Sets",
-    "category": "azure"
-  },
-  "azure-availability-set": {
-    "local": "/icons/azure-availability-set.svg",
-    "label": "Availability Set",
-    "category": "azure"
-  },
-  "azure-disk": {
-    "local": "/icons/azure-disk.svg",
-    "label": "Managed Disk",
-    "category": "azure"
-  },
-  "azure-public-ip": {
-    "local": "/icons/azure-public-ip.svg",
-    "label": "Public IP",
-    "category": "azure"
-  },
-  "azure-traffic-manager": {
-    "local": "/icons/azure-traffic-manager.svg",
-    "label": "Traffic Manager",
     "category": "azure"
   },
   "azure-app-insights": {
@@ -434,44 +254,24 @@
     "label": "Application Insights",
     "category": "azure"
   },
-  "azure-service-fabric": {
-    "local": "/icons/azure-service-fabric.svg",
-    "label": "Service Fabric",
+  "azure-app-service": {
+    "local": "/icons/azure-app-service.svg",
+    "label": "App Service",
     "category": "azure"
   },
-  "azure-ddos": {
-    "local": "/icons/azure-ddos.svg",
-    "label": "DDoS Protection",
+  "azure-application-gateway": {
+    "local": "/icons/azure-application-gateway.svg",
+    "label": "Application Gateway",
     "category": "azure"
   },
-  "azure-recovery-vault": {
-    "local": "/icons/azure-recovery-vault.svg",
-    "label": "Recovery Vault",
+  "azure-availability-set": {
+    "local": "/icons/azure-availability-set.svg",
+    "label": "Availability Set",
     "category": "azure"
   },
-  "azure-bot-service": {
-    "local": "/icons/azure-bot-service.svg",
-    "label": "Bot Service",
-    "category": "azure"
-  },
-  "azure-iot-hub": {
-    "local": "/icons/azure-iot-hub.svg",
-    "label": "IoT Hub",
-    "category": "azure"
-  },
-  "azure-waf": {
-    "local": "/icons/azure-waf.svg",
-    "label": "WAF",
-    "category": "azure"
-  },
-  "azure-databricks": {
-    "local": "/icons/azure-databricks.svg",
-    "label": "Databricks",
-    "category": "azure"
-  },
-  "azure-private-link": {
-    "local": "/icons/azure-private-link.svg",
-    "label": "Private Link",
+  "azure-bastion": {
+    "local": "/icons/azure-bastion.svg",
+    "label": "Bastion",
     "category": "azure"
   },
   "azure-batch": {
@@ -479,19 +279,154 @@
     "label": "Batch",
     "category": "azure"
   },
+  "azure-blob-storage": {
+    "local": "/icons/azure-blob-storage.svg",
+    "label": "Blob Storage",
+    "category": "azure"
+  },
+  "azure-bot-service": {
+    "local": "/icons/azure-bot-service.svg",
+    "label": "Bot Service",
+    "category": "azure"
+  },
+  "azure-cache-redis": {
+    "local": "/icons/azure-cache-redis.svg",
+    "label": "Azure Cache for Redis",
+    "category": "azure"
+  },
+  "azure-cdn": {
+    "local": "/icons/azure-cdn.svg",
+    "label": "CDN",
+    "category": "azure"
+  },
+  "azure-cognitive-services": {
+    "local": "/icons/azure-cognitive-services.svg",
+    "label": "Cognitive Services",
+    "category": "azure"
+  },
+  "azure-container-instances": {
+    "local": "/icons/azure-container-instances.svg",
+    "label": "Container Instances",
+    "category": "azure"
+  },
+  "azure-container-registry": {
+    "local": "/icons/azure-container-registry.svg",
+    "label": "Container Registry",
+    "category": "azure"
+  },
+  "azure-cosmos-db": {
+    "local": "/icons/azure-cosmos-db.svg",
+    "label": "Cosmos DB",
+    "category": "azure"
+  },
+  "azure-data-factory": {
+    "local": "/icons/azure-data-factory.svg",
+    "label": "Data Factory",
+    "category": "azure"
+  },
+  "azure-databricks": {
+    "local": "/icons/azure-databricks.svg",
+    "label": "Databricks",
+    "category": "azure"
+  },
+  "azure-ddos": {
+    "local": "/icons/azure-ddos.svg",
+    "label": "DDoS Protection",
+    "category": "azure"
+  },
+  "azure-devops": {
+    "local": "/icons/azure-devops.svg",
+    "label": "DevOps",
+    "category": "azure"
+  },
+  "azure-digital-twins": {
+    "local": "/icons/azure-digital-twins.svg",
+    "label": "Digital Twins",
+    "category": "azure"
+  },
+  "azure-disk": {
+    "local": "/icons/azure-disk.svg",
+    "label": "Managed Disk",
+    "category": "azure"
+  },
+  "azure-dns": {
+    "local": "/icons/azure-dns.svg",
+    "label": "DNS",
+    "category": "azure"
+  },
+  "azure-event-grid": {
+    "local": "/icons/azure-event-grid.svg",
+    "label": "Event Grid",
+    "category": "azure"
+  },
+  "azure-event-hubs": {
+    "local": "/icons/azure-event-hubs.svg",
+    "label": "Event Hubs",
+    "category": "azure"
+  },
+  "azure-expressroute": {
+    "local": "/icons/azure-expressroute.svg",
+    "label": "ExpressRoute",
+    "category": "azure"
+  },
+  "azure-firewall": {
+    "local": "/icons/azure-firewall.svg",
+    "label": "Firewall",
+    "category": "azure"
+  },
+  "azure-front-door": {
+    "local": "/icons/azure-front-door.svg",
+    "label": "Front Door",
+    "category": "azure"
+  },
+  "azure-functions": {
+    "local": "/icons/azure-functions.svg",
+    "label": "Functions",
+    "category": "azure"
+  },
   "azure-hdinsight": {
     "local": "/icons/azure-hdinsight.svg",
     "label": "HDInsight",
     "category": "azure"
   },
-  "azure-static-apps": {
-    "local": "/icons/azure-static-apps.svg",
-    "label": "Static Web Apps",
+  "azure-iot-hub": {
+    "local": "/icons/azure-iot-hub.svg",
+    "label": "IoT Hub",
     "category": "azure"
   },
-  "azure-search": {
-    "local": "/icons/azure-search.svg",
-    "label": "Cognitive Search",
+  "azure-key-vault": {
+    "local": "/icons/azure-key-vault.svg",
+    "label": "Key Vault",
+    "category": "azure"
+  },
+  "azure-kubernetes-service": {
+    "local": "/icons/azure-kubernetes-service.svg",
+    "label": "AKS",
+    "category": "azure"
+  },
+  "azure-load-balancers": {
+    "local": "/icons/azure-load-balancers.svg",
+    "label": "Load Balancer",
+    "category": "azure"
+  },
+  "azure-log-analytics": {
+    "local": "/icons/azure-log-analytics.svg",
+    "label": "Log Analytics",
+    "category": "azure"
+  },
+  "azure-logic-apps": {
+    "local": "/icons/azure-logic-apps.svg",
+    "label": "Logic Apps",
+    "category": "azure"
+  },
+  "azure-monitor": {
+    "local": "/icons/azure-monitor.svg",
+    "label": "Monitor",
+    "category": "azure"
+  },
+  "azure-network-security-groups": {
+    "local": "/icons/azure-network-security-groups.svg",
+    "label": "NSG",
     "category": "azure"
   },
   "azure-notification-hub": {
@@ -499,19 +434,29 @@
     "label": "Notification Hub",
     "category": "azure"
   },
-  "gcp-compute-engine": {
-    "local": "/icons/gcp-compute-engine.svg",
-    "label": "Compute Engine",
-    "category": "gcp"
+  "azure-policy": {
+    "local": "/icons/azure-policy.svg",
+    "label": "Policy",
+    "category": "azure"
   },
-  "gcp": {
-    "local": "/icons/gcp.svg",
-    "label": "Google Cloud",
-    "category": "gcp"
+  "azure-private-link": {
+    "local": "/icons/azure-private-link.svg",
+    "label": "Private Link",
+    "category": "azure"
   },
-  "azure-digital-twins": {
-    "local": "/icons/azure-digital-twins.svg",
-    "label": "Digital Twins",
+  "azure-public-ip": {
+    "local": "/icons/azure-public-ip.svg",
+    "label": "Public IP",
+    "category": "azure"
+  },
+  "azure-recovery-vault": {
+    "local": "/icons/azure-recovery-vault.svg",
+    "label": "Recovery Vault",
+    "category": "azure"
+  },
+  "azure-search": {
+    "local": "/icons/azure-search.svg",
+    "label": "Cognitive Search",
     "category": "azure"
   },
   "azure-security-center": {
@@ -524,10 +469,180 @@
     "label": "Sentinel",
     "category": "azure"
   },
-  "azure-policy": {
-    "local": "/icons/azure-policy.svg",
-    "label": "Policy",
+  "azure-service-bus": {
+    "local": "/icons/azure-service-bus.svg",
+    "label": "Service Bus",
     "category": "azure"
+  },
+  "azure-service-fabric": {
+    "local": "/icons/azure-service-fabric.svg",
+    "label": "Service Fabric",
+    "category": "azure"
+  },
+  "azure-sql-database": {
+    "local": "/icons/azure-sql-database.svg",
+    "label": "SQL Database",
+    "category": "azure"
+  },
+  "azure-sql-managed-instance": {
+    "local": "/icons/azure-sql-managed-instance.svg",
+    "label": "SQL Managed Instance",
+    "category": "azure"
+  },
+  "azure-sql-server": {
+    "local": "/icons/azure-sql-server.svg",
+    "label": "SQL Server",
+    "category": "azure"
+  },
+  "azure-static-apps": {
+    "local": "/icons/azure-static-apps.svg",
+    "label": "Static Web Apps",
+    "category": "azure"
+  },
+  "azure-storage": {
+    "local": "/icons/azure-storage.svg",
+    "label": "Storage",
+    "category": "azure"
+  },
+  "azure-synapse-analytics": {
+    "local": "/icons/azure-synapse-analytics.svg",
+    "label": "Synapse Analytics",
+    "category": "azure"
+  },
+  "azure-traffic-manager": {
+    "local": "/icons/azure-traffic-manager.svg",
+    "label": "Traffic Manager",
+    "category": "azure"
+  },
+  "azure-virtual-machine": {
+    "local": "/icons/azure-virtual-machine.svg",
+    "label": "Virtual Machine",
+    "category": "azure"
+  },
+  "azure-virtual-networks": {
+    "local": "/icons/azure-virtual-networks.svg",
+    "label": "Virtual Network",
+    "category": "azure"
+  },
+  "azure-vm-scale-sets": {
+    "local": "/icons/azure-vm-scale-sets.svg",
+    "label": "VM Scale Sets",
+    "category": "azure"
+  },
+  "azure-vpn-gateway": {
+    "local": "/icons/azure-vpn-gateway.svg",
+    "label": "VPN Gateway",
+    "category": "azure"
+  },
+  "azure-waf": {
+    "local": "/icons/azure-waf.svg",
+    "label": "WAF",
+    "category": "azure"
+  },
+  "cache": {
+    "local": "/icons/cache.svg",
+    "label": "Cache",
+    "category": "general"
+  },
+  "cloud": {
+    "local": "/icons/cloud.svg",
+    "label": "Cloud",
+    "category": "general"
+  },
+  "consul": {
+    "local": "/icons/consul.svg",
+    "label": "Consul",
+    "category": "tech"
+  },
+  "container": {
+    "local": "/icons/container.svg",
+    "label": "Container",
+    "category": "general"
+  },
+  "database": {
+    "local": "/icons/database.svg",
+    "label": "Database",
+    "category": "general"
+  },
+  "databricks": {
+    "local": "/icons/databricks.svg",
+    "label": "Databricks",
+    "category": "tech"
+  },
+  "desktop": {
+    "local": "/icons/desktop.svg",
+    "label": "Desktop",
+    "category": "general"
+  },
+  "docker": {
+    "local": "/icons/docker.svg",
+    "label": "Docker",
+    "category": "tech"
+  },
+  "dotnet": {
+    "local": "/icons/dotnet.svg",
+    "label": ".NET",
+    "category": "tech"
+  },
+  "elasticsearch": {
+    "local": "/icons/elasticsearch.svg",
+    "label": "Elasticsearch",
+    "category": "tech"
+  },
+  "email": {
+    "local": "/icons/email.svg",
+    "label": "Email",
+    "category": "general"
+  },
+  "envoy": {
+    "local": "/icons/envoy.svg",
+    "label": "Envoy",
+    "category": "tech"
+  },
+  "firewall": {
+    "local": "/icons/firewall.svg",
+    "label": "Firewall",
+    "category": "general"
+  },
+  "gcp": {
+    "local": "/icons/gcp.svg",
+    "label": "Google Cloud",
+    "category": "gcp"
+  },
+  "gcp-app-engine": {
+    "local": "/icons/gcp-app-engine.svg",
+    "label": "App Engine",
+    "category": "gcp"
+  },
+  "gcp-bigquery": {
+    "local": "/icons/gcp-bigquery.svg",
+    "label": "BigQuery",
+    "category": "gcp"
+  },
+  "gcp-cloud-armor": {
+    "local": "/icons/gcp-cloud-armor.svg",
+    "label": "Cloud Armor",
+    "category": "gcp"
+  },
+  "gcp-cloud-build": {
+    "local": "/icons/gcp-cloud-build.svg",
+    "label": "Cloud Build",
+    "category": "gcp"
+  },
+  "gcp-cloud-functions": {
+    "local": "/icons/gcp-cloud-functions.svg",
+    "label": "Cloud Functions",
+    "category": "gcp"
+  },
+  "gcp-cloud-logging": {
+    "local": "/icons/gcp-cloud-logging.svg",
+    "label": "Cloud Logging",
+    "category": "gcp"
+  },
+  "gcp-cloud-run": {
+    "local": "/icons/gcp-cloud-run.svg",
+    "label": "Cloud Run",
+    "category": "gcp"
   },
   "gcp-cloud-sql": {
     "local": "/icons/gcp-cloud-sql.svg",
@@ -539,19 +654,9 @@
     "label": "Cloud Storage",
     "category": "gcp"
   },
-  "gcp-bigquery": {
-    "local": "/icons/gcp-bigquery.svg",
-    "label": "BigQuery",
-    "category": "gcp"
-  },
-  "gcp-pubsub": {
-    "local": "/icons/gcp-pubsub.svg",
-    "label": "Pub/Sub",
-    "category": "gcp"
-  },
-  "gcp-cloud-functions": {
-    "local": "/icons/gcp-cloud-functions.svg",
-    "label": "Cloud Functions",
+  "gcp-compute-engine": {
+    "local": "/icons/gcp-compute-engine.svg",
+    "label": "Compute Engine",
     "category": "gcp"
   },
   "gcp-dataflow": {
@@ -559,44 +664,9 @@
     "label": "Dataflow",
     "category": "gcp"
   },
-  "gcp-cloud-logging": {
-    "local": "/icons/gcp-cloud-logging.svg",
-    "label": "Cloud Logging",
-    "category": "gcp"
-  },
-  "gcp-load-balancing": {
-    "local": "/icons/gcp-load-balancing.svg",
-    "label": "Load Balancing",
-    "category": "gcp"
-  },
-  "gcp-vpc": {
-    "local": "/icons/gcp-vpc.svg",
-    "label": "VPC",
-    "category": "gcp"
-  },
-  "gcp-iam": {
-    "local": "/icons/gcp-iam.svg",
-    "label": "IAM",
-    "category": "gcp"
-  },
-  "gcp-cloud-build": {
-    "local": "/icons/gcp-cloud-build.svg",
-    "label": "Cloud Build",
-    "category": "gcp"
-  },
-  "gcp-app-engine": {
-    "local": "/icons/gcp-app-engine.svg",
-    "label": "App Engine",
-    "category": "gcp"
-  },
   "gcp-firestore": {
     "local": "/icons/gcp-firestore.svg",
     "label": "Firestore",
-    "category": "gcp"
-  },
-  "gcp-spanner": {
-    "local": "/icons/gcp-spanner.svg",
-    "label": "Spanner",
     "category": "gcp"
   },
   "gcp-gke": {
@@ -604,39 +674,89 @@
     "label": "GKE",
     "category": "gcp"
   },
+  "gcp-iam": {
+    "local": "/icons/gcp-iam.svg",
+    "label": "IAM",
+    "category": "gcp"
+  },
+  "gcp-load-balancing": {
+    "local": "/icons/gcp-load-balancing.svg",
+    "label": "Load Balancing",
+    "category": "gcp"
+  },
   "gcp-memorystore": {
     "local": "/icons/gcp-memorystore.svg",
     "label": "Memorystore",
     "category": "gcp"
   },
-  "gcp-cloud-armor": {
-    "local": "/icons/gcp-cloud-armor.svg",
-    "label": "Cloud Armor",
+  "gcp-pubsub": {
+    "local": "/icons/gcp-pubsub.svg",
+    "label": "Pub/Sub",
     "category": "gcp"
+  },
+  "gcp-spanner": {
+    "local": "/icons/gcp-spanner.svg",
+    "label": "Spanner",
+    "category": "gcp"
+  },
+  "gcp-vpc": {
+    "local": "/icons/gcp-vpc.svg",
+    "label": "VPC",
+    "category": "gcp"
+  },
+  "github": {
+    "local": "/icons/github.svg",
+    "label": "GitHub",
+    "category": "tech"
+  },
+  "gitlab": {
+    "local": "/icons/gitlab.svg",
+    "label": "GitLab",
+    "category": "tech"
+  },
+  "go": {
+    "local": "/icons/go.svg",
+    "label": "Go",
+    "category": "tech"
+  },
+  "grafana": {
+    "local": "/icons/grafana.svg",
+    "label": "Grafana",
+    "category": "tech"
+  },
+  "graphql": {
+    "local": "/icons/graphql.svg",
+    "label": "GraphQL",
+    "category": "tech"
+  },
+  "helm": {
+    "local": "/icons/helm.svg",
+    "label": "Helm",
+    "category": "tech"
+  },
+  "internet": {
+    "local": "/icons/internet.svg",
+    "label": "Internet",
+    "category": "general"
+  },
+  "istio": {
+    "local": "/icons/istio.svg",
+    "label": "Istio",
+    "category": "tech"
+  },
+  "java": {
+    "local": "/icons/java.svg",
+    "label": "Java",
+    "category": "tech"
+  },
+  "jenkins": {
+    "local": "/icons/jenkins.svg",
+    "label": "Jenkins",
+    "category": "tech"
   },
   "k8s": {
     "local": "/icons/k8s.svg",
     "label": "Kubernetes",
-    "category": "kubernetes"
-  },
-  "k8s-deployment": {
-    "local": "/icons/k8s-deployment.svg",
-    "label": "Deployment",
-    "category": "kubernetes"
-  },
-  "k8s-service": {
-    "local": "/icons/k8s-service.svg",
-    "label": "Service",
-    "category": "kubernetes"
-  },
-  "k8s-ingress": {
-    "local": "/icons/k8s-ingress.svg",
-    "label": "Ingress",
-    "category": "kubernetes"
-  },
-  "k8s-pod": {
-    "local": "/icons/k8s-pod.svg",
-    "label": "Pod",
     "category": "kubernetes"
   },
   "k8s-configmap": {
@@ -644,14 +764,29 @@
     "label": "ConfigMap",
     "category": "kubernetes"
   },
-  "gcp-cloud-run": {
-    "local": "/icons/gcp-cloud-run.svg",
-    "label": "Cloud Run",
-    "category": "gcp"
+  "k8s-cronjob": {
+    "local": "/icons/k8s-cronjob.svg",
+    "label": "CronJob",
+    "category": "kubernetes"
   },
-  "k8s-secret": {
-    "local": "/icons/k8s-secret.svg",
-    "label": "Secret",
+  "k8s-daemonset": {
+    "local": "/icons/k8s-daemonset.svg",
+    "label": "DaemonSet",
+    "category": "kubernetes"
+  },
+  "k8s-deployment": {
+    "local": "/icons/k8s-deployment.svg",
+    "label": "Deployment",
+    "category": "kubernetes"
+  },
+  "k8s-hpa": {
+    "local": "/icons/k8s-hpa.svg",
+    "label": "HPA",
+    "category": "kubernetes"
+  },
+  "k8s-ingress": {
+    "local": "/icons/k8s-ingress.svg",
+    "label": "Ingress",
     "category": "kubernetes"
   },
   "k8s-namespace": {
@@ -664,19 +799,9 @@
     "label": "Node",
     "category": "kubernetes"
   },
-  "k8s-daemonset": {
-    "local": "/icons/k8s-daemonset.svg",
-    "label": "DaemonSet",
-    "category": "kubernetes"
-  },
-  "k8s-statefulset": {
-    "local": "/icons/k8s-statefulset.svg",
-    "label": "StatefulSet",
-    "category": "kubernetes"
-  },
-  "k8s-hpa": {
-    "local": "/icons/k8s-hpa.svg",
-    "label": "HPA",
+  "k8s-pod": {
+    "local": "/icons/k8s-pod.svg",
+    "label": "Pod",
     "category": "kubernetes"
   },
   "k8s-pv": {
@@ -684,34 +809,54 @@
     "label": "PersistentVolume",
     "category": "kubernetes"
   },
-  "k8s-cronjob": {
-    "local": "/icons/k8s-cronjob.svg",
-    "label": "CronJob",
+  "k8s-secret": {
+    "local": "/icons/k8s-secret.svg",
+    "label": "Secret",
     "category": "kubernetes"
   },
-  "docker": {
-    "local": "/icons/docker.svg",
-    "label": "Docker",
+  "k8s-service": {
+    "local": "/icons/k8s-service.svg",
+    "label": "Service",
+    "category": "kubernetes"
+  },
+  "k8s-statefulset": {
+    "local": "/icons/k8s-statefulset.svg",
+    "label": "StatefulSet",
+    "category": "kubernetes"
+  },
+  "kafka": {
+    "local": "/icons/kafka.svg",
+    "label": "Kafka",
     "category": "tech"
   },
-  "terraform": {
-    "local": "/icons/terraform.svg",
-    "label": "Terraform",
+  "load-balancer": {
+    "local": "/icons/load-balancer.svg",
+    "label": "Load Balancer",
+    "category": "general"
+  },
+  "lock": {
+    "local": "/icons/lock.svg",
+    "label": "Lock",
+    "category": "general"
+  },
+  "mobile": {
+    "local": "/icons/mobile.svg",
+    "label": "Mobile",
+    "category": "general"
+  },
+  "mongodb": {
+    "local": "/icons/mongodb.svg",
+    "label": "MongoDB",
     "category": "tech"
   },
-  "github": {
-    "local": "/icons/github.svg",
-    "label": "GitHub",
-    "category": "tech"
+  "monitor": {
+    "local": "/icons/monitor.svg",
+    "label": "Monitor",
+    "category": "general"
   },
-  "ansible": {
-    "local": "/icons/ansible.svg",
-    "label": "Ansible",
-    "category": "tech"
-  },
-  "gitlab": {
-    "local": "/icons/gitlab.svg",
-    "label": "GitLab",
+  "mysql": {
+    "local": "/icons/mysql.svg",
+    "label": "MySQL",
     "category": "tech"
   },
   "nginx": {
@@ -719,69 +864,19 @@
     "label": "Nginx",
     "category": "tech"
   },
-  "jenkins": {
-    "local": "/icons/jenkins.svg",
-    "label": "Jenkins",
-    "category": "tech"
-  },
-  "redis": {
-    "local": "/icons/redis.svg",
-    "label": "Redis",
-    "category": "tech"
-  },
-  "postgresql": {
-    "local": "/icons/postgresql.svg",
-    "label": "PostgreSQL",
-    "category": "tech"
-  },
-  "mongodb": {
-    "local": "/icons/mongodb.svg",
-    "label": "MongoDB",
-    "category": "tech"
-  },
-  "mysql": {
-    "local": "/icons/mysql.svg",
-    "label": "MySQL",
-    "category": "tech"
-  },
-  "elasticsearch": {
-    "local": "/icons/elasticsearch.svg",
-    "label": "Elasticsearch",
-    "category": "tech"
-  },
   "nodejs": {
     "local": "/icons/nodejs.svg",
     "label": "Node.js",
     "category": "tech"
   },
-  "python": {
-    "local": "/icons/python.svg",
-    "label": "Python",
-    "category": "tech"
+  "notification": {
+    "local": "/icons/notification.svg",
+    "label": "Notification",
+    "category": "general"
   },
-  "kafka": {
-    "local": "/icons/kafka.svg",
-    "label": "Kafka",
-    "category": "tech"
-  },
-  "go": {
-    "local": "/icons/go.svg",
-    "label": "Go",
-    "category": "tech"
-  },
-  "rabbitmq": {
-    "local": "/icons/rabbitmq.svg",
-    "label": "RabbitMQ",
-    "category": "tech"
-  },
-  "graphql": {
-    "local": "/icons/graphql.svg",
-    "label": "GraphQL",
-    "category": "tech"
-  },
-  "java": {
-    "local": "/icons/java.svg",
-    "label": "Java",
+  "postgresql": {
+    "local": "/icons/postgresql.svg",
+    "label": "PostgreSQL",
     "category": "tech"
   },
   "prometheus": {
@@ -789,50 +884,35 @@
     "label": "Prometheus",
     "category": "tech"
   },
-  "dotnet": {
-    "local": "/icons/dotnet.svg",
-    "label": ".NET",
+  "python": {
+    "local": "/icons/python.svg",
+    "label": "Python",
     "category": "tech"
   },
-  "grafana": {
-    "local": "/icons/grafana.svg",
-    "label": "Grafana",
+  "queue": {
+    "local": "/icons/queue.svg",
+    "label": "Queue",
+    "category": "general"
+  },
+  "rabbitmq": {
+    "local": "/icons/rabbitmq.svg",
+    "label": "RabbitMQ",
     "category": "tech"
   },
-  "vault": {
-    "local": "/icons/vault.svg",
-    "label": "Vault",
+  "redis": {
+    "local": "/icons/redis.svg",
+    "label": "Redis",
     "category": "tech"
   },
-  "envoy": {
-    "local": "/icons/envoy.svg",
-    "label": "Envoy",
-    "category": "tech"
+  "server": {
+    "local": "/icons/server.svg",
+    "label": "Server",
+    "category": "general"
   },
-  "consul": {
-    "local": "/icons/consul.svg",
-    "label": "Consul",
-    "category": "tech"
-  },
-  "istio": {
-    "local": "/icons/istio.svg",
-    "label": "Istio",
-    "category": "tech"
-  },
-  "argocd": {
-    "local": "/icons/argocd.svg",
-    "label": "Argo CD",
-    "category": "tech"
-  },
-  "databricks": {
-    "local": "/icons/databricks.svg",
-    "label": "Databricks",
-    "category": "tech"
-  },
-  "helm": {
-    "local": "/icons/helm.svg",
-    "label": "Helm",
-    "category": "tech"
+  "settings": {
+    "local": "/icons/settings.svg",
+    "label": "Settings",
+    "category": "general"
   },
   "snowflake": {
     "local": "/icons/snowflake.svg",
@@ -844,24 +924,9 @@
     "label": "Spark",
     "category": "tech"
   },
-  "user": {
-    "local": "/icons/user.svg",
-    "label": "User",
-    "category": "general"
-  },
-  "airflow": {
-    "local": "/icons/airflow.svg",
-    "label": "Airflow",
-    "category": "tech"
-  },
-  "users": {
-    "local": "/icons/users.svg",
-    "label": "Users",
-    "category": "general"
-  },
-  "server": {
-    "local": "/icons/server.svg",
-    "label": "Server",
+  "storage": {
+    "local": "/icons/storage.svg",
+    "label": "Storage",
     "category": "general"
   },
   "tensorflow": {
@@ -869,89 +934,24 @@
     "label": "TensorFlow",
     "category": "tech"
   },
-  "internet": {
-    "local": "/icons/internet.svg",
-    "label": "Internet",
+  "terraform": {
+    "local": "/icons/terraform.svg",
+    "label": "Terraform",
+    "category": "tech"
+  },
+  "user": {
+    "local": "/icons/user.svg",
+    "label": "User",
     "category": "general"
   },
-  "firewall": {
-    "local": "/icons/firewall.svg",
-    "label": "Firewall",
+  "users": {
+    "local": "/icons/users.svg",
+    "label": "Users",
     "category": "general"
   },
-  "lock": {
-    "local": "/icons/lock.svg",
-    "label": "Lock",
-    "category": "general"
-  },
-  "monitor": {
-    "local": "/icons/monitor.svg",
-    "label": "Monitor",
-    "category": "general"
-  },
-  "cloud": {
-    "local": "/icons/cloud.svg",
-    "label": "Cloud",
-    "category": "general"
-  },
-  "database": {
-    "local": "/icons/database.svg",
-    "label": "Database",
-    "category": "general"
-  },
-  "settings": {
-    "local": "/icons/settings.svg",
-    "label": "Settings",
-    "category": "general"
-  },
-  "api": {
-    "local": "/icons/api.svg",
-    "label": "API",
-    "category": "general"
-  },
-  "mobile": {
-    "local": "/icons/mobile.svg",
-    "label": "Mobile",
-    "category": "general"
-  },
-  "email": {
-    "local": "/icons/email.svg",
-    "label": "Email",
-    "category": "general"
-  },
-  "load-balancer": {
-    "local": "/icons/load-balancer.svg",
-    "label": "Load Balancer",
-    "category": "general"
-  },
-  "queue": {
-    "local": "/icons/queue.svg",
-    "label": "Queue",
-    "category": "general"
-  },
-  "notification": {
-    "local": "/icons/notification.svg",
-    "label": "Notification",
-    "category": "general"
-  },
-  "desktop": {
-    "local": "/icons/desktop.svg",
-    "label": "Desktop",
-    "category": "general"
-  },
-  "storage": {
-    "local": "/icons/storage.svg",
-    "label": "Storage",
-    "category": "general"
-  },
-  "cache": {
-    "local": "/icons/cache.svg",
-    "label": "Cache",
-    "category": "general"
-  },
-  "container": {
-    "local": "/icons/container.svg",
-    "label": "Container",
-    "category": "general"
+  "vault": {
+    "local": "/icons/vault.svg",
+    "label": "Vault",
+    "category": "tech"
   }
 }
