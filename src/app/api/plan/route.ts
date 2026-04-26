@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
-import { getModelConfig } from "@/lib/models";
+import { getModelConfig, getModelByRole } from "@/lib/models";
+import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
@@ -152,8 +153,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use gpt-5.2-chat for architecture planning (thinking model, best reasoning)
-    const modelId = requestedModel || "gpt-5.2-chat";
+    // Use requested model or planner default
+    const modelId = requestedModel || getModelByRole('planner').id;
     const modelConfig = getModelConfig(modelId);
 
     const userContent = analysis
@@ -165,18 +166,7 @@ export async function POST(request: NextRequest) {
       { role: "user", content: userContent },
     ];
 
-    const baseEndpoint = AZURE_ENDPOINT.trim().replace(/\/+$/, "");
-    let apiUrl: string;
-
-    if (baseEndpoint.includes(".openai.azure.com")) {
-      const base = baseEndpoint.replace(/\/openai\/.*$/, "");
-      apiUrl = `${base}/openai/deployments/${modelId}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else if (baseEndpoint.includes("services.ai.azure.com")) {
-      const base = baseEndpoint.replace(/\/models\/?$/, "").replace(/\/api\/projects\/.*$/, "");
-      apiUrl = `${base}/models/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else {
-      apiUrl = `${baseEndpoint}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    }
+    const apiUrl = buildChatCompletionsUrl(modelId, modelConfig.apiVersion);
 
     console.log(`Architecture planning [${modelId}]:`, apiUrl);
 
