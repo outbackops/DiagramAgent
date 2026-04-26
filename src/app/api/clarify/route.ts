@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
         id: q.id || `q${i + 1}`,
         question: String(q.question || ""),
         rationale: q.rationale ? String(q.rationale) : undefined,
-        type: ["single", "multi", "freetext"].includes(q.type) ? q.type : "single",
+        type: ["single", "multi"].includes(q.type) ? q.type : "single",
         options: Array.isArray(q.options)
           ? q.options.map((o: any) => ({
               label: String(o.label || ""),
