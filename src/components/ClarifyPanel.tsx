@@ -6,7 +6,7 @@ export interface ClarifyQuestion {
   id: string;
   question: string;
   rationale?: string;
-  type: "single" | "multi" | "freetext";
+  type: "single" | "multi";
   options: { label: string; value: string }[];
 }
 
@@ -68,10 +68,6 @@ export default function ClarifyPanel({
 
   const handleOtherText = useCallback((qId: string, text: string) => {
     setOtherTexts((prev) => ({ ...prev, [qId]: text }));
-  }, []);
-
-  const handleFreetext = useCallback((qId: string, value: string) => {
-    setAnswers((prev) => ({ ...prev, [qId]: value }));
   }, []);
 
   const handleSubmit = useCallback(() => {
@@ -201,16 +197,6 @@ export default function ClarifyPanel({
               </div>
             )}
 
-            {q.type === "freetext" && (
-              <input
-                type="text"
-                value={(answers[q.id] as string) || ""}
-                onChange={(e) => handleFreetext(q.id, e.target.value)}
-                placeholder="Type your answer..."
-                disabled={isSubmitting}
-                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-              />
-            )}
           </div>
         ))}
       </div>
