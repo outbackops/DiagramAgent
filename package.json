@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest"
+    "test": "vitest",
+    "vendor:icons": "tsx scripts/vendor-icons.ts",
+    "prebuild": "npm run vendor:icons"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
@@ -29,6 +31,7 @@
     "eslint-config-next": "16.1.6",
     "jsdom": "^29.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.1"
   }
