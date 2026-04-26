@@ -34,10 +34,12 @@ interface RefinementStatus {
 }
 
 const MAX_REFINE_ITERATIONS = 3;
+const useRefinementGuard = true;
 
 export default function Home() {
   const [d2Code, setD2Code] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [selectedModel, setSelectedModel] = useState("gpt-5.2-chat");
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -216,6 +218,7 @@ export default function Home() {
       abortRef.current = controller;
 
       setIsGenerating(true);
+      setGenerationError(null);
       if (!existingCode) setD2Code("");
       // Clear any lingering done-status timer
       if (doneTimerRef.current) {
@@ -264,6 +267,13 @@ export default function Home() {
         }
 
         // Step 2: Iterative refinement loop
+        // Regression guard: track the best candidate across iterations
+        let bestCode = currentCode;
+        let _bestSvg = "";
+        let bestScore = -1;
+        let _bestAssessment: { score: number; pass: boolean } | null = null;
+        let consecutiveNonImproving = 0;
+
         for (let i = 0; i < maxIterations; i++) {
           if (controller.signal.aborted) break;
 
@@ -280,20 +290,23 @@ export default function Home() {
           try {
             svg = await renderToSvg(currentCode);
             console.log(`[Client] Render complete, length: ${svg?.length}`);
-          } catch (renderErr: any) {
+          } catch (renderErr: unknown) {
+            const errMsg = renderErr instanceof Error ? renderErr.message : String(renderErr);
             console.error("[Client] Render error:", renderErr);
-            // If render fails, the code has syntax errors — ask the model to fix
+            setGenerationError(`Render error: ${errMsg}`);
             setRefinementStatus({
               phase: "refining",
               iteration: i + 1,
               maxIterations: maxIterations,
-              issues: [`Render error: ${renderErr.message}`],
+              issues: [`Render error: ${errMsg}`],
             });
 
-            const fixPrompt = `The D2 code has a rendering error: "${renderErr.message}". Fix the D2 syntax while keeping the architecture intact. Output the COMPLETE corrected D2 code.`;
+            const fixPrompt = `The D2 code has a rendering error: "${errMsg}". Fix the D2 syntax while keeping the architecture intact. Output the COMPLETE corrected D2 code.`;
             currentCode = await streamGenerate(fixPrompt, currentCode, [], controller.signal);
             continue;
           }
+
+          setGenerationError(null);
 
           if (controller.signal.aborted) break;
 
@@ -316,8 +329,10 @@ export default function Home() {
           };
           try {
             assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
-          } catch (assessErr: any) {
-            console.warn("Assessment failed, skipping:", assessErr.message);
+          } catch (assessErr: unknown) {
+            const errMsg = assessErr instanceof Error ? assessErr.message : String(assessErr);
+            console.warn("Assessment failed, skipping:", errMsg);
+            setGenerationError(`Assessment failed: ${errMsg}`);
             break;
           }
 
@@ -329,21 +344,43 @@ export default function Home() {
             issues: assessment.issues || assessment.layout_issues || [],
           });
 
+          // Track best candidate (regression guard)
+          if (useRefinementGuard) {
+            if (assessment.score > bestScore) {
+              bestCode = currentCode;
+              _bestSvg = svg;
+              bestScore = assessment.score;
+              _bestAssessment = assessment;
+              consecutiveNonImproving = 0;
+            } else if (assessment.score < bestScore + 1) {
+              consecutiveNonImproving++;
+            }
+          }
+
           // 2c: If passing, we're done
           if (assessment.pass) {
+            const finalCode = useRefinementGuard && bestScore > assessment.score ? bestCode : currentCode;
+            const finalScore = useRefinementGuard && bestScore > assessment.score ? bestScore : assessment.score;
+            setD2Code(finalCode);
             setChatMessages((prev) => [
               ...prev,
               {
                 role: "assistant",
-                content: `Diagram generated and verified (score: ${assessment.score}/10 after ${i + 1} iteration${i > 0 ? "s" : ""}).`,
+                content: `Diagram generated and verified (score: ${finalScore}/10 after ${i + 1} iteration${i > 0 ? "s" : ""}).`,
               },
             ]);
-            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: maxIterations, score: assessment.score });
+            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: maxIterations, score: finalScore });
             doneTimerRef.current = setTimeout(() => {
               setRefinementStatus(null);
               doneTimerRef.current = null;
             }, 4000);
             return;
+          }
+
+          // Early stop: 2 consecutive non-improving rounds
+          if (useRefinementGuard && consecutiveNonImproving >= 2) {
+            console.log(`[Client] Early stop: 2 consecutive non-improving rounds. Best score: ${bestScore}`);
+            break;
           }
 
           if (controller.signal.aborted) break;
@@ -378,24 +415,35 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
           currentCode = await streamGenerate(refinePrompt, currentCode, [], controller.signal);
         }
 
-        // Exhausted iterations
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `Diagram generated with ${maxIterations} refinement iterations.`,
-          },
-        ]);
-        setRefinementStatus(null);
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
-          console.error("Generation error:", err);
-          setD2Code(
-            `# Error: ${err.message}\n# Please check your Azure AI Foundry configuration.`
-          );
+        // Exhausted iterations or early stop — commit best candidate if guard is on
+        if (useRefinementGuard && bestScore >= 0) {
+          setD2Code(bestCode);
           setChatMessages((prev) => [
             ...prev,
-            { role: "assistant", content: `Error: ${err.message}` },
+            {
+              role: "assistant",
+              content: `Diagram generated — best candidate (score: ${bestScore}/10) from ${maxIterations} refinement iterations.`,
+            },
+          ]);
+        } else {
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `Diagram generated with ${maxIterations} refinement iterations.`,
+            },
+          ]);
+        }
+        setRefinementStatus(null);
+      } catch (err: unknown) {
+        const isAbort = err instanceof Error && err.name === "AbortError";
+        if (!isAbort) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error("Generation error:", err);
+          setGenerationError(errMsg);
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `⚠️ Error: ${errMsg}` },
           ]);
         }
         setRefinementStatus(null);
@@ -712,6 +760,7 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
     setSelectedElement(null);
     setConnectMode(false);
     setConnectSource(null);
+    setGenerationError(null);
   }, []);
 
   return (
@@ -826,7 +875,10 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
         {/* Chat Panel */}
         <div className="w-1/4 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col min-w-[280px]">
           <ChatPanel
-            messages={chatMessages}
+            messages={generationError
+              ? [...chatMessages, { role: "assistant" as const, content: `⚠️ ${generationError}` }]
+              : chatMessages
+            }
             onSend={handleSend}
             onNewDiagram={handleNewDiagram}
             isGenerating={isGenerating}
