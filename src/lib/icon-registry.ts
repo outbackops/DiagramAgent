@@ -219,9 +219,43 @@ export const iconRegistry: Record<string, IconEntry> = {
   "container": { url: `${ICONIFY_MDI}/package-variant-closed.svg?color=%23666`, label: "Container", category: "general" },
 };
 
-// Resolve an icon key to a URL, returning undefined if not found
+// Resolve an icon key to a URL.
+// Prefers vendored local copy under /icons/ when the build has run
+// `npm run vendor:icons` (manifest at public/icons/manifest.json).
+// Falls back to the upstream CDN URL when the icon is not vendored,
+// which keeps the registry usable in dev without a vendor pass.
 export function resolveIconUrl(key: string): string | undefined {
+  if (vendoredIconKeys.has(key)) {
+    return `/icons/${key}.svg`;
+  }
   return iconRegistry[key]?.url;
+}
+
+/**
+ * Set of icon keys present in public/icons/manifest.json. Loaded once at
+ * module init in Node; on the client this is statically inlined as an
+ * empty set (the renderer is server-side, so this branch is never reached
+ * in a browser).
+ */
+let vendoredIconKeys: Set<string> = new Set();
+
+if (typeof process !== "undefined" && process.versions?.node) {
+  // Server-side only — load manifest from disk synchronously at module init.
+  // ESM dynamic-importing fs synchronously isn't possible; require is fine
+  // here because Next.js bundles this file for the Node runtime.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require("node:path");
+    const manifestPath = path.join(process.cwd(), "public", "icons", "manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+      vendoredIconKeys = new Set(Object.keys(manifest));
+    }
+  } catch {
+    // best-effort: missing manifest just means we fall through to CDN URLs
+  }
 }
 
 // Get all available icon keys
