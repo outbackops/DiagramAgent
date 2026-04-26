@@ -39,7 +39,6 @@ export default function ElementEditor({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEditingLabel(false);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLabelValue(selected?.label || "");
   }, [selected]);
 

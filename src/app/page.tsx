@@ -19,6 +19,7 @@ import {
 import { analyzeD2Code } from "@/lib/d2-analyzer";
 import { hashSvg } from "@/lib/svg-hash";
 import { planToD2Scaffold } from "@/lib/plan-to-d2";
+import { usePersistedState } from "@/lib/use-persisted-state";
 
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
@@ -42,14 +43,34 @@ const MAX_REFINE_ITERATIONS = 3;
 const useRefinementGuard = true;
 
 export default function Home() {
-  const [d2Code, setD2Code] = useState("");
+  // Persisted state — survives page reloads via localStorage. Keys are namespaced
+  // under "diagramAgent." so a future migration can find/clean them as a group.
+  const [d2Code, setD2Code] = usePersistedState<string>("diagramAgent.d2Code", "");
+  const [chatMessages, setChatMessages] = usePersistedState<ChatMessage[]>(
+    "diagramAgent.chatMessages",
+    [],
+    { validate: (v): v is ChatMessage[] => Array.isArray(v) },
+  );
+  const [selectedModel, setSelectedModel] = usePersistedState<string>(
+    "diagramAgent.selectedModel",
+    "gpt-5.2-chat",
+    { validate: (v): v is string => typeof v === "string" },
+  );
+  const [autoRefine, setAutoRefine] = usePersistedState<boolean>(
+    "diagramAgent.autoRefine",
+    true,
+    { validate: (v): v is boolean => typeof v === "boolean" },
+  );
+  const [maxIterations, setMaxIterations] = usePersistedState<number>(
+    "diagramAgent.maxIterations",
+    1,
+    { validate: (v): v is number => typeof v === "number" && v >= 1 && v <= MAX_REFINE_ITERATIONS },
+  );
+
+  // Transient state — not persisted (network, generation lifecycle, UI focus).
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [selectedModel, setSelectedModel] = useState("gpt-5.2-chat");
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [autoRefine, setAutoRefine] = useState(true);
-  const [maxIterations, setMaxIterations] = useState(1);
   const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
