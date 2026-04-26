@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { errorMessage } from "@/lib/error-message";
 import { d2ToVsdx } from "@/lib/d2-to-vsdx";
 
 /**
@@ -29,10 +30,10 @@ export async function POST(request: NextRequest) {
         "Content-Length": String(vsdxBuffer.length),
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Visio export error:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Failed to export Visio file" }),
+      JSON.stringify({ error: errorMessage(error) || "Failed to export Visio file" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

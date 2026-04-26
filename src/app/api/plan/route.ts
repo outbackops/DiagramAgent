@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { errorMessage } from "@/lib/error-message";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { getModelConfig, getModelByRole, getRoleTokenLimit } from "@/lib/models";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
@@ -221,10 +222,10 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ plan: result.data }), {
       headers: { "Content-Type": "application/json" },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Plan API error:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Internal server error" }),
+      JSON.stringify({ error: errorMessage(error) || "Internal server error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

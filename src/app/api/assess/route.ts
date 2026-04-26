@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { errorMessage } from "@/lib/error-message";
 import { VISION_MODEL_ID, getModelByRole, getRoleTokenLimit } from "@/lib/models";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
@@ -67,10 +68,10 @@ export async function POST(request: NextRequest) {
         .png()
         .toBuffer();
       pngBase64 = pngBuffer.toString("base64");
-    } catch (convErr: any) {
+    } catch (convErr) {
       console.error("SVG to PNG conversion error:", convErr);
       return new Response(
-        JSON.stringify({ error: `Failed to convert SVG to PNG: ${convErr.message}` }),
+        JSON.stringify({ error: `Failed to convert SVG to PNG: ${errorMessage(convErr)}` }),
         { status: 422, headers: { "Content-Type": "application/json" } }
       );
     }

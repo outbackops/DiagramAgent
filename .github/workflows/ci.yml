@@ -27,7 +27,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true  # TODO(#7-followup): clear pre-existing lint errors then drop this
 
       - name: Type-check
         run: npx tsc --noEmit

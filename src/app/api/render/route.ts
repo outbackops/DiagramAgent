@@ -1,18 +1,33 @@
 import { NextRequest } from "next/server";
 import { resolveIconsInD2Code } from "@/lib/icon-registry";
 import { convertConnectionsToOrthogonal } from "@/lib/svg-orthogonal";
+import { errorMessage as toErrorMessage } from "@/lib/error-message";
 
-let d2Instance: any = null;
-let d2InitPromise: Promise<any> | null = null;
+// Narrow structural typing for the parts of the D2 API we actually use,
+// without trying to mirror the upstream type surface (which is large and
+// not stable across versions).
+type D2Like = {
+  compile: (code: string, opts: { layout: string; sketch: boolean; pad: number }) => Promise<{
+    diagram: unknown;
+    renderOptions: Record<string, unknown>;
+  }>;
+  render: (diagram: unknown, opts: Record<string, unknown>) => Promise<string>;
+};
 
-async function getD2(): Promise<any> {
+let d2Instance: D2Like | null = null;
+let d2InitPromise: Promise<D2Like> | null = null;
+
+async function getD2(): Promise<D2Like> {
   if (d2Instance) return d2Instance;
   if (d2InitPromise) return d2InitPromise;
 
   d2InitPromise = (async () => {
     const { D2 } = await import("@terrastruct/d2");
-    d2Instance = new D2();
-    return d2Instance;
+    // The upstream constructor signature is broader than D2Like; we narrow
+    // it via an unknown bounce so the assignment is explicit.
+    const inst = new D2() as unknown as D2Like;
+    d2Instance = inst;
+    return inst;
   })();
 
   return d2InitPromise;
@@ -54,22 +69,22 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ svg: processedSvg }), {
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("D2 render error:", err);
 
     // Try to extract useful error message
-    let errorMessage = err?.message || "Failed to render diagram";
+    let errorText = toErrorMessage(err) || "Failed to render diagram";
     try {
-      const parsed = JSON.parse(errorMessage);
+      const parsed = JSON.parse(errorText);
       if (Array.isArray(parsed) && parsed[0]?.errmsg) {
-        errorMessage = parsed.map((e: any) => e.errmsg).join("\n");
+        errorText = parsed.map((e: { errmsg?: string }) => e.errmsg ?? "").join("\n");
       }
     } catch {
       // keep original message
     }
 
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: errorText }),
       { status: 422, headers: { "Content-Type": "application/json" } }
     );
   }

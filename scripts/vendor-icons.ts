@@ -96,13 +96,14 @@ async function main() {
   const ok = results.filter((r) => r.ok);
   const failed = results.filter((r) => !r.ok);
 
-  // Manifest: which keys have a local file
+  // Manifest: which keys have a local file (sorted for deterministic output)
   const manifest: Record<string, { local: string; label: string; category: string }> = {};
-  for (const r of ok) {
-    const entry = iconRegistry[r.key];
+  for (const key of Object.keys(iconRegistry).sort()) {
+    const entry = iconRegistry[key];
     if (!entry) continue;
-    manifest[r.key] = {
-      local: `/icons/${r.key}.svg`,
+    if (!ok.find((r) => r.key === key)) continue;
+    manifest[key] = {
+      local: `/icons/${key}.svg`,
       label: entry.label,
       category: entry.category,
     };
