@@ -96,6 +96,33 @@ const ROLE_ENV_KEYS: Record<ModelRole, string> = {
   judge: 'MODEL_JUDGE',
 };
 
+/**
+ * Per-role completion-token budgets. These were previously hardcoded inline
+ * in each route (clarify=4000, plan=8000, assess=4000), making model-config
+ * drift invisible. Centralised here so the budget travels with the role.
+ *
+ * Generator uses the model's own `maxTokens` because it streams long D2 code;
+ * the other roles return small structured JSON and need much less.
+ */
+export const ROLE_TOKEN_LIMITS: Record<ModelRole, number> = {
+  generator: 0, // sentinel — generator uses ModelConfig.maxTokens
+  clarifier: 4000,
+  planner: 8000,
+  judge: 4000,
+};
+
+/**
+ * Returns the completion-token budget for a role. For 'generator' this falls
+ * back to the resolved model's own maxTokens (since generator streams long
+ * D2 code).
+ */
+export function getRoleTokenLimit(role: ModelRole): number {
+  if (role === 'generator') {
+    return getModelByRole('generator').maxTokens;
+  }
+  return ROLE_TOKEN_LIMITS[role];
+}
+
 const warnedEnvKeys = new Set<string>();
 
 export function getModelByRole(role: ModelRole): ModelConfig {

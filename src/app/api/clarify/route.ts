@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
-import { getModelByRole } from "@/lib/models";
+import { getModelByRole, getRoleTokenLimit } from "@/lib/models";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 import { ClarifyResponseSchema, parseLlmJson } from "@/lib/llm-schemas";
 
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
     const requestBody = {
       model: modelId,
       messages,
-      max_completion_tokens: 4000,
+      max_completion_tokens: getRoleTokenLimit('clarifier'),
     };
 
     const response = await fetch(apiUrl, {
