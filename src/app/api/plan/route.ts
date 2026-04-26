@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
-import { getModelConfig, getModelByRole } from "@/lib/models";
+import { getModelConfig, getModelByRole, getRoleTokenLimit } from "@/lib/models";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 import { PlanSchema, parseLlmJson } from "@/lib/llm-schemas";
 
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
     const requestBody: Record<string, unknown> = {
       model: modelId,
       messages,
-      max_completion_tokens: 8000,
+      max_completion_tokens: getRoleTokenLimit('planner'),
     };
 
     if (modelConfig.supportsTemperature) {

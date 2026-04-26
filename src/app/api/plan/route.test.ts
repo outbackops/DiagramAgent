@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { stubAzureFetch, stubAzureError, makeJsonRequest } from "../_test-helpers";
+import { getRoleTokenLimit } from "@/lib/models";
 
 vi.mock("@/lib/azure-auth", () => ({
   getAzureEndpoint: () => "https://test-endpoint.openai.azure.com",
@@ -53,7 +54,7 @@ describe("POST /api/plan", () => {
     const sent = fetchSpy.lastBody();
     expect(sent).toMatchObject({
       messages: expect.any(Array),
-      max_completion_tokens: 8000,
+      max_completion_tokens: getRoleTokenLimit("planner"),
     });
     const messages = sent.messages as Array<{ role: string; content: string }>;
     expect(messages[1].content).toContain("HA Azure SQL setup");

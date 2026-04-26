@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { VISION_MODEL_ID, getModelByRole } from "@/lib/models";
+import { VISION_MODEL_ID, getModelByRole, getRoleTokenLimit } from "@/lib/models";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 import { AssessmentSchema, parseLlmJson, ASSESS_PASS_THRESHOLD } from "@/lib/llm-schemas";
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     const requestBody: Record<string, unknown> = {
       model: VISION_MODEL_ID,
       messages,
-      max_completion_tokens: 4000,
+      max_completion_tokens: getRoleTokenLimit('judge'),
     };
 
     // Only set temperature for models that support it

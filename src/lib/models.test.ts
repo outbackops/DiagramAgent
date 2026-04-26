@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getModelByRole, VISION_MODEL_ID, AVAILABLE_MODELS } from "./models";
+import { getModelByRole, getRoleTokenLimit, VISION_MODEL_ID, AVAILABLE_MODELS, ROLE_TOKEN_LIMITS } from "./models";
 
 describe("getModelByRole", () => {
   const ENV_KEYS = ["MODEL_GENERATOR", "MODEL_CLARIFIER", "MODEL_PLANNER", "MODEL_JUDGE"];
@@ -53,5 +53,28 @@ describe("getModelByRole", () => {
     const ids = AVAILABLE_MODELS.map((m) => m.id);
     expect(ids).toContain("gpt-5.2-chat");
     expect(ids).toContain("gpt-4o");
+  });
+});
+
+describe("getRoleTokenLimit", () => {
+  it("returns the static budget for non-generator roles", () => {
+    expect(getRoleTokenLimit("clarifier")).toBe(ROLE_TOKEN_LIMITS.clarifier);
+    expect(getRoleTokenLimit("planner")).toBe(ROLE_TOKEN_LIMITS.planner);
+    expect(getRoleTokenLimit("judge")).toBe(ROLE_TOKEN_LIMITS.judge);
+  });
+
+  it("returns the resolved generator model's maxTokens for the generator role", () => {
+    const limit = getRoleTokenLimit("generator");
+    const generator = getModelByRole("generator");
+    expect(limit).toBe(generator.maxTokens);
+    expect(limit).toBeGreaterThan(0);
+  });
+
+  it("non-generator budgets are sane (positive, < 64k)", () => {
+    for (const role of ["clarifier", "planner", "judge"] as const) {
+      const v = getRoleTokenLimit(role);
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThan(64_000);
+    }
   });
 });
