@@ -118,7 +118,17 @@ AZURE_AI_FOUNDRY_API_KEY=your-key-if-needed
 
 # Default model for diagram generation
 AZURE_AI_FOUNDRY_MODEL=gpt-5.2-chat
+
+# Role-based model overrides (optional)
+# MODEL_GENERATOR=gpt-5.2-chat
+# MODEL_CLARIFIER=gpt-5.2-chat
+# MODEL_PLANNER=gpt-5.2-chat
+# MODEL_JUDGE=gpt-4o
 ```
+
+> **Note:** The model selector in the UI controls the **generator** role only.
+> Clarifier, planner, and judge models are configured via the `MODEL_*` env vars above.
+> The judge defaults to `gpt-4o` (vision-capable) for diagram quality assessment.
 
 > **Note:** Key-based auth may be disabled on your Azure resource. The app uses `DefaultAzureCredential` from `@azure/identity`, which works with Azure CLI login, managed identities, and environment credentials.
 

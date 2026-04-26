@@ -10,9 +10,6 @@ export interface ModelConfig {
   supportsVision?: boolean;
 }
 
-// Vision model used for diagram assessment
-export const VISION_MODEL_ID = "gpt-5.2-chat";
-
 export const AVAILABLE_MODELS: ModelConfig[] = [
   {
     id: "gpt-5.2-chat",
@@ -80,3 +77,41 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
 export function getModelConfig(modelId: string): ModelConfig {
   return AVAILABLE_MODELS.find((m) => m.id === modelId) || AVAILABLE_MODELS[0];
 }
+
+// --- Role-based model resolution ---
+
+export type ModelRole = 'generator' | 'clarifier' | 'planner' | 'judge';
+
+const ROLE_DEFAULTS: Record<ModelRole, string> = {
+  generator: 'gpt-5.2-chat',
+  clarifier: 'gpt-5.2-chat',
+  planner: 'gpt-5.2-chat',
+  judge: 'gpt-4o',
+};
+
+const ROLE_ENV_KEYS: Record<ModelRole, string> = {
+  generator: 'MODEL_GENERATOR',
+  clarifier: 'MODEL_CLARIFIER',
+  planner: 'MODEL_PLANNER',
+  judge: 'MODEL_JUDGE',
+};
+
+const warnedEnvKeys = new Set<string>();
+
+export function getModelByRole(role: ModelRole): ModelConfig {
+  const envKey = ROLE_ENV_KEYS[role];
+  const envVal = process.env[envKey];
+  if (envVal) {
+    const found = AVAILABLE_MODELS.find((m) => m.id === envVal);
+    if (found) return found;
+    if (!warnedEnvKeys.has(envKey)) {
+      warnedEnvKeys.add(envKey);
+      console.warn(`${envKey}="${envVal}" is not a known model id; falling back to "${ROLE_DEFAULTS[role]}"`);
+    }
+  }
+  return AVAILABLE_MODELS.find((m) => m.id === ROLE_DEFAULTS[role])!;
+}
+
+// Vision model used for diagram assessment (backwards compat). Lazily resolved
+// to honour env overrides at request time, not module-load time.
+export const VISION_MODEL_ID: string = ROLE_DEFAULTS.judge;

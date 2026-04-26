@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
-import { VISION_MODEL_ID, getModelConfig } from "@/lib/models";
+import { VISION_MODEL_ID, getModelByRole } from "@/lib/models";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
+import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 import sharp from "sharp";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const visionConfig = getModelConfig(VISION_MODEL_ID);
+    const visionConfig = getModelByRole('judge');
 
     // Convert SVG to PNG using sharp (GPT-4o vision doesn't accept SVG)
     let pngBase64: string;
@@ -93,18 +94,7 @@ export async function POST(request: NextRequest) {
     ];
 
     // Build API URL for vision model
-    const baseEndpoint = AZURE_ENDPOINT.trim().replace(/\/+$/, "");
-    let apiUrl: string;
-
-    if (baseEndpoint.includes(".openai.azure.com")) {
-      const base = baseEndpoint.replace(/\/openai\/.*$/, "");
-      apiUrl = `${base}/openai/deployments/${VISION_MODEL_ID}/chat/completions?api-version=${visionConfig.apiVersion}`;
-    } else if (baseEndpoint.includes("services.ai.azure.com")) {
-      const base = baseEndpoint.replace(/\/models\/?$/, "").replace(/\/api\/projects\/.*$/, "");
-      apiUrl = `${base}/models/chat/completions?api-version=${visionConfig.apiVersion}`;
-    } else {
-      apiUrl = `${baseEndpoint}/chat/completions?api-version=${visionConfig.apiVersion}`;
-    }
+    const apiUrl = buildChatCompletionsUrl(VISION_MODEL_ID, visionConfig.apiVersion);
 
     console.log(`Vision assessment [${VISION_MODEL_ID}]:`, apiUrl);
 

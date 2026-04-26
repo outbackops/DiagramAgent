@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { buildSystemPrompt } from "@/lib/system-prompt";
-import { getModelConfig } from "@/lib/models";
+import { getModelConfig, getModelByRole } from "@/lib/models";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
+import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
-const DEFAULT_MODEL = process.env.AZURE_AI_FOUNDRY_MODEL || "gpt-5.2-chat";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const modelId = requestedModel || DEFAULT_MODEL;
+    const modelId = requestedModel || getModelByRole('generator').id;
     const modelConfig = getModelConfig(modelId);
     const systemPrompt = buildSystemPrompt();
 
@@ -57,19 +57,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Build API URL
-    const baseEndpoint = AZURE_ENDPOINT.trim().replace(/\/+$/, "");
-    let apiUrl: string;
-
-    if (baseEndpoint.includes(".openai.azure.com")) {
-      const base = baseEndpoint.replace(/\/openai\/.*$/, "");
-      apiUrl = `${base}/openai/deployments/${modelId}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else if (baseEndpoint.includes("services.ai.azure.com")) {
-      const base = baseEndpoint.replace(/\/models\/?$/, "").replace(/\/api\/projects\/.*$/, "");
-      apiUrl = `${base}/models/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else {
-      apiUrl = `${baseEndpoint}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    }
+    const apiUrl = buildChatCompletionsUrl(modelId, modelConfig.apiVersion);
 
     console.log(`Calling Azure AI [${modelId}]:`, apiUrl);
 

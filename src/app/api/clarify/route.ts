@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
-import { getModelConfig } from "@/lib/models";
+import { getModelByRole } from "@/lib/models";
+import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
@@ -95,9 +96,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use gpt-5.2-chat for expert analysis (deep reasoning, thinking model)
-    const modelId = "gpt-5.2-chat";
-    const modelConfig = getModelConfig(modelId);
+    const clarifierConfig = getModelByRole('clarifier');
+    const modelId = clarifierConfig.id;
 
     const messages = [
       { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -107,18 +107,7 @@ export async function POST(request: NextRequest) {
       },
     ];
 
-    const baseEndpoint = AZURE_ENDPOINT.trim().replace(/\/+$/, "");
-    let apiUrl: string;
-
-    if (baseEndpoint.includes(".openai.azure.com")) {
-      const base = baseEndpoint.replace(/\/openai\/.*$/, "");
-      apiUrl = `${base}/openai/deployments/${modelId}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else if (baseEndpoint.includes("services.ai.azure.com")) {
-      const base = baseEndpoint.replace(/\/models\/?$/, "").replace(/\/api\/projects\/.*$/, "");
-      apiUrl = `${base}/models/chat/completions?api-version=${modelConfig.apiVersion}`;
-    } else {
-      apiUrl = `${baseEndpoint}/chat/completions?api-version=${modelConfig.apiVersion}`;
-    }
+    const apiUrl = buildChatCompletionsUrl(modelId, clarifierConfig.apiVersion);
 
     const authHeaders = await getAuthHeaders();
 
