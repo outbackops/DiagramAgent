@@ -4,7 +4,6 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import ChatPanel, { ChatMessage } from "@/components/PromptInput";
 import ClarifyPanel, { ClarifyQuestion, ClarifyAnswers } from "@/components/ClarifyPanel";
-import { resolveAnswerSpecs } from "@/lib/clarify-utils";
 import ElementEditor, { SelectedElement } from "@/components/ElementEditor";
 import {
   parseConnectionPath,
@@ -515,7 +514,25 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
   const buildEnhancedPrompt = useCallback(
     (originalPrompt: string, questions: ClarifyQuestion[], answers: ClarifyAnswers): string => {
       const parts: string[] = [originalPrompt];
-      const specs: string[] = resolveAnswerSpecs(questions, answers);
+      const specs: string[] = [];
+
+      for (const q of questions) {
+        const answer = answers[q.id];
+        if (!answer) continue;
+
+        if (q.type === "freetext") {
+          const text = (answer as string).trim();
+          if (text) specs.push(`${q.question}: ${text}`);
+        } else if (q.type === "single") {
+          const opt = q.options.find((o) => o.value === answer);
+          if (opt) specs.push(`${q.question}: ${opt.label}`);
+        } else if (q.type === "multi") {
+          const selected = (answer as string[])
+            .map((v) => q.options.find((o) => o.value === v)?.label)
+            .filter(Boolean);
+          if (selected.length > 0) specs.push(`${q.question}: ${selected.join(", ")}`);
+        }
+      }
 
       if (specs.length > 0) {
         parts.push("\n\nAdditional specifications:");
@@ -537,7 +554,23 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
       const enhancedPrompt = buildEnhancedPrompt(clarifyPrompt, clarifyQuestions, answers);
 
       // Show a summary of selections in chat
-      const answeredSpecs: string[] = resolveAnswerSpecs(clarifyQuestions, answers);
+      const answeredSpecs: string[] = [];
+      for (const q of clarifyQuestions) {
+        const answer = answers[q.id];
+        if (!answer) continue;
+        if (q.type === "freetext") {
+          const text = (answer as string).trim();
+          if (text) answeredSpecs.push(`${q.question} ${text}`);
+        } else if (q.type === "single") {
+          const opt = q.options.find((o) => o.value === answer);
+          if (opt) answeredSpecs.push(`${q.question} ${opt.label}`);
+        } else if (q.type === "multi") {
+          const selected = (answer as string[])
+            .map((v) => q.options.find((o) => o.value === v)?.label)
+            .filter(Boolean);
+          if (selected.length > 0) answeredSpecs.push(`${q.question} ${selected.join(", ")}`);
+        }
+      }
 
       if (answeredSpecs.length > 0) {
         setChatMessages((prev) => [
