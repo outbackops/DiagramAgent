@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { getModelByRole } from "@/lib/models";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
+import { ClarifyResponseSchema, parseLlmJson } from "@/lib/llm-schemas";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
@@ -139,51 +140,27 @@ export async function POST(request: NextRequest) {
     const content = data.choices?.[0]?.message?.content || "";
 
     // Parse the JSON response (now an object with analysis + questions)
-    let questions;
-    let analysis;
-    let skipClarification = false;
-    try {
-      const cleaned = content
-        .replace(/^```json?\s*/m, "")
-        .replace(/\s*```$/m, "")
-        .trim();
-      const parsed = JSON.parse(cleaned);
-
-      // Handle new object format
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        analysis = parsed.analysis || null;
-        skipClarification = parsed.skipClarification === true;
-        questions = Array.isArray(parsed.questions) ? parsed.questions : [];
-      } else if (Array.isArray(parsed)) {
-        // Backward compatibility: old format returned a plain array
-        questions = parsed;
-      } else {
-        throw new Error("Unexpected response format");
-      }
-
-      questions = questions.map((q: any, i: number) => ({
-        id: q.id || `q${i + 1}`,
-        question: String(q.question || ""),
-        rationale: q.rationale ? String(q.rationale) : undefined,
-        type: ["single", "multi"].includes(q.type) ? q.type : "single",
-        options: Array.isArray(q.options)
-          ? q.options.map((o: any) => ({
-              label: String(o.label || ""),
-              value: String(o.value || o.label || ""),
-            }))
-          : [],
-      }));
-    } catch {
-      console.error("Failed to parse clarify response:", content);
+    const result = parseLlmJson(content, ClarifyResponseSchema);
+    if (!result.ok) {
+      console.error("Failed to parse clarify response:", result.error, content);
       return new Response(
-        JSON.stringify({ error: "Failed to generate questions", raw: content }),
+        JSON.stringify({ error: "Failed to generate questions", raw: result.raw, detail: result.error }),
         { status: 422, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    return new Response(JSON.stringify({ questions, analysis, skipClarification }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    const { questions, analysis, skipClarification } = result.data;
+
+    // Auto-assign question ids if missing
+    const questionsWithIds = questions.map((q, i) => ({
+      ...q,
+      id: q.id || `q${i + 1}`,
+    }));
+
+    return new Response(
+      JSON.stringify({ questions: questionsWithIds, analysis, skipClarification }),
+      { headers: { "Content-Type": "application/json" } }
+    );
   } catch (error: any) {
     console.error("Clarify API error:", error);
     return new Response(

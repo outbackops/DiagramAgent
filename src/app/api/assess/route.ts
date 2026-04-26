@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { VISION_MODEL_ID, getModelByRole } from "@/lib/models";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
+import { AssessmentSchema, parseLlmJson, ASSESS_PASS_THRESHOLD } from "@/lib/llm-schemas";
 import sharp from "sharp";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
@@ -138,34 +139,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await response.json();
-    const content = result.choices?.[0]?.message?.content || "";
+    const apiResponse = await response.json();
+    const content = apiResponse.choices?.[0]?.message?.content || "";
 
     // Parse the JSON assessment
-    try {
-      // Strip any markdown fences if present
-      const cleaned = content.replace(/^```json?\n?/m, "").replace(/\n?```$/m, "").trim();
-      const assessment = JSON.parse(cleaned);
-      return new Response(JSON.stringify({ assessment }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch {
-      console.error("Failed to parse assessment JSON:", content);
+    const result = parseLlmJson(content, AssessmentSchema);
+    if (!result.ok) {
+      console.error("Failed to parse assessment JSON:", result.error, content);
       return new Response(
         JSON.stringify({
           assessment: {
             score: 5,
-            pass: false,
+            // Server-side rule: pass = score >= ASSESS_PASS_THRESHOLD
+            pass: 5 >= ASSESS_PASS_THRESHOLD,
             reasoning: "Could not parse assessment response",
             missing_components: [],
             layout_issues: ["Assessment JSON parsing failed"],
             specific_fixes: ["Re-generate the diagram"],
             raw: content,
+            parse_error: result.error,
           },
         }),
         { headers: { "Content-Type": "application/json" } }
       );
     }
+
+    // `pass` was recomputed server-side inside AssessmentSchema's transform.
+    return new Response(JSON.stringify({ assessment: result.data }), {
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error) {
     console.error("Assess API error:", error);
     return new Response(
