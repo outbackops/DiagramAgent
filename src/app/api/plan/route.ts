@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { getModelConfig, getModelByRole } from "@/lib/models";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
+import { PlanSchema, parseLlmJson } from "@/lib/llm-schemas";
 
 const AZURE_ENDPOINT = getAzureEndpoint();
 
@@ -204,22 +205,22 @@ export async function POST(request: NextRequest) {
     const content = data.choices?.[0]?.message?.content || "";
 
     // Parse the JSON plan
-    try {
-      const cleaned = content
-        .replace(/^```json?\s*/m, "")
-        .replace(/\s*```$/m, "")
-        .trim();
-      const plan = JSON.parse(cleaned);
-      return new Response(JSON.stringify({ plan }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch {
-      console.error("Failed to parse plan response:", content);
+    const result = parseLlmJson(content, PlanSchema);
+    if (!result.ok) {
+      console.error("Failed to parse plan response:", result.error, content);
       return new Response(
-        JSON.stringify({ error: "Failed to generate architecture plan", raw: content }),
+        JSON.stringify({
+          error: "Failed to generate architecture plan",
+          raw: result.raw,
+          detail: result.error,
+        }),
         { status: 422, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    return new Response(JSON.stringify({ plan: result.data }), {
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error: any) {
     console.error("Plan API error:", error);
     return new Response(
