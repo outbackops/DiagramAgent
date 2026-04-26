@@ -18,6 +18,7 @@ import {
 } from "@/lib/d2-editor";
 import { analyzeD2Code } from "@/lib/d2-analyzer";
 import { hashSvg } from "@/lib/svg-hash";
+import { planToD2Scaffold } from "@/lib/plan-to-d2";
 
 
 const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
@@ -83,9 +84,19 @@ export default function Home() {
       signal?: AbortSignal,
       architecturePlan?: Record<string, unknown> | null
     ): Promise<string> => {
-      // If an architecture plan is provided, prefix it to the prompt
+      // If an architecture plan is provided, prefix it to the prompt.
+      // Item 5: also build a deterministic D2 scaffold from the plan and feed
+      // it to the LLM as a starting point so it refines instead of
+      // reconstructing (and dropping nodes).
+      let scaffoldBlock = "";
+      if (architecturePlan) {
+        const scaffold = planToD2Scaffold(architecturePlan);
+        if (scaffold.d2 && scaffold.componentCount > 0) {
+          scaffoldBlock = `\n\nD2 SCAFFOLD (deterministic, derived from plan — refine, do not rebuild from scratch):\n${scaffold.d2}`;
+        }
+      }
       const finalPrompt = architecturePlan
-        ? `ARCHITECTURE PLAN:\n${JSON.stringify(architecturePlan, null, 2)}\n\nUSER REQUEST:\n${prompt}`
+        ? `ARCHITECTURE PLAN:\n${JSON.stringify(architecturePlan, null, 2)}${scaffoldBlock}\n\nUSER REQUEST:\n${prompt}`
         : prompt;
 
       const res = await fetch("/api/generate", {
