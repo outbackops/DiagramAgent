@@ -11,8 +11,13 @@ export function errorMessage(err: unknown): string {
     if (typeof m === "string") return m;
   }
   try {
-    return JSON.stringify(err);
+    const j = JSON.stringify(err);
+    // JSON.stringify can return undefined for values like `undefined`,
+    // functions, or symbols. Fall through to String() in that case so the
+    // helper always returns a real string.
+    if (typeof j === "string") return j;
   } catch {
-    return String(err);
+    // circular / toJSON throw — fall through.
   }
+  return String(err);
 }
