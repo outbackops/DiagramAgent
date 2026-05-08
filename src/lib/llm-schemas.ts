@@ -37,9 +37,11 @@ const ClarifyQuestionSchema = z.object({
 });
 
 export const ClarifyResponseSchema = z.union([
-  // New object format
+  // New object format. `analysis` may be a free-form string or a structured
+  // object (e.g. {pattern, provider, stated_components, completeness, ...})
+  // emitted by the expert-intent system prompt.
   z.object({
-    analysis: z.string().nullable().optional(),
+    analysis: z.unknown().nullable().optional(),
     skipClarification: z.boolean().optional().default(false),
     questions: z.array(ClarifyQuestionSchema).default([]),
   }),

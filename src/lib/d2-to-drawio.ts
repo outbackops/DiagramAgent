@@ -285,8 +285,17 @@ export function parseD2(code: string): D2ParseResult {
 // ── Icon Fetching & Embedding ────────────────────────────────────────
 
 /**
- * Fetch an SVG icon from a URL and return it as a base64 data URI.
- * Caches results in-memory to avoid re-fetching within the same process.
+ * Fetch an icon from a URL and return it as a data URI suitable for use
+ * inside an mxGraph `image=` style.
+ *
+ * IMPORTANT: mxGraph styles split on `;` and parse `key=value` pairs, so a
+ * raw `data:image/svg+xml;base64,XYZ=` URI breaks style parsing — the
+ * embedded `;base64,` and `=` padding are interpreted as new style keys
+ * and the icon vanishes in draw.io. To avoid this we serialize SVGs as
+ * `data:image/svg+xml,<URL-encoded SVG>` (no base64, no extra `;`).
+ * Non-SVG payloads (rare) fall back to base64 — they may not render in
+ * every viewer, but at least the export does not corrupt the styles of
+ * the surrounding cells.
  */
 const iconCache = new Map<string, string | null>();
 
@@ -305,10 +314,28 @@ async function fetchIconAsDataUri(url: string): Promise<string | null> {
     }
 
     const contentType = res.headers.get("content-type") || "image/svg+xml";
-    const buffer = await res.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
-    const mimeType = contentType.includes("svg") ? "image/svg+xml" : contentType;
-    const dataUri = `data:${mimeType};base64,${base64}`;
+    const isSvg = contentType.includes("svg") || url.toLowerCase().endsWith(".svg");
+
+    let dataUri: string;
+    if (isSvg) {
+      // URL-encode the SVG body so it can live safely inside an mxGraph
+      // style value (no `;`, no `=`, no quote characters).
+      let svgText = await res.text();
+      // Strip XML declaration / DOCTYPE — draw.io only needs the <svg> root.
+      svgText = svgText.replace(/<\?xml[^?]*\?>\s*/i, "").replace(/<!DOCTYPE[^>]*>\s*/i, "").trim();
+      const encoded = encodeURIComponent(svgText)
+        // encodeURIComponent leaves these reserved chars alone, but they
+        // still trip mxGraph's style parser — encode them explicitly.
+        .replace(/'/g, "%27")
+        .replace(/\(/g, "%28")
+        .replace(/\)/g, "%29");
+      dataUri = `data:image/svg+xml,${encoded}`;
+    } else {
+      const buffer = await res.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      dataUri = `data:${contentType};base64,${base64}`;
+    }
+
     iconCache.set(url, dataUri);
     return dataUri;
   } catch {
