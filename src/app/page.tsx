@@ -66,6 +66,16 @@ export default function Home() {
     1,
     { validate: (v): v is number => typeof v === "number" && v >= 1 && v <= MAX_REFINE_ITERATIONS },
   );
+  const [chatCollapsed, setChatCollapsed] = usePersistedState<boolean>(
+    "diagramAgent.chatCollapsed",
+    false,
+    { validate: (v): v is boolean => typeof v === "boolean" },
+  );
+  const [codeCollapsed, setCodeCollapsed] = usePersistedState<boolean>(
+    "diagramAgent.codeCollapsed",
+    false,
+    { validate: (v): v is boolean => typeof v === "boolean" },
+  );
 
   // Transient state — not persisted (network, generation lifecycle, UI focus).
   const [isGenerating, setIsGenerating] = useState(false);
@@ -921,33 +931,75 @@ Fix these issues in the D2 code. Maintain the overall architecture but improve l
       {/* Main Content: 3-column layout */}
       <div className="flex flex-1 min-h-0">
         {/* Chat Panel */}
-        <div className="w-1/4 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col min-w-[280px]">
-          <ChatPanel
-            messages={generationError
-              ? [...chatMessages, { role: "assistant" as const, content: `⚠️ ${generationError}` }]
-              : chatMessages
-            }
-            onSend={handleSend}
-            onNewDiagram={handleNewDiagram}
-            isGenerating={isGenerating}
-            isClarifying={isClarifying}
-            inlinePanel={
-              clarifyQuestions ? (
-                <ClarifyPanel
-                  questions={clarifyQuestions}
-                  onSubmit={handleClarifySubmit}
-                  onSkip={handleClarifySkip}
-                  isSubmitting={isGenerating}
-                />
-              ) : undefined
-            }
-          />
-        </div>
+        {chatCollapsed ? (
+          <button
+            onClick={() => setChatCollapsed(false)}
+            title="Show chat"
+            className="w-8 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        ) : (
+          <div className="w-1/4 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col min-w-[280px] relative">
+            <button
+              onClick={() => setChatCollapsed(true)}
+              title="Hide chat"
+              className="absolute top-2 right-2 z-10 w-6 h-6 rounded hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <ChatPanel
+              messages={generationError
+                ? [...chatMessages, { role: "assistant" as const, content: `⚠️ ${generationError}` }]
+                : chatMessages
+              }
+              onSend={handleSend}
+              onNewDiagram={handleNewDiagram}
+              isGenerating={isGenerating}
+              isClarifying={isClarifying}
+              inlinePanel={
+                clarifyQuestions ? (
+                  <ClarifyPanel
+                    questions={clarifyQuestions}
+                    onSubmit={handleClarifySubmit}
+                    onSkip={handleClarifySkip}
+                    isSubmitting={isGenerating}
+                  />
+                ) : undefined
+              }
+            />
+          </div>
+        )}
 
         {/* Code Editor */}
-        <div className="w-[30%] border-r border-gray-200 dark:border-gray-800">
-          <CodeEditor code={d2Code} onChange={setD2Code} readOnly={isGenerating} />
-        </div>
+        {codeCollapsed ? (
+          <button
+            onClick={() => setCodeCollapsed(false)}
+            title="Show code"
+            className="w-8 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        ) : (
+          <div className="w-[30%] border-r border-gray-200 dark:border-gray-800 relative">
+            <button
+              onClick={() => setCodeCollapsed(true)}
+              title="Hide code"
+              className="absolute top-2 right-2 z-10 w-6 h-6 rounded bg-white/80 dark:bg-gray-900/80 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <CodeEditor code={d2Code} onChange={setD2Code} readOnly={isGenerating} />
+          </div>
+        )}
 
         {/* Diagram Preview */}
         <div className="flex-1 relative">
