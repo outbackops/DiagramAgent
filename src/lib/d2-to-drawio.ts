@@ -299,10 +299,51 @@ export function parseD2(code: string): D2ParseResult {
  */
 const iconCache = new Map<string, string | null>();
 
+function encodeSvgForStyle(svgText: string): string {
+  // Strip XML declaration / DOCTYPE — draw.io only needs the <svg> root.
+  const cleaned = svgText
+    .replace(/<\?xml[^?]*\?>\s*/i, "")
+    .replace(/<!DOCTYPE[^>]*>\s*/i, "")
+    .trim();
+  return encodeURIComponent(cleaned)
+    // encodeURIComponent leaves these reserved chars alone, but they
+    // still trip mxGraph's style parser — encode them explicitly.
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+}
+
 async function fetchIconAsDataUri(url: string): Promise<string | null> {
   if (iconCache.has(url)) return iconCache.get(url)!;
 
   try {
+    // Vendored icons resolve to root-relative paths like "/icons/foo.svg".
+    // Node's `fetch` requires an absolute URL, so read them straight from
+    // disk instead — this is the fast path used in the dev/prod server.
+    if (url.startsWith("/")) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("node:fs");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require("node:path");
+      const filePath = path.join(process.cwd(), "public", url.replace(/^\/+/, ""));
+      if (!fs.existsSync(filePath)) {
+        iconCache.set(url, null);
+        return null;
+      }
+      const isSvg = filePath.toLowerCase().endsWith(".svg");
+      if (isSvg) {
+        const svgText = fs.readFileSync(filePath, "utf8");
+        const dataUri = `data:image/svg+xml,${encodeSvgForStyle(svgText)}`;
+        iconCache.set(url, dataUri);
+        return dataUri;
+      }
+      const buffer: Buffer = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).slice(1) || "png";
+      const dataUri = `data:image/${ext};base64,${buffer.toString("base64")}`;
+      iconCache.set(url, dataUri);
+      return dataUri;
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(url, { signal: controller.signal });
@@ -318,18 +359,8 @@ async function fetchIconAsDataUri(url: string): Promise<string | null> {
 
     let dataUri: string;
     if (isSvg) {
-      // URL-encode the SVG body so it can live safely inside an mxGraph
-      // style value (no `;`, no `=`, no quote characters).
-      let svgText = await res.text();
-      // Strip XML declaration / DOCTYPE — draw.io only needs the <svg> root.
-      svgText = svgText.replace(/<\?xml[^?]*\?>\s*/i, "").replace(/<!DOCTYPE[^>]*>\s*/i, "").trim();
-      const encoded = encodeURIComponent(svgText)
-        // encodeURIComponent leaves these reserved chars alone, but they
-        // still trip mxGraph's style parser — encode them explicitly.
-        .replace(/'/g, "%27")
-        .replace(/\(/g, "%28")
-        .replace(/\)/g, "%29");
-      dataUri = `data:image/svg+xml,${encoded}`;
+      const svgText = await res.text();
+      dataUri = `data:image/svg+xml,${encodeSvgForStyle(svgText)}`;
     } else {
       const buffer = await res.arrayBuffer();
       const base64 = Buffer.from(buffer).toString("base64");
