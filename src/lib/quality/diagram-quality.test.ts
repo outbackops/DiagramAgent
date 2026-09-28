@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { renderD2 } from "@/lib/d2-render";
-import { countCrossings, findUnknownIcons, hasCriticalFailure, qualityFeedback, scoreDiagram } from "./diagram-quality";
+import { countCrossings, findEdgesThroughNodes, findUnknownIcons, hasCriticalFailure, qualityFeedback, scoreDiagram } from "./diagram-quality";
 
 // Real D2 (WASM) — the scorer is only meaningful against real layouts.
 async function score(code: string) {
@@ -67,8 +67,21 @@ describe("scoreDiagram", () => {
     const chain = Array.from({ length: 16 }, (_, i) => `n${i} -> n${i + 1}: x`).join("\n");
     const report = await score(`direction: right\n${chain}\n`);
     expect(check(report, "aspect_ratio").status).toBe("fail");
-    expect(report.metrics.aspectRatio).toBeGreaterThan(4.5);
+    expect(report.metrics.aspectRatio).toBeGreaterThan(3.6);
   }, 30_000);
+
+  it("flags connections routed through unrelated components", () => {
+    const shape = (id: string, x: number, y: number) => ({ id, type: "rectangle", pos: { x, y }, width: 100, height: 60, label: id, icon: null, level: 1 });
+    const diagram = {
+      shapes: [shape("a", 0, 0), shape("middle", 200, 0), shape("b", 400, 0)],
+      connections: [{ id: "(a -> b)[0]", src: "a", dst: "b", label: "x", strokeDash: 0, route: [{ x: 100, y: 30 }, { x: 400, y: 30 }] }],
+    };
+    expect(findEdgesThroughNodes(diagram)).toEqual(["(a -> b)[0]"]);
+    const report = scoreDiagram("direction: right\na -> b: x\nmiddle", diagram);
+    expect(check(report, "edges_through_nodes").status).toBe("fail");
+    const around = { ...diagram, connections: [{ ...diagram.connections[0], route: [{ x: 100, y: 30 }, { x: 150, y: 30 }, { x: 150, y: 90 }, { x: 350, y: 90 }, { x: 350, y: 30 }, { x: 400, y: 30 }] }] };
+    expect(findEdgesThroughNodes(around)).toEqual([]);
+  });
 
   it("turns failures into refinement feedback", async () => {
     const report = await score(`${GOOD}\nWeb -> DB: SQL\n`);

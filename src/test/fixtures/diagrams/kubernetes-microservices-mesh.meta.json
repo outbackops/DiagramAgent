@@ -1,0 +1,39 @@
+{
+  "id": "kubernetes-microservices-mesh",
+  "title": "Kubernetes Microservices With Service Mesh",
+  "prompt": "Create a vendor-neutral Kubernetes microservices architecture diagram. Show external users, DNS, ingress controller, API gateway, Kubernetes cluster, namespaces for frontend, backend services, data, and observability. Include service mesh sidecars, frontend service, orders service, payments service, inventory service, PostgreSQL, Redis, message broker, Prometheus, Grafana, Jaeger tracing, log collector, secrets, and horizontal pod autoscaler. Show north-south ingress traffic, east-west mTLS service-to-service traffic, async events to the broker, metrics/logs/traces to observability, and database/cache access.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 82,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "ingress"
+    ],
+    [
+      "service mesh",
+      "mesh"
+    ],
+    [
+      "frontend"
+    ],
+    [
+      "orders"
+    ],
+    [
+      "payments"
+    ],
+    [
+      "postgresql",
+      "postgres"
+    ],
+    [
+      "prometheus"
+    ],
+    [
+      "jaeger",
+      "tracing"
+    ]
+  ],
+  "minNodes": 13,
+  "generatedOn": "2026-09-28"
+}

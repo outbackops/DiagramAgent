@@ -30,6 +30,7 @@ export interface QualityMetrics {
   labelCoverage: number;
   crossings: number;
   orphans: number;
+  edgesThroughNodes: number;
 }
 
 export type QualityGrade = "A" | "B" | "C" | "D" | "F";
@@ -43,6 +44,8 @@ export interface QualityReport {
 
 const WEIGHTS: Record<CheckSeverity, number> = { critical: 20, major: 10, minor: 4 };
 const NOTE_LIKE = /(^|\.)(legend|notes?|key|title)$/i;
+// Components usually drawn attached to a resource rather than wired to it.
+const ATTACHMENT_LIKE = /(nsg|network[\s_-]?security[\s_-]?group|udr|route[\s_-]?table|routes?\b|polic(y|ies)|role|iam|identity|tags?\b|waf[\s_-]?policy)/i;
 
 interface ShapeInfo {
   shape: CompiledShape;
@@ -118,6 +121,50 @@ export function countCrossings(connections: CompiledConnection[]): number {
     }
   }
   return crossings;
+}
+
+function segmentCrossesBox(a: { x: number; y: number }, b: { x: number; y: number }, box: { x: number; y: number; w: number; h: number }): boolean {
+  // Liang–Barsky clip: does the segment enter the box interior?
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const edges: Array<[number, number]> = [
+    [-dx, a.x - box.x],
+    [dx, box.x + box.w - a.x],
+    [-dy, a.y - box.y],
+    [dy, box.y + box.h - a.y],
+  ];
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q <= 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) t0 = Math.max(t0, r);
+      else t1 = Math.min(t1, r);
+      if (t0 >= t1) return false;
+    }
+  }
+  return true;
+}
+
+/** Connections whose route runs through a component that is neither its source nor its target. */
+export function findEdgesThroughNodes(diagram: CompiledDiagram, inset = 6): string[] {
+  const ids = diagram.shapes.map((s) => s.id);
+  const leaves = diagram.shapes.filter((s) => !ids.some((other) => other.startsWith(`${s.id}.`)));
+  const hits: string[] = [];
+  for (const c of diagram.connections) {
+    const route = c.route ?? [];
+    const through = leaves.some((leaf) => {
+      if (leaf.id === c.src || leaf.id === c.dst) return false;
+      const box = { x: leaf.pos.x + inset, y: leaf.pos.y + inset, w: leaf.width - inset * 2, h: leaf.height - inset * 2 };
+      if (box.w <= 0 || box.h <= 0) return false;
+      for (let i = 1; i < route.length; i++) if (segmentCrossesBox(route[i - 1], route[i], box)) return true;
+      return false;
+    });
+    if (through) hits.push(c.id);
+  }
+  return hits;
 }
 
 function overlapArea(a: CompiledShape, b: CompiledShape): number {
@@ -206,7 +253,11 @@ export function scoreDiagram(code: string, diagram: CompiledDiagram): QualityRep
   });
 
   const connectedIds = new Set(connections.flatMap((c) => [c.src, c.dst]));
-  const orphanList = leaves.filter((l) => ![...connectedIds].some((id) => id === l.shape.id || id.startsWith(`${l.shape.id}.`)));
+  const orphanList = leaves.filter(
+    (l) =>
+      !ATTACHMENT_LIKE.test(`${l.lastSegment} ${l.shape.label ?? ""}`) &&
+      ![...connectedIds].some((id) => id === l.shape.id || id.startsWith(`${l.shape.id}.`)),
+  );
   const orphanRatio = leaves.length ? orphanList.length / leaves.length : 0;
   add({
     id: "orphans",
@@ -254,12 +305,26 @@ export function scoreDiagram(code: string, diagram: CompiledDiagram): QualityRep
   const width = diagram.shapes.length ? maxX - minX : 0;
   const height = diagram.shapes.length ? maxY - minY : 0;
   const aspectRatio = height > 0 ? width / height : 0;
+  // Wide strips and tall towers both end up unreadably small when fitted to a screen.
   add({
     id: "aspect_ratio",
     label: "Balanced aspect ratio",
     severity: "major",
-    status: aspectRatio >= 0.6 && aspectRatio <= 3 ? "pass" : aspectRatio >= 0.4 && aspectRatio <= 4.5 ? "warn" : "fail",
+    status: aspectRatio >= 0.6 && aspectRatio <= 2.6 ? "pass" : aspectRatio >= 0.4 && aspectRatio <= 3.6 ? "warn" : "fail",
     detail: `${aspectRatio.toFixed(2)}:1 (${Math.round(width)}×${Math.round(height)})`,
+  });
+
+  const throughNodes = findEdgesThroughNodes(diagram);
+  const throughRate = connections.length ? throughNodes.length / connections.length : 0;
+  add({
+    id: "edges_through_nodes",
+    label: "Connections route around components",
+    severity: "major",
+    status: throughNodes.length === 0 ? "pass" : throughRate <= 0.1 ? "warn" : "fail",
+    detail:
+      throughNodes.length === 0
+        ? "No connection passes through an unrelated component"
+        : `${throughNodes.length} connection${throughNodes.length === 1 ? "" : "s"} pass through unrelated components`,
   });
 
   const overlaps = findOverlaps(infos);
@@ -337,6 +402,7 @@ export function scoreDiagram(code: string, diagram: CompiledDiagram): QualityRep
       labelCoverage: Number(labelCoverage.toFixed(2)),
       crossings,
       orphans: orphanList.length,
+      edgesThroughNodes: throughNodes.length,
     },
   };
 }

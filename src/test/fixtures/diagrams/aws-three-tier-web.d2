@@ -1,0 +1,295 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+Users.class: resource
+Users: {
+  icon: users
+  label: Internet Users
+}
+
+AWSAccount.class: subscription
+AWSAccount: {
+  label: AWS ACCOUNT (PRODUCTION)
+
+  GlobalEdge.class: resource_group
+  GlobalEdge: {
+    label: GLOBAL / EDGE SERVICES
+    direction: down
+
+    Route53.class: resource
+    Route53: {
+      icon: aws-route53
+      label: Route 53 (Public Hosted Zone)
+    }
+
+    WAF.class: resource
+    WAF: {
+      icon: aws-waf
+      label: AWS WAF (Web ACL)
+    }
+
+    CloudFront.class: resource
+    CloudFront: {
+      icon: aws-cloudfront
+      label: CloudFront Distribution
+    }
+  }
+
+  Region_us_east_1.class: region
+  Region_us_east_1: {
+    label: REGION US-EAST-1
+
+    AppVPC.class: network
+    AppVPC: {
+      label: VPC (10.0.0.0/16)
+      direction: down
+
+      IGW.class: resource
+      IGW: {
+        icon: internet
+        label: Internet Gateway
+      }
+
+      ALB.class: resource
+      ALB: {
+        icon: aws-elastic-load-balancing
+        label: Public ALB (AZ-a + AZ-b)
+      }
+
+      AZ_A.class: subnet
+      AZ_A: {
+        label: AVAILABILITY ZONE US-EAST-1A
+        direction: right
+        style.fill: "#ffffff"
+        style.stroke: "#1e88e5"
+        style.stroke-dash: 4
+        style.font-color: "#1565c0"
+
+        PublicSubnet_A.class: subnet
+        PublicSubnet_A: {
+          label: PUBLIC SUBNET (10.0.0.0/24)
+
+          NAT_A.class: resource
+          NAT_A: {
+            icon: aws-vpc
+            label: NAT Gateway (AZ-a)
+          }
+        }
+
+        AppSubnet_A.class: subnet
+        AppSubnet_A: {
+          label: PRIVATE APP SUBNET (10.0.10.0/24)
+          style.fill: "#e3f2fd"
+          style.stroke: "#1565c0"
+          style.font-color: "#0d47a1"
+
+          EC2_A.class: resource
+          EC2_A: {
+            icon: aws-ec2
+            label: EC2 Instances (ASG, AZ-a)
+          }
+        }
+
+        DataSubnet_A.class: subnet
+        DataSubnet_A: {
+          label: PRIVATE DATA SUBNET (10.0.20.0/24)
+          style.fill: "#f3e5f5"
+          style.stroke: "#6a1b9a"
+          style.font-color: "#4a148c"
+
+          RDS_Primary.class: resource
+          RDS_Primary: {
+            icon: aws-rds
+            label: RDS Primary (Multi-AZ)
+            shape: cylinder
+          }
+
+          Redis_Primary.class: resource
+          Redis_Primary: {
+            icon: aws-elasticache
+            label: ElastiCache Redis Primary
+          }
+        }
+      }
+
+      AZ_B.class: subnet
+      AZ_B: {
+        label: AVAILABILITY ZONE US-EAST-1B
+        direction: right
+        style.fill: "#ffffff"
+        style.stroke: "#1e88e5"
+        style.stroke-dash: 4
+        style.font-color: "#1565c0"
+
+        PublicSubnet_B.class: subnet
+        PublicSubnet_B: {
+          label: PUBLIC SUBNET (10.0.1.0/24)
+
+          NAT_B.class: resource
+          NAT_B: {
+            icon: aws-vpc
+            label: NAT Gateway (AZ-b)
+          }
+        }
+
+        AppSubnet_B.class: subnet
+        AppSubnet_B: {
+          label: PRIVATE APP SUBNET (10.0.11.0/24)
+          style.fill: "#e3f2fd"
+          style.stroke: "#1565c0"
+          style.font-color: "#0d47a1"
+
+          EC2_B.class: resource
+          EC2_B: {
+            icon: aws-ec2
+            label: EC2 Instances (ASG, AZ-b)
+          }
+        }
+
+        DataSubnet_B.class: subnet
+        DataSubnet_B: {
+          label: PRIVATE DATA SUBNET (10.0.21.0/24)
+          style.fill: "#f3e5f5"
+          style.stroke: "#6a1b9a"
+          style.font-color: "#4a148c"
+
+          RDS_Standby.class: resource
+          RDS_Standby: {
+            icon: aws-rds
+            label: RDS Standby (Multi-AZ)
+            shape: cylinder
+          }
+
+          Redis_Replica.class: resource
+          Redis_Replica: {
+            icon: aws-elasticache
+            label: ElastiCache Redis Replica
+          }
+        }
+      }
+    }
+
+    RegionalServices.class: resource_group
+    RegionalServices: {
+      label: REGIONAL MANAGED SERVICES
+      direction: down
+
+      S3_Static.class: resource
+      S3_Static: {
+        icon: aws-s3
+        label: S3 Static Assets
+      }
+
+      SecretsManager.class: resource
+      SecretsManager: {
+        icon: aws-secrets-manager
+        label: Secrets Manager (DB Credentials)
+      }
+
+      CloudWatch.class: resource
+      CloudWatch: {
+        icon: aws-cloudwatch
+        label: CloudWatch (Metrics, Logs, Alarms)
+      }
+
+      FlowLogs.class: resource
+      FlowLogs: {
+        icon: aws-vpc
+        label: VPC Flow Logs
+      }
+    }
+  }
+}
+
+# Connections
+Users -> AWSAccount.GlobalEdge.Route53: DNS
+AWSAccount.GlobalEdge.Route53 -> AWSAccount.GlobalEdge.CloudFront: Alias {
+  style.stroke-dash: 5
+}
+Users -> AWSAccount.GlobalEdge.CloudFront: HTTPS
+AWSAccount.GlobalEdge.WAF -> AWSAccount.GlobalEdge.CloudFront: Web ACL {
+  style.stroke-dash: 5
+}
+AWSAccount.GlobalEdge.CloudFront -> AWSAccount.Region_us_east_1.RegionalServices.S3_Static: HTTPS (OAC)
+AWSAccount.GlobalEdge.CloudFront -> AWSAccount.Region_us_east_1.AppVPC.ALB: HTTPS Origin
+AWSAccount.Region_us_east_1.AppVPC.ALB -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.AppSubnet_A.EC2_A: HTTPS :443
+AWSAccount.Region_us_east_1.AppVPC.ALB -> AWSAccount.Region_us_east_1.AppVPC.AZ_B.AppSubnet_B.EC2_B: HTTPS :443
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.AppSubnet_A.EC2_A -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.RDS_Primary: SQL :5432
+AWSAccount.Region_us_east_1.AppVPC.AZ_B.AppSubnet_B.EC2_B -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.RDS_Primary: SQL :5432
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.RDS_Primary -> AWSAccount.Region_us_east_1.AppVPC.AZ_B.DataSubnet_B.RDS_Standby: Sync Replication {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.AppSubnet_A.EC2_A -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.Redis_Primary: Redis TLS :6379
+AWSAccount.Region_us_east_1.AppVPC.AZ_B.AppSubnet_B.EC2_B -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.Redis_Primary: Redis TLS :6379
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.DataSubnet_A.Redis_Primary -> AWSAccount.Region_us_east_1.AppVPC.AZ_B.DataSubnet_B.Redis_Replica: Async Replication {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.AppSubnet_A.EC2_A -> AWSAccount.Region_us_east_1.AppVPC.AZ_A.PublicSubnet_A.NAT_A: Outbound
+AWSAccount.Region_us_east_1.AppVPC.AZ_B.AppSubnet_B.EC2_B -> AWSAccount.Region_us_east_1.AppVPC.AZ_B.PublicSubnet_B.NAT_B: Outbound
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.PublicSubnet_A.NAT_A -> AWSAccount.Region_us_east_1.AppVPC.IGW: Egress
+AWSAccount.Region_us_east_1.AppVPC.AZ_B.PublicSubnet_B.NAT_B -> AWSAccount.Region_us_east_1.AppVPC.IGW: Egress
+AWSAccount.Region_us_east_1.AppVPC.AZ_A.AppSubnet_A.EC2_A -> AWSAccount.Region_us_east_1.RegionalServices.SecretsManager: Secrets API {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.AppVPC.AZ_B.AppSubnet_B.EC2_B -> AWSAccount.Region_us_east_1.RegionalServices.SecretsManager: Secrets API {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.AppVPC -> AWSAccount.Region_us_east_1.RegionalServices.FlowLogs: ENI Capture {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.RegionalServices.FlowLogs -> AWSAccount.Region_us_east_1.RegionalServices.CloudWatch: Log Delivery {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_us_east_1.AppVPC -> AWSAccount.Region_us_east_1.RegionalServices.CloudWatch: Metrics/Logs {
+  style.stroke-dash: 5
+}

@@ -1,0 +1,541 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+OnPremDC.class: region
+OnPremDC: {
+  label: "ON-PREMISES DATACENTER (10.100.0.0/16)"
+  direction: down
+
+  CorpUsers.class: resource
+  CorpUsers: {
+    icon: users
+    label: Corporate Users / Admins
+  }
+
+  OnPremServers.class: resource
+  OnPremServers: {
+    icon: server
+    label: On-Prem Servers / AD DS
+  }
+
+  OnPremDNS.class: resource
+  OnPremDNS: {
+    icon: settings
+    label: "On-Prem DNS (corp.contoso.com)"
+  }
+
+  CEEdgeRouter.class: resource
+  CEEdgeRouter: {
+    icon: firewall
+    label: Customer Edge Router / VPN Device
+  }
+}
+
+ConnectivityProvider.class: region
+ConnectivityProvider: {
+  label: "CONNECTIVITY PROVIDER (MSEE PEERING LOCATION)"
+
+  ERCircuit.class: resource
+  ERCircuit: {
+    icon: azure-expressroute
+    label: "ExpressRoute Circuit (Private Peering, 1 Gbps)"
+  }
+}
+
+AzureTenant.class: region
+AzureTenant: {
+  label: "AZURE TENANT (CONTOSO)"
+  direction: right
+
+  Platform.class: region
+  Platform: {
+    label: PLATFORM MANAGEMENT GROUP
+    direction: down
+    style.stroke-dash: 4
+
+    ConnectivitySubscription.class: subscription
+    ConnectivitySubscription: {
+      label: CONNECTIVITY SUBSCRIPTION
+
+      AustraliaEast.class: region
+      AustraliaEast: {
+        label: "REGION: AUSTRALIA EAST"
+        style.stroke-dash: 4
+
+        HubRG.class: resource_group
+        HubRG: {
+          label: RG-HUB-NETWORK
+          grid-columns: 1
+
+          HubVNet.class: network
+          HubVNet: {
+            label: "HUB VNET (10.0.0.0/16)"
+            grid-columns: 3
+
+            GatewaySubnet.class: subnet
+            GatewaySubnet: {
+              label: "GATEWAYSUBNET (10.0.0.0/27)"
+              grid-columns: 2
+
+              ERGateway.class: resource
+              ERGateway: {
+                icon: azure-expressroute
+                label: "ExpressRoute Gateway (ErGw1AZ)"
+              }
+
+              VPNGateway.class: resource
+              VPNGateway: {
+                icon: azure-vpn-gateway
+                label: "VPN Gateway (VpnGw2AZ, Active-Active)"
+              }
+
+              UDR_Gateway.class: resource
+              UDR_Gateway: {
+                icon: settings
+                label: "rt-gateway: 10.1/16, 10.2/16 → FW"
+              }
+            }
+
+            AzureFirewallSubnet.class: subnet
+            AzureFirewallSubnet: {
+              label: "AZUREFIREWALLSUBNET (10.0.1.0/26)"
+
+              AzureFirewall.class: resource
+              AzureFirewall: {
+                icon: azure-firewall
+                label: "Azure Firewall Premium (10.0.1.4)"
+                style.stroke: "#d32f2f"
+                style.stroke-width: 3
+                style.fill: "#ffebee"
+              }
+            }
+
+            AzureBastionSubnet.class: subnet
+            AzureBastionSubnet: {
+              label: "AZUREBASTIONSUBNET (10.0.2.0/26)"
+              direction: down
+
+              AzureBastion.class: resource
+              AzureBastion: {
+                icon: azure-bastion
+                label: "Azure Bastion (Standard)"
+              }
+
+              NSG_Bastion.class: resource
+              NSG_Bastion: {
+                icon: azure-network-security-groups
+                label: nsg-bastion
+              }
+            }
+
+            DNSInboundSubnet.class: subnet
+            DNSInboundSubnet: {
+              label: "SNET-DNS-INBOUND (10.0.3.0/28)"
+
+              DNSInboundEndpoint.class: resource
+              DNSInboundEndpoint: {
+                icon: azure-dns
+                label: "DNS Resolver Inbound EP (10.0.3.4)"
+              }
+            }
+
+            DNSOutboundSubnet.class: subnet
+            DNSOutboundSubnet: {
+              label: "SNET-DNS-OUTBOUND (10.0.3.16/28)"
+
+              DNSOutboundEndpoint.class: resource
+              DNSOutboundEndpoint: {
+                icon: azure-dns
+                label: DNS Resolver Outbound EP
+              }
+            }
+
+            SharedServicesSubnet.class: subnet
+            SharedServicesSubnet: {
+              label: "SNET-SHARED-SERVICES (10.0.4.0/24)"
+              grid-columns: 2
+
+              ADDS_DC.class: resource
+              ADDS_DC: {
+                icon: azure-virtual-machine
+                label: AD DS Domain Controllers
+              }
+
+              NSG_Shared.class: resource
+              NSG_Shared: {
+                icon: azure-network-security-groups
+                label: nsg-shared
+              }
+
+              UDR_Shared.class: resource
+              UDR_Shared: {
+                icon: settings
+                label: "rt-shared: 0/0 → FW"
+              }
+            }
+
+            ManagementSubnet.class: subnet
+            ManagementSubnet: {
+              label: "SNET-MANAGEMENT (10.0.5.0/24)"
+              grid-columns: 2
+
+              JumpBox.class: resource
+              JumpBox: {
+                icon: azure-virtual-machine
+                label: Management / Jump VMs
+              }
+
+              NSG_Mgmt.class: resource
+              NSG_Mgmt: {
+                icon: azure-network-security-groups
+                label: "nsg-mgmt (Bastion only)"
+              }
+
+              UDR_Mgmt.class: resource
+              UDR_Mgmt: {
+                icon: settings
+                label: "rt-mgmt: 0/0 → FW"
+              }
+            }
+          }
+
+          HubServices.class: resource_group
+          HubServices: {
+            label: HUB PLATFORM SERVICES (NON-VNET)
+            grid-columns: 4
+
+            FirewallPolicy.class: resource
+            FirewallPolicy: {
+              icon: azure-policy
+              label: "Firewall Policy (IDPS, TLS Inspection)"
+            }
+
+            PrivateDNSZones.class: resource
+            PrivateDNSZones: {
+              icon: azure-dns
+              label: "Private DNS Zones (privatelink.database / blob) – Spokes use DNS 10.0.3.4"
+            }
+
+            DNSForwardingRuleset.class: resource
+            DNSForwardingRuleset: {
+              icon: azure-dns
+              label: "DNS Forwarding Ruleset (corp.contoso.com → On-Prem) – Linked to Spokes"
+            }
+
+            NetworkWatcher.class: resource
+            NetworkWatcher: {
+              icon: monitor
+              label: "Network Watcher (VNet Flow Logs)"
+            }
+          }
+        }
+      }
+    }
+
+    ManagementSubscription.class: subscription
+    ManagementSubscription: {
+      label: MANAGEMENT SUBSCRIPTION
+
+      AustraliaEast.class: region
+      AustraliaEast: {
+        label: "REGION: AUSTRALIA EAST"
+        style.stroke-dash: 4
+
+        MgmtRG.class: resource_group
+        MgmtRG: {
+          label: RG-MANAGEMENT
+          direction: right
+
+          LogAnalytics.class: resource
+          LogAnalytics: {
+            icon: azure-log-analytics
+            label: "Log Analytics Workspace (Central)"
+          }
+
+          AzureMonitor.class: resource
+          AzureMonitor: {
+            icon: azure-monitor
+            label: "Azure Monitor (Alerts, Workbooks, Traffic Analytics)"
+          }
+        }
+      }
+    }
+  }
+
+  LandingZones.class: region
+  LandingZones: {
+    label: LANDING ZONES MANAGEMENT GROUP
+    grid-columns: 1
+    style.stroke-dash: 4
+
+    WorkloadASubscription.class: subscription
+    WorkloadASubscription: {
+      label: WORKLOAD A SUBSCRIPTION
+
+      AustraliaEast.class: region
+      AustraliaEast: {
+        label: "REGION: AUSTRALIA EAST"
+        style.stroke-dash: 4
+
+        SpokeARG.class: resource_group
+        SpokeARG: {
+          label: RG-SPOKE-A
+          direction: right
+
+          SpokeAVNet.class: network
+          SpokeAVNet: {
+            label: "SPOKE A VNET (10.1.0.0/16)"
+            direction: right
+
+            AppSubnetA.class: subnet
+            AppSubnetA: {
+              label: "SNET-APP (10.1.1.0/24)"
+              grid-columns: 2
+
+              InternalLB_A.class: resource
+              InternalLB_A: {
+                icon: azure-load-balancers
+                label: Internal Load Balancer
+              }
+
+              AppVMs_A.class: resource
+              AppVMs_A: {
+                icon: azure-vm-scale-sets
+                label: App Tier VMSS
+              }
+
+              NSG_AppA.class: resource
+              NSG_AppA: {
+                icon: azure-network-security-groups
+                label: nsg-app-a
+              }
+
+              UDR_AppA.class: resource
+              UDR_AppA: {
+                icon: settings
+                label: "rt-app-a: 0/0 → FW, BGP Prop Off"
+              }
+            }
+
+            DataSubnetA.class: subnet
+            DataSubnetA: {
+              label: "SNET-DATA (10.1.2.0/24)"
+              grid-columns: 1
+
+              PE_SQL_A.class: resource
+              PE_SQL_A: {
+                icon: azure-private-link
+                label: "Private Endpoint – SQL (10.1.2.4)"
+              }
+
+              NSG_DataA.class: resource
+              NSG_DataA: {
+                icon: azure-network-security-groups
+                label: "nsg-data-a (PE Policies On)"
+              }
+
+              UDR_DataA.class: resource
+              UDR_DataA: {
+                icon: settings
+                label: "rt-data-a: 0/0 → FW"
+              }
+            }
+          }
+
+          AzureSQL_A.class: resource
+          AzureSQL_A: {
+            icon: azure-sql-database
+            label: "Azure SQL Database (Public Access Disabled)"
+            shape: cylinder
+          }
+        }
+      }
+    }
+
+    WorkloadBSubscription.class: subscription
+    WorkloadBSubscription: {
+      label: WORKLOAD B SUBSCRIPTION
+
+      AustraliaEast.class: region
+      AustraliaEast: {
+        label: "REGION: AUSTRALIA EAST"
+        style.stroke-dash: 4
+
+        SpokeBRG.class: resource_group
+        SpokeBRG: {
+          label: RG-SPOKE-B
+          direction: right
+
+          SpokeBVNet.class: network
+          SpokeBVNet: {
+            label: "SPOKE B VNET (10.2.0.0/16)"
+            direction: right
+
+            AppSubnetB.class: subnet
+            AppSubnetB: {
+              label: "SNET-APP (10.2.1.0/24)"
+              grid-columns: 2
+
+              InternalLB_B.class: resource
+              InternalLB_B: {
+                icon: azure-load-balancers
+                label: Internal Load Balancer
+              }
+
+              AppVMs_B.class: resource
+              AppVMs_B: {
+                icon: azure-vm-scale-sets
+                label: App Tier VMSS
+              }
+
+              NSG_AppB.class: resource
+              NSG_AppB: {
+                icon: azure-network-security-groups
+                label: nsg-app-b
+              }
+
+              UDR_AppB.class: resource
+              UDR_AppB: {
+                icon: settings
+                label: "rt-app-b: 0/0 → FW, BGP Prop Off"
+              }
+            }
+
+            DataSubnetB.class: subnet
+            DataSubnetB: {
+              label: "SNET-DATA (10.2.2.0/24)"
+              grid-columns: 1
+
+              PE_Storage_B.class: resource
+              PE_Storage_B: {
+                icon: azure-private-link
+                label: "Private Endpoint – Blob (10.2.2.4)"
+              }
+
+              NSG_DataB.class: resource
+              NSG_DataB: {
+                icon: azure-network-security-groups
+                label: "nsg-data-b (PE Policies On)"
+              }
+
+              UDR_DataB.class: resource
+              UDR_DataB: {
+                icon: settings
+                label: "rt-data-b: 0/0 → FW"
+              }
+            }
+          }
+
+          StorageAccount_B.class: resource
+          StorageAccount_B: {
+            icon: azure-storage
+            label: "Storage Account (Public Access Disabled)"
+            shape: cylinder
+          }
+        }
+      }
+    }
+  }
+}
+
+# Connections
+OnPremDC.CEEdgeRouter -> ConnectivityProvider.ERCircuit: "ER Private Peering (BGP)"
+ConnectivityProvider.ERCircuit -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.GatewaySubnet.ERGateway: "ER Connection (Primary)"
+OnPremDC.CEEdgeRouter -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.GatewaySubnet.VPNGateway: "S2S IPsec (Backup)" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.GatewaySubnet.ERGateway -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureFirewallSubnet.AzureFirewall: "UDR → FW"
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.GatewaySubnet.VPNGateway -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureFirewallSubnet.AzureFirewall: "UDR → FW"
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureFirewallSubnet.AzureFirewall <-> AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.AppSubnetA.InternalLB_A: "Inspected (0/0 → FW)" {
+  style.stroke: "#d32f2f"
+  style.stroke-width: 2
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureFirewallSubnet.AzureFirewall <-> AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.AppSubnetB.InternalLB_B: "Inspected (0/0 → FW)" {
+  style.stroke: "#d32f2f"
+  style.stroke-width: 2
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet <-> AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet: "VNet Peering (GW Transit)" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet <-> AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet: "VNet Peering (GW Transit)" {
+  style.stroke-dash: 5
+}
+AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.AppSubnetA.InternalLB_A -> AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.AppSubnetA.AppVMs_A: "HTTPS 443"
+AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.AppSubnetA.AppVMs_A -> AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.DataSubnetA.PE_SQL_A: "TDS 1433"
+AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.SpokeAVNet.DataSubnetA.PE_SQL_A -> AzureTenant.LandingZones.WorkloadASubscription.AustraliaEast.SpokeARG.AzureSQL_A: "Private Link"
+AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.AppSubnetB.InternalLB_B -> AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.AppSubnetB.AppVMs_B: "HTTPS 443"
+AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.AppSubnetB.AppVMs_B -> AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.DataSubnetB.PE_Storage_B: "HTTPS 443"
+AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.SpokeBVNet.DataSubnetB.PE_Storage_B -> AzureTenant.LandingZones.WorkloadBSubscription.AustraliaEast.SpokeBRG.StorageAccount_B: "Private Link"
+OnPremDC.OnPremDNS -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.DNSInboundSubnet.DNSInboundEndpoint: "DNS 53 (privatelink)" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.DNSInboundSubnet.DNSInboundEndpoint -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubServices.PrivateDNSZones: "PE A-Records" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.DNSOutboundSubnet.DNSOutboundEndpoint -> OnPremDC.OnPremDNS: "DNS Fwd (corp)" {
+  style.stroke-dash: 5
+}
+OnPremDC.CorpUsers -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureBastionSubnet.AzureBastion: "HTTPS 443"
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureBastionSubnet.AzureBastion -> AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.ManagementSubnet.JumpBox: "RDP/SSH"
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubVNet.AzureFirewallSubnet.AzureFirewall -> AzureTenant.Platform.ManagementSubscription.AustraliaEast.MgmtRG.LogAnalytics: "FW Logs" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ConnectivitySubscription.AustraliaEast.HubRG.HubServices.NetworkWatcher -> AzureTenant.Platform.ManagementSubscription.AustraliaEast.MgmtRG.LogAnalytics: "Flow Logs" {
+  style.stroke-dash: 5
+}
+AzureTenant.LandingZones -> AzureTenant.Platform.ManagementSubscription.AustraliaEast.MgmtRG.LogAnalytics: "Diagnostics + AMA" {
+  style.stroke-dash: 5
+}
+AzureTenant.Platform.ManagementSubscription.AustraliaEast.MgmtRG.LogAnalytics -> AzureTenant.Platform.ManagementSubscription.AustraliaEast.MgmtRG.AzureMonitor: "KQL Alerts" {
+  style.stroke-dash: 5
+}

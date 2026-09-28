@@ -1,0 +1,41 @@
+{
+  "id": "azure-rag-llm-app",
+  "title": "Azure RAG / LLM Application",
+  "prompt": "Create an Azure retrieval-augmented generation application architecture diagram. Include users, Azure Front Door, App Service web app, managed identity, Azure OpenAI, Azure AI Search vector index, Blob Storage document store, Cosmos DB chat/session store, document ingestion function, chunking/embedding pipeline, Key Vault, Application Insights, Azure Monitor, and private endpoints. Show user query flow, retrieval from AI Search, prompt completion through Azure OpenAI, document upload ingestion, embeddings creation, metadata persistence, secret access, and telemetry. Group by Azure subscription, region, resource group, app subnet, data/private endpoint subnet, and operations.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 87,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "app service"
+    ],
+    [
+      "azure openai",
+      "openai"
+    ],
+    [
+      "ai search",
+      "search"
+    ],
+    [
+      "blob storage",
+      "blob"
+    ],
+    [
+      "cosmos db",
+      "cosmos"
+    ],
+    [
+      "embedding",
+      "embeddings"
+    ],
+    [
+      "key vault"
+    ],
+    [
+      "private endpoint"
+    ]
+  ],
+  "minNodes": 12,
+  "generatedOn": "2026-09-28"
+}

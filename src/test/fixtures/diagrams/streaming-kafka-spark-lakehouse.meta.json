@@ -1,0 +1,37 @@
+{
+  "id": "streaming-kafka-spark-lakehouse",
+  "title": "Streaming Kafka to Lakehouse Analytics",
+  "prompt": "Create a vendor-neutral streaming data pipeline diagram. Include producers, Kafka cluster with topics, schema registry, stream ingestion service, Apache Spark streaming jobs, checkpoint storage, raw data lake zone, curated data lake zone, batch quality checks, data warehouse, BI dashboard, metadata catalog, monitoring, and alerting. Show event ingestion, schema validation, stream processing, writes to raw and curated zones, warehouse loading, BI queries, and operational metrics. Group into ingestion, processing, storage, serving, and operations zones.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 81,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "kafka"
+    ],
+    [
+      "schema registry"
+    ],
+    [
+      "spark"
+    ],
+    [
+      "checkpoint"
+    ],
+    [
+      "data lake"
+    ],
+    [
+      "warehouse"
+    ],
+    [
+      "bi",
+      "dashboard"
+    ],
+    [
+      "catalog"
+    ]
+  ],
+  "minNodes": 11,
+  "generatedOn": "2026-09-28"
+}

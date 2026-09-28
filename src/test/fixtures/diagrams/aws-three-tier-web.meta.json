@@ -1,0 +1,42 @@
+{
+  "id": "aws-three-tier-web",
+  "title": "AWS Three-Tier Web Application",
+  "prompt": "Create an AWS three-tier web application architecture diagram. Include internet users, Route 53, CloudFront, WAF, a public Application Load Balancer across two Availability Zones, EC2 Auto Scaling Group instances in private application subnets, RDS Multi-AZ in private data subnets, ElastiCache Redis, NAT Gateways, S3 static assets, Secrets Manager, CloudWatch, and VPC Flow Logs. Show HTTPS request flow from users through CloudFront and ALB to EC2, then SQL to RDS and cache calls to Redis. Group by AWS account, region, VPC, public/private subnets, and Availability Zones.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 90,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "cloudfront",
+      "cdn"
+    ],
+    [
+      "application load balancer",
+      "alb"
+    ],
+    [
+      "ec2",
+      "auto scaling"
+    ],
+    [
+      "rds",
+      "aurora"
+    ],
+    [
+      "elasticache",
+      "redis"
+    ],
+    [
+      "route 53",
+      "dns"
+    ],
+    [
+      "waf"
+    ],
+    [
+      "cloudwatch"
+    ]
+  ],
+  "minNodes": 12,
+  "generatedOn": "2026-09-28"
+}

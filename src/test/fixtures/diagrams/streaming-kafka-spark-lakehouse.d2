@@ -1,0 +1,328 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+Producers.class: region
+Producers: {
+  label: EVENT PRODUCERS
+  direction: down
+
+  AppServices.class: resource
+  AppServices: {
+    icon: server
+    label: App Services
+  }
+
+  IoTDevices.class: resource
+  IoTDevices: {
+    icon: mobile
+    label: IoT Devices
+  }
+
+  CDCConnectors.class: resource
+  CDCConnectors: {
+    icon: database
+    label: CDC Connectors
+  }
+}
+
+DataPlatform.class: subscription
+DataPlatform: {
+  label: STREAMING DATA PLATFORM
+  grid-columns: 3
+  grid-gap: 60
+
+  IngestionZone.class: resource_group
+  IngestionZone: {
+    label: INGESTION ZONE
+    direction: down
+
+    StreamIngestionService.class: resource
+    StreamIngestionService: {
+      icon: api
+      label: Stream Ingestion Service
+    }
+
+    SchemaRegistry.class: resource
+    SchemaRegistry: {
+      icon: settings
+      label: Schema Registry
+    }
+
+    KafkaCluster.class: network
+    KafkaCluster: {
+      label: KAFKA CLUSTER
+      icon: kafka
+      direction: down
+
+      Topic_RawEvents.class: resource
+      Topic_RawEvents: {
+        icon: queue
+        label: "topic: events.raw"
+      }
+
+      Topic_DeadLetter.class: resource
+      Topic_DeadLetter: {
+        icon: queue
+        label: "topic: events.dlq"
+        style.stroke: "#c62828"
+      }
+    }
+  }
+
+  ProcessingZone.class: resource_group
+  ProcessingZone: {
+    label: PROCESSING ZONE
+    direction: down
+
+    StreamProcessing.class: network
+    StreamProcessing: {
+      label: SPARK STRUCTURED STREAMING
+      icon: spark
+      direction: down
+
+      SparkRawIngestJob.class: resource
+      SparkRawIngestJob: {
+        icon: spark
+        label: Raw Ingest Job
+      }
+
+      SparkCurationJob.class: resource
+      SparkCurationJob: {
+        icon: spark
+        label: Curation Job
+      }
+    }
+
+    CheckpointStorage.class: resource
+    CheckpointStorage: {
+      icon: storage
+      label: Checkpoint Storage
+    }
+
+    BatchLayer.class: subnet
+    BatchLayer: {
+      label: BATCH LAYER (SCHEDULED BY ORCHESTRATOR)
+      direction: down
+
+      Orchestrator.class: resource
+      Orchestrator: {
+        icon: airflow
+        label: Orchestrator
+      }
+
+      BatchQualityChecks.class: resource
+      BatchQualityChecks: {
+        icon: lock
+        label: Batch Quality Checks
+      }
+
+      WarehouseLoader.class: resource
+      WarehouseLoader: {
+        icon: server
+        label: Warehouse Loader
+      }
+    }
+  }
+
+  StorageZone.class: resource_group
+  StorageZone: {
+    label: STORAGE ZONE
+    direction: down
+
+    DataLake.class: network
+    DataLake: {
+      label: DATA LAKE (OPEN TABLE FORMAT)
+      direction: down
+
+      RawZone.class: resource
+      RawZone: {
+        icon: storage
+        label: Raw Zone (Bronze)
+      }
+
+      CuratedZone.class: resource
+      CuratedZone: {
+        icon: storage
+        label: Curated Zone (Silver/Gold)
+      }
+    }
+  }
+
+  OperationsZone.class: resource_group
+  OperationsZone: {
+    label: OPERATIONS ZONE
+    direction: down
+
+    Monitoring.class: resource
+    Monitoring: {
+      icon: monitor
+      label: Monitoring
+    }
+
+    Alerting.class: resource
+    Alerting: {
+      icon: notification
+      label: Alerting
+    }
+  }
+
+  ServingZone.class: resource_group
+  ServingZone: {
+    label: SERVING ZONE
+    direction: right
+
+    DataWarehouse.class: resource
+    DataWarehouse: {
+      icon: database
+      label: Data Warehouse
+      shape: cylinder
+    }
+
+    BIDashboard.class: resource
+    BIDashboard: {
+      icon: desktop
+      label: BI Dashboard
+    }
+
+    MetadataCatalog.class: resource
+    MetadataCatalog: {
+      icon: settings
+      label: Metadata Catalog
+    }
+  }
+}
+
+BIUsers.class: resource
+BIUsers: {
+  icon: users
+  label: BI Users
+}
+
+OnCallTeam.class: resource
+OnCallTeam: {
+  icon: user
+  label: On-Call Team
+}
+
+# Connections
+Producers -> DataPlatform.IngestionZone.StreamIngestionService: 1. Events {
+  style.stroke: "#1565c0"
+}
+DataPlatform.IngestionZone.StreamIngestionService -> DataPlatform.IngestionZone.SchemaRegistry: 2. Schema Check {
+  style.stroke: "#1565c0"
+}
+DataPlatform.IngestionZone.StreamIngestionService -> DataPlatform.IngestionZone.KafkaCluster.Topic_RawEvents: 3. Produce {
+  style.stroke: "#1565c0"
+}
+DataPlatform.IngestionZone.StreamIngestionService -> DataPlatform.IngestionZone.KafkaCluster.Topic_DeadLetter: Invalid {
+  style.stroke-dash: 5
+  style.stroke: "#c62828"
+}
+DataPlatform.IngestionZone.KafkaCluster.Topic_RawEvents -> DataPlatform.ProcessingZone.StreamProcessing.SparkRawIngestJob: 4. Consume {
+  style.stroke: "#1565c0"
+}
+DataPlatform.ProcessingZone.StreamProcessing -> DataPlatform.IngestionZone.SchemaRegistry: Schema Lookup {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+DataPlatform.ProcessingZone.StreamProcessing -> DataPlatform.ProcessingZone.CheckpointStorage: Checkpoint {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+DataPlatform.ProcessingZone.StreamProcessing.SparkRawIngestJob -> DataPlatform.StorageZone.DataLake.RawZone: 5. Append Raw {
+  style.stroke: "#1565c0"
+}
+DataPlatform.StorageZone.DataLake.RawZone -> DataPlatform.ProcessingZone.StreamProcessing.SparkCurationJob: 6. Stream Read {
+  style.stroke: "#1565c0"
+}
+DataPlatform.ProcessingZone.StreamProcessing.SparkCurationJob -> DataPlatform.StorageZone.DataLake.CuratedZone: 7. Merge {
+  style.stroke: "#1565c0"
+}
+DataPlatform.StorageZone.DataLake.CuratedZone -> DataPlatform.ProcessingZone.BatchLayer.BatchQualityChecks: 8. Batch Read {
+  style.stroke: "#1565c0"
+}
+DataPlatform.ProcessingZone.BatchLayer.BatchQualityChecks -> DataPlatform.ProcessingZone.BatchLayer.WarehouseLoader: 9. Gate Passed {
+  style.stroke: "#1565c0"
+}
+DataPlatform.ProcessingZone.BatchLayer.WarehouseLoader -> DataPlatform.ServingZone.DataWarehouse: 10. Load {
+  style.stroke: "#1565c0"
+}
+DataPlatform.ServingZone.BIDashboard -> DataPlatform.ServingZone.DataWarehouse: SQL {
+  style.stroke: "#1565c0"
+}
+BIUsers -> DataPlatform.ServingZone.BIDashboard: HTTPS {
+  style.stroke: "#1565c0"
+}
+DataPlatform.StorageZone -> DataPlatform.ServingZone.MetadataCatalog: Lineage {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+DataPlatform.IngestionZone -> DataPlatform.OperationsZone.Monitoring: Metrics {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+DataPlatform.ProcessingZone -> DataPlatform.OperationsZone.Monitoring: Metrics {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+DataPlatform.ServingZone -> DataPlatform.OperationsZone.Monitoring: Metrics {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+DataPlatform.OperationsZone.Monitoring -> DataPlatform.OperationsZone.Alerting: Threshold {
+  style.stroke: "#c62828"
+}
+DataPlatform.OperationsZone.Alerting -> OnCallTeam: Page {
+  style.stroke-dash: 5
+  style.stroke: "#c62828"
+}

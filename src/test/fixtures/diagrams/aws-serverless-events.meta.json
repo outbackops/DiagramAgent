@@ -1,0 +1,40 @@
+{
+  "id": "aws-serverless-events",
+  "title": "AWS Serverless Event-Driven Application",
+  "prompt": "Create an AWS serverless event-driven architecture diagram for an order processing API. Include users, Amazon API Gateway, Lambda authorizer, order Lambda functions, SQS queue, EventBridge event bus, DynamoDB orders table, Step Functions workflow, SNS notifications, S3 receipt bucket, CloudWatch logs and alarms, IAM roles, and DLQ. Show synchronous API request/response, asynchronous queue processing, EventBridge fan-out, retry/DLQ path, and notifications. Group resources by AWS account and region, with clear API, processing, data, and observability zones.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 91,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "api gateway"
+    ],
+    [
+      "lambda"
+    ],
+    [
+      "sqs",
+      "queue"
+    ],
+    [
+      "dynamodb"
+    ],
+    [
+      "eventbridge",
+      "event bus"
+    ],
+    [
+      "step functions",
+      "state machine"
+    ],
+    [
+      "sns"
+    ],
+    [
+      "dlq",
+      "dead letter"
+    ]
+  ],
+  "minNodes": 11,
+  "generatedOn": "2026-09-28"
+}

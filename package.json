@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
+    "eval:diagrams": "tsx scripts/eval-diagrams.ts",
     "vendor:icons": "tsx scripts/vendor-icons.ts",
     "prebuild": "npm run vendor:icons"
   },

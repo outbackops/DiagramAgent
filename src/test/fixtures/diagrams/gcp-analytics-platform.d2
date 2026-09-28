@@ -1,0 +1,325 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+External.class: region
+External: {
+  label: EXTERNAL
+  direction: down
+
+  DataProducers.class: resource
+  DataProducers: {
+    icon: server
+    label: Data Producers (Apps, IoT, CDC)
+  }
+
+  BIUsers.class: resource
+  BIUsers: {
+    icon: users
+    label: Business Analysts / BI Users
+  }
+}
+
+GCPProject.class: subscription
+GCPProject: {
+  label: GCP PROJECT: ANALYTICS-PROD
+  direction: down
+
+  RegionUSC1.class: region
+  RegionUSC1: {
+    label: REGION: US-CENTRAL1
+
+    IngestionZone.class: resource_group
+    IngestionZone: {
+      label: DATA INGESTION
+      direction: down
+
+      PubSubTopic.class: resource
+      PubSubTopic: {
+        icon: gcp-pubsub
+        label: "Pub/Sub Topic: events-raw"
+      }
+
+      PubSubSubscription.class: resource
+      PubSubSubscription: {
+        icon: gcp-pubsub
+        label: "Subscription: events-dataflow-sub"
+      }
+
+      PubSubDLQ.class: resource
+      PubSubDLQ: {
+        icon: gcp-pubsub
+        label: "Dead-Letter Topic: events-dlq"
+        shape: queue
+      }
+    }
+
+    ProcessingZone.class: resource_group
+    ProcessingZone: {
+      label: PROCESSING & ORCHESTRATION
+
+      AnalyticsVPC.class: network
+      AnalyticsVPC: {
+        label: "VPC: ANALYTICS-VPC (PRIVATE GOOGLE ACCESS)"
+        direction: down
+
+        ProcessingSubnet.class: subnet
+        ProcessingSubnet: {
+          label: "PROCESSING-SUBNET (10.10.0.0/20)"
+          direction: down
+
+          Dataflow.class: resource
+          Dataflow: {
+            icon: gcp-dataflow
+            label: Dataflow Streaming Pipeline
+          }
+
+          Dataproc.class: resource
+          Dataproc: {
+            icon: spark
+            label: Dataproc Serverless Spark
+          }
+        }
+
+        ComposerSubnet.class: subnet
+        ComposerSubnet: {
+          label: "COMPOSER-SUBNET (10.20.0.0/24)"
+
+          Composer.class: resource
+          Composer: {
+            icon: airflow
+            label: Cloud Composer 2 (Airflow)
+          }
+        }
+      }
+
+      Dataform.class: resource
+      Dataform: {
+        icon: settings
+        label: Dataform (SQLX ELT)
+      }
+    }
+
+    StorageWarehouseZone.class: resource_group
+    StorageWarehouseZone: {
+      label: STORAGE & WAREHOUSE
+      direction: down
+
+      RawBucket.class: resource
+      RawBucket: {
+        icon: gcp-cloud-storage
+        label: "Cloud Storage: raw-landing"
+      }
+
+      BigQueryWarehouse.class: resource_group
+      BigQueryWarehouse: {
+        label: BIGQUERY WAREHOUSE
+        direction: down
+
+        BQRaw.class: resource
+        BQRaw: {
+          icon: gcp-bigquery
+          label: "Dataset: raw"
+          shape: cylinder
+        }
+
+        BQCurated.class: resource
+        BQCurated: {
+          icon: gcp-bigquery
+          label: "Dataset: curated"
+          shape: cylinder
+        }
+
+        BQMarts.class: resource
+        BQMarts: {
+          icon: gcp-bigquery
+          label: "Dataset: marts"
+          shape: cylinder
+        }
+      }
+    }
+  }
+
+  AnalyticsZone.class: resource_group
+  AnalyticsZone: {
+    label: ANALYTICS / BI
+
+    Looker.class: resource
+    Looker: {
+      icon: desktop
+      label: Looker Dashboards
+    }
+  }
+
+  OperationsZone.class: resource_group
+  OperationsZone: {
+    label: OPERATIONS, SECURITY & GOVERNANCE
+    direction: right
+
+    SecurityIdentity.class: resource_group
+    SecurityIdentity: {
+      label: SECURITY & IDENTITY
+      direction: down
+
+      SecretManager.class: resource
+      SecretManager: {
+        icon: lock
+        label: Secret Manager
+      }
+
+      IAMServiceAccounts.class: resource_group
+      IAMServiceAccounts: {
+        label: IAM SERVICE ACCOUNTS
+        direction: down
+
+        SA_Dataflow.class: resource
+        SA_Dataflow: {
+          icon: gcp-iam
+          label: sa-dataflow
+        }
+
+        SA_Transform.class: resource
+        SA_Transform: {
+          icon: gcp-iam
+          label: sa-transform
+        }
+
+        SA_Composer.class: resource
+        SA_Composer: {
+          icon: gcp-iam
+          label: sa-composer
+        }
+
+        SA_Looker.class: resource
+        SA_Looker: {
+          icon: gcp-iam
+          label: sa-looker (BQ Read)
+        }
+      }
+    }
+
+    Governance.class: resource_group
+    Governance: {
+      label: METADATA & GOVERNANCE
+      direction: down
+
+      DataCatalog.class: resource
+      DataCatalog: {
+        icon: database
+        label: Data Catalog (Dataplex)
+      }
+    }
+
+    Observability.class: resource_group
+    Observability: {
+      label: OBSERVABILITY
+      direction: down
+
+      CloudMonitoring.class: resource
+      CloudMonitoring: {
+        icon: monitor
+        label: Cloud Monitoring
+      }
+
+      CloudLogging.class: resource
+      CloudLogging: {
+        icon: gcp-cloud-logging
+        label: Cloud Logging
+      }
+    }
+  }
+}
+
+# Connections
+External.DataProducers -> GCPProject.RegionUSC1.IngestionZone.PubSubTopic: 1 Publish (gRPC)
+GCPProject.RegionUSC1.IngestionZone.PubSubTopic -> GCPProject.RegionUSC1.IngestionZone.PubSubSubscription: Fan-out
+GCPProject.RegionUSC1.IngestionZone.PubSubSubscription -> GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow: Streaming Pull
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow -> GCPProject.RegionUSC1.IngestionZone.PubSubDLQ: Dead Letter {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow -> GCPProject.RegionUSC1.StorageWarehouseZone.RawBucket: 2 Land (Avro/Parquet)
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow -> GCPProject.RegionUSC1.StorageWarehouseZone.BigQueryWarehouse.BQRaw: Storage Write API
+GCPProject.RegionUSC1.StorageWarehouseZone.RawBucket -> GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataproc: 3 Transform (Spark)
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataproc -> GCPProject.RegionUSC1.StorageWarehouseZone.BigQueryWarehouse.BQCurated: 4 Load Curated
+GCPProject.RegionUSC1.ProcessingZone.Dataform -> GCPProject.RegionUSC1.StorageWarehouseZone.BigQueryWarehouse.BQMarts: SQLX ELT
+External.BIUsers -> GCPProject.AnalyticsZone.Looker: HTTPS
+GCPProject.AnalyticsZone.Looker -> GCPProject.RegionUSC1.StorageWarehouseZone.BigQueryWarehouse.BQMarts: 5 Serve (BigQuery SQL)
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ComposerSubnet.Composer -> GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow: Flex Template {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ComposerSubnet.Composer -> GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataproc: Spark Batch {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ComposerSubnet.Composer -> GCPProject.RegionUSC1.ProcessingZone.Dataform: Invoke Workflow {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ComposerSubnet.Composer -> GCPProject.OperationsZone.SecurityIdentity.SecretManager: Secrets {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.StorageWarehouseZone.RawBucket -> GCPProject.OperationsZone.Governance.DataCatalog: Fileset Metadata {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.StorageWarehouseZone.BigQueryWarehouse -> GCPProject.OperationsZone.Governance.DataCatalog: Schemas / Lineage {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ProcessingSubnet.Dataflow -> GCPProject.OperationsZone.Observability.CloudMonitoring: Metrics {
+  style.stroke-dash: 5
+}
+GCPProject.RegionUSC1.ProcessingZone.AnalyticsVPC.ComposerSubnet.Composer -> GCPProject.OperationsZone.Observability.CloudLogging: Logs {
+  style.stroke-dash: 5
+}
+GCPProject.OperationsZone.SecurityIdentity.IAMServiceAccounts -> GCPProject.RegionUSC1.ProcessingZone: Workload Identity {
+  style.stroke-dash: 5
+}
+GCPProject.OperationsZone.SecurityIdentity.IAMServiceAccounts.SA_Looker -> GCPProject.AnalyticsZone.Looker: BQ Identity {
+  style.stroke-dash: 5
+}
