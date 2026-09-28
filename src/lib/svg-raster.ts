@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { resolveIconUrl } from "@/lib/icon-registry";
 
 /**
  * Rasterise D2 SVGs on the server. Vendored icons are referenced as
@@ -10,25 +11,42 @@ import sharp from "sharp";
  */
 
 const ICON_HREF = /\b(href|xlink:href)="(\/icons\/([a-z0-9][a-z0-9._-]*\.svg))"/gi;
-const iconCache = new Map<string, string | null>();
+const MAX_ICONS_PER_SVG = 500;
+const MAX_ICON_CACHE_ENTRIES = 1000;
+const iconCache = new Map<string, string>();
 
 async function iconDataUri(fileName: string, publicDir: string): Promise<string | null> {
   const key = `${publicDir}|${fileName}`;
-  if (iconCache.has(key)) return iconCache.get(key)!;
-  let uri: string | null = null;
+  const cached = iconCache.get(key);
+  if (cached) {
+    iconCache.delete(key);
+    iconCache.set(key, cached);
+    return cached;
+  }
   try {
     const svg = await readFile(path.join(publicDir, "icons", fileName));
-    uri = `data:image/svg+xml;base64,${svg.toString("base64")}`;
+    const uri = `data:image/svg+xml;base64,${svg.toString("base64")}`;
+    iconCache.set(key, uri);
+    if (iconCache.size > MAX_ICON_CACHE_ENTRIES) {
+      const oldest = iconCache.keys().next().value;
+      if (oldest) iconCache.delete(oldest);
+    }
+    return uri;
   } catch {
-    uri = null;
+    return null;
   }
-  iconCache.set(key, uri);
-  return uri;
 }
 
 export async function inlineVendoredIcons(svg: string, publicDir = path.join(process.cwd(), "public")): Promise<string> {
   const files = new Set<string>();
-  for (const match of svg.matchAll(ICON_HREF)) files.add(match[3]);
+  for (const match of svg.matchAll(ICON_HREF)) {
+    const file = match[3];
+    const key = file.slice(0, -4);
+    if (resolveIconUrl(key) === `/icons/${key}.svg`) {
+      files.add(file);
+      if (files.size >= MAX_ICONS_PER_SVG) break;
+    }
+  }
   if (files.size === 0) return svg;
 
   const uris = new Map<string, string>();
@@ -59,7 +77,8 @@ const MONO_STACK = `"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace`;
  * explicit system fallback with the matching weight/style.
  */
 export function withFallbackFonts(svg: string): string {
-  return svg.replace(/font-family:\s*"(d2-[\w-]*?font-([a-z]+)[\w-]*)";/g, (_whole, family: string, variant: string) => {
+  return svg.replace(/font-family:\s*"(d2-[\w-]{1,120})";/g, (_whole, family: string) => {
+    const variant = /font-([a-z]+)/.exec(family)?.[1] ?? "";
     const stack = variant.startsWith("mono") ? MONO_STACK : SANS_STACK;
     const weight = variant === "bold" ? " font-weight: 700;" : variant === "semibold" ? " font-weight: 600;" : "";
     const style = variant === "italic" ? " font-style: italic;" : "";

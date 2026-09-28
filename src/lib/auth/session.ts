@@ -1,6 +1,6 @@
 import { LlmError } from "@/lib/llm/errors";
 import type { LlmCredentials } from "@/lib/llm/types";
-import { machineLoginAllowed } from "./policy";
+import { machineLoginAllowedFor } from "./policy";
 import { seal, unseal } from "./seal";
 
 export const SESSION_COOKIE = "da_session";
@@ -18,7 +18,13 @@ function readCookie(request: Request, name: string): string | null {
   if (!header) return null;
   for (const part of header.split(";")) {
     const [rawName, ...rest] = part.trim().split("=");
-    if (rawName === name) return decodeURIComponent(rest.join("="));
+    if (rawName === name) {
+      try {
+        return decodeURIComponent(rest.join("="));
+      } catch {
+        return null;
+      }
+    }
   }
   return null;
 }
@@ -37,7 +43,7 @@ export function readSession(request: Request): SessionPayload | null {
 export function getRequestCredentials(request: Request): LlmCredentials | null {
   const session = readSession(request);
   if (session) return { kind: "github-token", token: session.token, login: session.login };
-  return machineLoginAllowed() ? { kind: "machine" } : null;
+  return machineLoginAllowedFor(request) ? { kind: "machine" } : null;
 }
 
 export function requireCredentials(request: Request): LlmCredentials {

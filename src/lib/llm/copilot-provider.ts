@@ -41,7 +41,7 @@ type GlobalWithRuntime = typeof globalThis & {
  * never show up in their CLI history and no repo instructions are discovered.
  */
 export function copilotHomeDir(): string {
-  return process.env.DIAGRAM_AGENT_COPILOT_HOME || path.join(os.tmpdir(), "diagram-agent", "copilot");
+  return process.env.DIAGRAM_AGENT_COPILOT_HOME || path.join(os.homedir(), ".diagram-agent", "copilot");
 }
 
 /**
@@ -68,10 +68,25 @@ function getRuntime(): Promise<Runtime> {
       return { client, workDir };
     })().catch((err) => {
       delete g[RUNTIME_KEY];
-      throw toLlmError(err, "Could not start the GitHub Copilot runtime");
+      console.error("GitHub Copilot runtime start failed:", err);
+      throw toLlmError(err, "Could not start the GitHub Copilot runtime", true);
     });
   }
   return g[RUNTIME_KEY]!;
+}
+
+/**
+ * Drop a runtime whose connection died and kill its CLI process. The shared slot
+ * is cleared only if it still holds that runtime, so when several requests hit
+ * the same dead connection they don't discard a replacement another one started.
+ */
+async function resetRuntime(dead: Runtime): Promise<void> {
+  const g = globalThis as GlobalWithRuntime;
+  const current = g[RUNTIME_KEY];
+  if (current && (await current.catch(() => null)) === dead && g[RUNTIME_KEY] === current) {
+    delete g[RUNTIME_KEY];
+  }
+  await dead.client.forceStop().catch(() => {});
 }
 
 function catalogCache() {
@@ -111,7 +126,12 @@ const ERROR_TYPE_CODES: Record<string, LlmError["code"]> = {
   context_limit: "bad_request",
 };
 
-function toLlmError(err: unknown, fallback: string): LlmError {
+function isConnectionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /connection|closed|disposed|not connected|EPIPE|ECONNRESET|exited/i.test(message);
+}
+
+function toLlmError(err: unknown, fallback: string, runtimeStart = false): LlmError {
   if (isLlmError(err)) return err;
   const message = err instanceof Error ? err.message : String(err ?? fallback);
   if (/\b401\b|unauthori[sz]ed|not authenticated|no (github )?token|login required/i.test(message)) {
@@ -120,7 +140,25 @@ function toLlmError(err: unknown, fallback: string): LlmError {
   if (/\b403\b|forbidden|not entitled|no copilot/i.test(message)) {
     return new LlmError("forbidden", "This GitHub account does not have access to GitHub Copilot.");
   }
+  if (runtimeStart || process.env.NODE_ENV === "production") {
+    const safe = "Could not start the GitHub Copilot runtime. Check that you are signed in with `gh auth login` or `copilot login`.";
+    return new LlmError("upstream", process.env.NODE_ENV === "production" ? safe : `${safe}: ${message}`);
+  }
+  console.error(`${fallback}:`, err);
   return new LlmError("upstream", `${fallback}: ${message}`);
+}
+
+async function withFreshRuntime<T>(operation: (runtime: Runtime) => Promise<T>): Promise<T> {
+  let runtime = await getRuntime();
+  try {
+    return await operation(runtime);
+  } catch (err) {
+    if (!isConnectionError(err)) throw err;
+    console.error("GitHub Copilot runtime connection failed; restarting:", err);
+    await resetRuntime(runtime);
+    runtime = await getRuntime();
+    return operation(runtime);
+  }
 }
 
 function sessionErrorToLlmError(data: { errorType?: string; message?: string; statusCode?: number }): LlmError {
@@ -146,33 +184,45 @@ export class CopilotProvider implements LlmProvider {
   }
 
   async listModels(credentials: LlmCredentials): Promise<CatalogModel[]> {
+    if (credentials.kind === "machine") {
+      return withFreshRuntime(async ({ client }) => {
+        const rpcList = client.rpc?.models?.list;
+        const infos: ModelInfo[] = rpcList
+          ? ((await rpcList.call(client.rpc.models, {})) as { models?: ModelInfo[] }).models ?? []
+          : await client.listModels();
+        return infos.map(toCatalogModel).filter((m): m is CatalogModel => m !== null);
+      }).catch((err) => {
+        throw toLlmError(err, "Could not list GitHub Copilot models");
+      });
+    }
+
     const cache = catalogCache();
     const key = credentialKey(credentials);
     const hit = cache.get(key);
     if (hit && hit.expires > Date.now()) return hit.models;
+    for (const [entryKey, entry] of cache) {
+      if (entry.expires <= Date.now()) cache.delete(entryKey);
+    }
 
-    const models = (async () => {
-      const { client } = await getRuntime();
-      const infos: ModelInfo[] =
-        credentials.kind === "github-token"
-          ? ((await client.rpc.models.list({ gitHubToken: credentials.token })) as { models?: ModelInfo[] }).models ?? []
-          : await client.listModels();
+    const models = withFreshRuntime(async ({ client }) => {
+      const infos = ((await client.rpc.models.list({ gitHubToken: credentials.token })) as { models?: ModelInfo[] }).models ?? [];
       return infos.map(toCatalogModel).filter((m): m is CatalogModel => m !== null);
-    })();
-    cache.set(key, { expires: Date.now() + CATALOG_TTL_MS, models });
-    try {
-      return await models;
-    } catch (err) {
+    }).catch((err) => {
       cache.delete(key);
       throw toLlmError(err, "Could not list GitHub Copilot models");
-    }
+    });
+    cache.set(key, { expires: Date.now() + CATALOG_TTL_MS, models });
+    return models;
   }
 
   /** Machine-level sign-in state (gh CLI or `copilot login`). */
   async getMachineAuthStatus(): Promise<{ signedIn: boolean; login?: string; detail?: string }> {
-    const { client } = await getRuntime();
-    const status = await client.getAuthStatus();
-    return { signedIn: status.isAuthenticated, login: status.login, detail: status.statusMessage };
+    return withFreshRuntime(async ({ client }) => {
+      const status = await client.getAuthStatus();
+      return { signedIn: status.isAuthenticated, login: status.login, detail: status.statusMessage };
+    }).catch((err) => {
+      throw toLlmError(err, "Could not read GitHub Copilot sign-in status");
+    });
   }
 
   complete(request: LlmRequest): Promise<LlmResult> {
@@ -185,7 +235,7 @@ export class CopilotProvider implements LlmProvider {
 
   private async run(request: LlmRequest, onDelta?: (chunk: string) => void): Promise<LlmResult> {
     if (request.signal?.aborted) throw new LlmError("aborted", "Request was cancelled");
-    const { client, workDir } = await getRuntime();
+    let runtime = await getRuntime();
 
     const config: SessionConfig = {
       clientName: "diagram-agent",
@@ -193,7 +243,7 @@ export class CopilotProvider implements LlmProvider {
       streaming: Boolean(onDelta),
       systemMessage: { mode: "replace", content: request.system },
       availableTools: [],
-      workingDirectory: workDir,
+      workingDirectory: runtime.workDir,
       enableSessionStore: false,
       infiniteSessions: { enabled: false },
       onPermissionRequest: () => ({ kind: "reject", feedback: "DiagramAgent sessions have no tools." }),
@@ -207,9 +257,21 @@ export class CopilotProvider implements LlmProvider {
 
     let session: Awaited<ReturnType<CopilotClient["createSession"]>>;
     try {
-      session = await client.createSession(config);
+      session = await runtime.client.createSession(config);
     } catch (err) {
-      throw toLlmError(err, "Could not start a GitHub Copilot session");
+      if (isConnectionError(err)) {
+        console.error("GitHub Copilot runtime connection failed; restarting:", err);
+        await resetRuntime(runtime);
+        runtime = await getRuntime();
+        config.workingDirectory = runtime.workDir;
+        try {
+          session = await runtime.client.createSession(config);
+        } catch (retryErr) {
+          throw toLlmError(retryErr, "Could not start a GitHub Copilot session");
+        }
+      } else {
+        throw toLlmError(err, "Could not start a GitHub Copilot session");
+      }
     }
 
     const started = Date.now();
@@ -221,6 +283,8 @@ export class CopilotProvider implements LlmProvider {
     let onAbort: (() => void) | undefined;
 
     try {
+      // Inside the try so a cancel that landed during setup still releases the session.
+      if (request.signal?.aborted) throw new LlmError("aborted", "Request was cancelled");
       const done = new Promise<void>((resolve, reject) => {
         unsubscribe = session.on((event: SessionEvent) => {
           if ("agentId" in event && event.agentId) return;
@@ -266,8 +330,10 @@ export class CopilotProvider implements LlmProvider {
             reject(new LlmError("aborted", "Request was cancelled"));
           };
           request.signal.addEventListener("abort", onAbort, { once: true });
+          if (request.signal.aborted) onAbort();
         }
       });
+      done.catch(() => {});
 
       const attachments: Attachments = request.images?.map((image, i) => ({
         type: "blob" as const,
@@ -292,7 +358,7 @@ export class CopilotProvider implements LlmProvider {
       unsubscribe?.();
       const sessionId = session.sessionId;
       await session.disconnect().catch(() => {});
-      void client.deleteSession(sessionId).catch(() => {});
+      void runtime.client.deleteSession(sessionId).catch(() => {});
     }
   }
 }

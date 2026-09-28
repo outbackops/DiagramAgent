@@ -36,6 +36,14 @@ function sealingKey(): Buffer {
   return g[KEY_SYMBOL]!;
 }
 
+export function sessionConfigError(): string | null {
+  if (process.env.NODE_ENV !== "production") return null;
+  const secret = process.env.DIAGRAM_AGENT_SESSION_SECRET;
+  if (!secret) return "Set DIAGRAM_AGENT_SESSION_SECRET (32+ random characters) to enable sign-in.";
+  if (secret.length < MIN_SECRET_LENGTH) return `DIAGRAM_AGENT_SESSION_SECRET must be at least ${MIN_SECRET_LENGTH} characters.`;
+  return null;
+}
+
 export type SealPurpose = "session" | "device-flow";
 
 export function seal(payload: unknown, purpose: SealPurpose): string {
@@ -53,9 +61,12 @@ export function unseal<T>(sealed: string | null | undefined, purpose: SealPurpos
   if (parts.length !== 4 || parts[0] !== "v1") return null;
   try {
     const [, iv, ciphertext, tag] = parts;
-    const decipher = createDecipheriv("aes-256-gcm", sealingKey(), Buffer.from(iv, "base64url"));
+    const ivBytes = Buffer.from(iv, "base64url");
+    const tagBytes = Buffer.from(tag, "base64url");
+    if (ivBytes.length !== 12 || tagBytes.length !== 16) return null;
+    const decipher = createDecipheriv("aes-256-gcm", sealingKey(), ivBytes, { authTagLength: 16 });
     decipher.setAAD(Buffer.from(purpose));
-    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    decipher.setAuthTag(tagBytes);
     const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]);
     return JSON.parse(plaintext.toString("utf8")) as T;
   } catch {

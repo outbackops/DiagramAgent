@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { performance } from "node:perf_hooks";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -34,6 +35,25 @@ describe("inlineVendoredIcons", () => {
     const svg = '<image href="/icons/../secrets.svg"/>';
     expect(await inlineVendoredIcons(svg, publicDir)).toBe(svg);
   });
+
+  it("does not read unknown icon names even when a matching file exists", async () => {
+    await writeFile(path.join(publicDir, "icons", "not-a-real-icon-xyz.svg"), "<svg/>");
+    const svg = '<image href="/icons/not-a-real-icon-xyz.svg"/>';
+    expect(await inlineVendoredIcons(svg, publicDir)).toBe(svg);
+  });
+
+  it("caps distinct icon reads per SVG", async () => {
+    vi.resetModules();
+    const readFile = vi.fn(async () => Buffer.from("<svg/>"));
+    vi.doMock("node:fs/promises", async () => ({ ...(await vi.importActual("node:fs/promises")), readFile }));
+    vi.doMock("@/lib/icon-registry", () => ({ resolveIconUrl: (key: string) => `/icons/${key}.svg` }));
+    const { inlineVendoredIcons: inlineWithMocks } = await import("./svg-raster");
+    const svg = Array.from({ length: 550 }, (_, i) => `<image href="/icons/icon-${i}.svg"/>`).join("");
+    await inlineWithMocks(svg, publicDir);
+    expect(readFile).toHaveBeenCalledTimes(500);
+    vi.doUnmock("node:fs/promises");
+    vi.doUnmock("@/lib/icon-registry");
+  });
 });
 
 describe("withFallbackFonts", () => {
@@ -54,6 +74,13 @@ describe("withFallbackFonts", () => {
   it("leaves other font declarations alone", () => {
     const css = 'text { font-family: "Inter"; }';
     expect(withFallbackFonts(css)).toBe(css);
+  });
+
+  it("handles hostile unterminated D2 font declarations in linear time", () => {
+    const hostile = `font-family: "d2-${"font-".repeat(40_000)}`;
+    const start = performance.now();
+    expect(withFallbackFonts(hostile)).toBe(hostile);
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 });
 

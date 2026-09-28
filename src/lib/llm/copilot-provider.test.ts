@@ -16,6 +16,13 @@ const state = vi.hoisted(() => ({
     emit: (type: string, data?: Record<string, unknown>, extra?: Record<string, unknown>) => void;
   }>,
   respond: null as null | ((session: { emit: (type: string, data?: Record<string, unknown>, extra?: Record<string, unknown>) => void }) => void),
+  holdSend: false,
+  sendResolvers: [] as Array<() => void>,
+  createFailures: [] as Error[],
+  listFailures: [] as Error[],
+  authFailures: [] as Error[],
+  beforeCreate: null as null | (() => void),
+  forceStops: 0,
   models: [] as unknown[],
   rpcModels: [] as unknown[],
   rpcCalls: [] as unknown[],
@@ -41,6 +48,7 @@ vi.mock("@github/copilot-sdk", () => {
     }
     async send(options: Record<string, unknown>) {
       this.sent.push(options);
+      if (state.holdSend) await new Promise<void>((resolve) => state.sendResolvers.push(resolve));
       setTimeout(() => state.respond?.(this), 0);
       return "msg-1";
     }
@@ -65,11 +73,16 @@ vi.mock("@github/copilot-sdk", () => {
     }
     async start() {}
     async createSession(config: Record<string, unknown>) {
+      state.beforeCreate?.();
+      const failure = state.createFailures.shift();
+      if (failure) throw failure;
       const s = new FakeSession(config);
       state.sessions.push(s);
       return s;
     }
     async listModels() {
+      const failure = state.listFailures.shift();
+      if (failure) throw failure;
       state.listCalls++;
       return state.models;
     }
@@ -77,13 +90,21 @@ vi.mock("@github/copilot-sdk", () => {
       state.deleted.push(id);
     }
     async getAuthStatus() {
+      const failure = state.authFailures.shift();
+      if (failure) throw failure;
       return { isAuthenticated: true, login: "octocat", statusMessage: "octocat (via gh)" };
+    }
+    forceStopping = false;
+    // Like the real SDK, this relies on `this`, so an unbound call fails.
+    async forceStop() {
+      this.forceStopping = true;
+      state.forceStops++;
     }
   }
   return { CopilotClient };
 });
 
-import { CopilotProvider, buildCopilotPrompt, toCatalogModel } from "./copilot-provider";
+import { CopilotProvider, buildCopilotPrompt, copilotHomeDir, toCatalogModel } from "./copilot-provider";
 import { LlmError } from "./errors";
 import type { LlmRequest } from "./types";
 
@@ -124,6 +145,13 @@ describe("CopilotProvider", () => {
     state.models = [];
     state.rpcModels = [];
     state.respond = null;
+    state.holdSend = false;
+    state.sendResolvers.length = 0;
+    state.createFailures.length = 0;
+    state.listFailures.length = 0;
+    state.authFailures.length = 0;
+    state.beforeCreate = null;
+    state.forceStops = 0;
   });
 
   it("starts one runtime in isolated 'empty' mode", async () => {
@@ -204,6 +232,16 @@ describe("CopilotProvider", () => {
     await expect(new CopilotProvider().complete(baseRequest())).rejects.toMatchObject({ code: "rate_limited", message: "Slow down" });
   });
 
+  it("observes session errors even when send is still pending", async () => {
+    state.holdSend = true;
+    const provider = new CopilotProvider();
+    const pending = provider.complete(baseRequest());
+    await vi.waitFor(() => expect(state.sessions).toHaveLength(1));
+    state.sessions[0].emit("session.error", { errorType: "rate_limit", message: "Slow down" });
+    state.sendResolvers.splice(0).forEach((resolve) => resolve());
+    await expect(pending).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
   it("aborts the session when the caller cancels", async () => {
     state.respond = () => {};
     const controller = new AbortController();
@@ -212,6 +250,23 @@ describe("CopilotProvider", () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: "aborted" });
     expect(state.sessions[0].aborted).toBe(true);
+  });
+
+  it("aborts if cancellation fires while the session is being set up", async () => {
+    const controller = new AbortController();
+    state.createFailures.push(new Error("Connection is closed"));
+    controller.abort();
+    await expect(new CopilotProvider().complete(baseRequest({ signal: controller.signal }))).rejects.toMatchObject({ code: "aborted" });
+  });
+
+  it("releases the session when the cancel lands just after it was created", async () => {
+    const controller = new AbortController();
+    state.beforeCreate = () => controller.abort();
+    await expect(new CopilotProvider().complete(baseRequest({ signal: controller.signal }))).rejects.toMatchObject({ code: "aborted" });
+    expect(state.sessions).toHaveLength(1);
+    expect(state.sessions[0].sent).toHaveLength(0);
+    expect(state.sessions[0].disconnected).toBe(true);
+    await vi.waitFor(() => expect(state.deleted).toContain(state.sessions[0].sessionId));
   });
 
   it("times out stuck sessions", async () => {
@@ -227,8 +282,8 @@ describe("CopilotProvider", () => {
     await vi.waitFor(() => expect(state.deleted).toContain(state.sessions[0].sessionId));
   });
 
-  it("lists and caches machine models, dropping auto and disabled ones", async () => {
-    state.models = [
+  it("lists machine models through uncached runtime RPC, dropping auto and disabled ones", async () => {
+    state.rpcModels = [
       { id: "auto", name: "Auto", capabilities: { supports: {}, limits: {} } },
       {
         id: "claude-opus-5.5",
@@ -242,9 +297,28 @@ describe("CopilotProvider", () => {
     const provider = new CopilotProvider();
     const first = await provider.listModels({ kind: "machine" });
     await provider.listModels({ kind: "machine" });
-    expect(state.listCalls).toBe(1);
+    expect(state.rpcCalls).toEqual([{}, {}]);
+    expect(state.listCalls).toBe(0);
     expect(first.map((m) => m.id)).toEqual(["claude-opus-5.5"]);
     expect(first[0]).toMatchObject({ vision: true, contextWindow: 1_000_000, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"] });
+  });
+
+  it("restarts a dead runtime once for session creation", async () => {
+    replyWith(["ok"]);
+    state.createFailures.push(new Error("Connection is closed"));
+    await expect(new CopilotProvider().complete(baseRequest())).resolves.toMatchObject({ text: "ok" });
+    expect(state.forceStops).toBe(1);
+    expect(state.sessions).toHaveLength(1);
+  });
+
+  it("starts a single replacement when concurrent requests hit the same dead runtime", async () => {
+    replyWith(["ok"]);
+    state.createFailures.push(new Error("Connection is closed"), new Error("Connection is closed"));
+    const provider = new CopilotProvider();
+    const results = await Promise.all([provider.complete(baseRequest()), provider.complete(baseRequest())]);
+    expect(results.map((r) => r.text)).toEqual(["ok", "ok"]);
+    expect(state.clientOptions).toHaveLength(2);
+    expect(state.forceStops).toBeGreaterThanOrEqual(1);
   });
 
   it("lists models for a user token through the runtime RPC", async () => {
@@ -256,6 +330,11 @@ describe("CopilotProvider", () => {
 });
 
 describe("helpers", () => {
+  it("defaults runtime state under the user's home directory", () => {
+    delete process.env.DIAGRAM_AGENT_COPILOT_HOME;
+    expect(copilotHomeDir()).toBe(path.join(os.homedir(), ".diagram-agent", "copilot"));
+  });
+
   it("leaves the prompt alone without history", () => {
     expect(buildCopilotPrompt("hello")).toBe("hello");
   });

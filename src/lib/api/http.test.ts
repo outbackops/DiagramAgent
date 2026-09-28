@@ -47,4 +47,27 @@ describe("readJsonBody", () => {
     expect(await readJsonBody(post({}, "[1,2]"))).toBeNull();
     expect(await readJsonBody(post({}, "{nope"))).toBeNull();
   });
+
+  it("rejects bodies over the content-length cap before reading", async () => {
+    const req = post({ "content-length": "11" }, '{"a":1}');
+    await expect(readJsonBody(req, 10)).rejects.toMatchObject({ code: "bad_request", status: 413 });
+  });
+
+  it("rejects streamed bodies that exceed the cap", async () => {
+    const encoder = new TextEncoder();
+    const req = new Request("http://localhost:3000/api/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"a":"'));
+          controller.enqueue(encoder.encode("x".repeat(20)));
+          controller.enqueue(encoder.encode('"}'));
+          controller.close();
+        },
+      }),
+      duplex: "half",
+    } as RequestInit);
+    await expect(readJsonBody(req, 10)).rejects.toMatchObject({ status: 413 });
+  });
 });

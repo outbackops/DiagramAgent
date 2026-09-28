@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../_test-helpers";
 
 vi.mock("@terrastruct/d2", () => ({
@@ -33,8 +33,15 @@ vi.mock("@/lib/quality/diagram-quality", () => quality);
 import { POST } from "./route";
 
 describe("POST /api/render", () => {
+  const env = process.env as Record<string, string | undefined>;
+  const savedEnv = env.NODE_ENV;
+
   beforeEach(() => {
+    env.NODE_ENV = savedEnv;
     quality.scoreDiagram.mockClear();
+  });
+  afterEach(() => {
+    env.NODE_ENV = savedEnv;
   });
 
   it("returns 400 when code is missing or blank", async () => {
@@ -82,5 +89,12 @@ describe("POST /api/render", () => {
       new Request("http://localhost/api/render", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "a -> b" }) as never,
     );
     expect(res.status).toBe(415);
+  });
+
+  it("requires credentials in production", async () => {
+    env.NODE_ENV = "production";
+    const res = await POST(makeJsonRequest({ code: "a -> b" }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Sign in with GitHub to use DiagramAgent.", code: "unauthenticated" });
   });
 });

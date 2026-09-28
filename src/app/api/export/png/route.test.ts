@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../../_test-helpers";
 
 const raster = vi.hoisted(() => ({
@@ -10,6 +10,12 @@ vi.mock("@/lib/svg-raster", () => raster);
 import { POST } from "./route";
 
 describe("POST /api/export/png", () => {
+  const env = process.env as Record<string, string | undefined>;
+  const savedEnv = env.NODE_ENV;
+  afterEach(() => {
+    env.NODE_ENV = savedEnv;
+  });
+
   it("returns 400 when svg missing", async () => {
     expect((await POST(makeJsonRequest({}))).status).toBe(400);
   });
@@ -29,5 +35,11 @@ describe("POST /api/export/png", () => {
     raster.svgToPng.mockRejectedValueOnce(new Error("bad svg"));
     const res = await POST(makeJsonRequest({ svg: "<svg/>" }));
     expect(res.status).toBe(500);
+  });
+
+  it("requires credentials in production", async () => {
+    env.NODE_ENV = "production";
+    const res = await POST(makeJsonRequest({ svg: "<svg/>" }));
+    expect(res.status).toBe(401);
   });
 });

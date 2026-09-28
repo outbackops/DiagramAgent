@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { errorResponseBody, errorStatus } from "@/lib/llm/errors";
+import { LlmError, errorResponseBody, errorStatus } from "@/lib/llm/errors";
 
 /**
  * Cheap CSRF / drive-by protection for the API. Model calls spend the
@@ -43,12 +43,44 @@ export function jsonError(err: unknown, logLabel?: string): Response {
   return NextResponse.json(errorResponseBody(err), { status });
 }
 
-/** Parse a JSON body, returning null (instead of throwing) when it is malformed. */
-export async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
+/** Parse a capped JSON body, returning null (instead of throwing) when it is malformed. */
+export async function readJsonBody(request: Request, maxBytes = 1_000_000): Promise<Record<string, unknown> | null> {
+  const length = request.headers.get("content-length");
+  if (length) {
+    const bytes = Number(length);
+    if (Number.isFinite(bytes) && bytes > maxBytes) {
+      throw new LlmError("bad_request", "Request body is too large", 413);
+    }
+  }
+
   try {
-    const body = (await request.json()) as unknown;
+    let text: string;
+    if (request.body) {
+      const reader = request.body.getReader();
+      const decoder = new TextDecoder();
+      let bytes = 0;
+      text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new LlmError("bad_request", "Request body is too large", 413);
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } else {
+      text = await request.text();
+      if (new TextEncoder().encode(text).byteLength > maxBytes) {
+        throw new LlmError("bad_request", "Request body is too large", 413);
+      }
+    }
+    const body = JSON.parse(text) as unknown;
     return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
-  } catch {
+  } catch (err) {
+    if (err instanceof LlmError) throw err;
     return null;
   }
 }

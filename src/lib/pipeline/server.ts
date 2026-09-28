@@ -111,7 +111,7 @@ export async function runGenerate(
       prompt: conversation.prompt,
       history: conversation.history,
       temperature: 0.3,
-      timeoutMs: 300_000,
+      timeoutMs: 270_000,
     },
     onDelta,
   );

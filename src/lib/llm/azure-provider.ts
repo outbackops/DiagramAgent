@@ -2,7 +2,7 @@ import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
 import { buildChatCompletionsUrl } from "@/lib/azure-openai";
 import { AZURE_MODELS, getAzureModelConfig, type AzureModelConfig } from "./azure-models";
 import { LlmError, isLlmError, llmErrorFromStatus } from "./errors";
-import type { CatalogModel, LlmProvider, LlmRequest, LlmResult } from "./types";
+import type { CatalogModel, LlmCredentials, LlmProvider, LlmRequest, LlmResult } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
@@ -47,6 +47,16 @@ function buildBody(config: AzureModelConfig, request: LlmRequest, stream: boolea
   return body;
 }
 
+function azureAllowed(credentials: LlmCredentials): boolean {
+  if (credentials.kind === "machine") return true;
+  const allowed = (process.env.DIAGRAM_AGENT_AZURE_USERS ?? "")
+    .split(",")
+    .map((login) => login.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.includes("*")) return true;
+  return Boolean(credentials.login && allowed.includes(credentials.login.toLowerCase()));
+}
+
 /**
  * Optional provider for Azure OpenAI / AI Foundry deployments. Auth is
  * Microsoft Entra ID via DefaultAzureCredential — no API keys.
@@ -58,8 +68,8 @@ export class AzureProvider implements LlmProvider {
     return getAzureEndpoint().length > 0;
   }
 
-  async listModels(): Promise<CatalogModel[]> {
-    if (!this.isConfigured()) return [];
+  async listModels(credentials: LlmCredentials): Promise<CatalogModel[]> {
+    if (!this.isConfigured() || !azureAllowed(credentials)) return [];
     return AZURE_MODELS.map((m) => ({
       provider: "azure" as const,
       id: m.id,
@@ -83,6 +93,10 @@ export class AzureProvider implements LlmProvider {
     if (!this.isConfigured()) {
       throw new LlmError("not_configured", "Azure OpenAI is not configured (set AZURE_AI_FOUNDRY_ENDPOINT).");
     }
+    if (!azureAllowed(request.credentials)) {
+      throw new LlmError("forbidden", "This GitHub account is not allowed to use Azure OpenAI from this server.");
+    }
+    if (request.signal?.aborted) throw new LlmError("aborted", "Request was cancelled");
     const config = getAzureModelConfig(request.selection.model);
     if (!config) {
       throw new LlmError("model_unavailable", `Unknown Azure model "${request.selection.model}"`);

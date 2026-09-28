@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
-import { guardApiRequest } from "@/lib/api/http";
+import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
+import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
 import { d2ToDrawio } from "@/lib/d2-to-drawio";
+import { LlmError, isLlmError } from "@/lib/llm/errors";
 
 /**
  * Export a diagram as a draw.io/diagrams.net XML file (.drawio).
@@ -14,8 +16,13 @@ import { d2ToDrawio } from "@/lib/d2-to-drawio";
 export async function POST(request: NextRequest) {
   const blocked = guardApiRequest(request);
   if (blocked) return blocked;
+  if (!getRequestCredentials(request)) {
+    return jsonError(new LlmError("unauthenticated", "Sign in with GitHub to use DiagramAgent."));
+  }
   try {
-    const { d2Code, title } = await request.json();
+    const body = await readJsonBody(request, 1_000_000);
+    const d2Code = body?.d2Code;
+    const title = body?.title;
 
     if (!d2Code || typeof d2Code !== "string") {
       return new Response(JSON.stringify({ error: "D2 code is required" }), {
@@ -24,7 +31,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const diagramTitle = title || "Architecture Diagram";
+    const diagramTitle = typeof title === "string" && title ? title : "Architecture Diagram";
 
     // Convert D2 code to native draw.io XML with editable shapes and embedded icons
     const drawioXml = await d2ToDrawio(d2Code, diagramTitle);
@@ -39,6 +46,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (isLlmError(error)) return jsonError(error);
     console.error("Draw.io export error:", error);
     return new Response(
       JSON.stringify({ error: errorMessage(error) || "Failed to export" }),

@@ -16,7 +16,12 @@ export async function POST(request: NextRequest) {
   if (!clientId) {
     return jsonError(new LlmError("not_configured", "In-app sign-in is not configured (set GITHUB_OAUTH_CLIENT_ID)."));
   }
-  const body = await readJsonBody(request);
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readJsonBody(request, 1_000_000);
+  } catch (err) {
+    return jsonError(err, "Device flow poll failed");
+  }
   const flow = body?.flow;
   if (typeof flow !== "string" || flow.length > 4096) {
     return jsonError(new LlmError("bad_request", "Missing sign-in request handle"));

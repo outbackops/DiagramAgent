@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   const blocked = guardApiRequest(request);
   if (blocked) return blocked;
   try {
-    const body = parseBody(PlanBody, await readJsonBody(request));
+    const body = parseBody(PlanBody, await readJsonBody(request, 1_000_000));
     const ctx = await resolveStepContext(request, body.model);
     const result = await runPlan(body.prompt, body.analysis ?? null, { ...ctx, signal: request.signal });
     return NextResponse.json({ plan: result.plan, model: ctx.selection, usage: result.usage });

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApiRequest } from "@/lib/api/http";
 import type { AuthStatusResponse } from "@/lib/api/types";
-import { deviceFlowEnabled, machineLoginAllowed } from "@/lib/auth/policy";
+import { deviceFlowEnabled, machineLoginAllowedFor } from "@/lib/auth/policy";
+import { sessionConfigError } from "@/lib/auth/seal";
 import { readSession } from "@/lib/auth/session";
 import { azureProvider } from "@/lib/llm/azure-provider";
 import { copilotProvider } from "@/lib/llm/copilot-provider";
@@ -13,15 +14,10 @@ export async function GET(request: NextRequest) {
   const blocked = guardApiRequest(request);
   if (blocked) return blocked;
 
-  let configError: string | undefined;
-  let session: ReturnType<typeof readSession> = null;
-  try {
-    session = readSession(request);
-  } catch (err) {
-    configError = isLlmError(err) ? err.message : "Session configuration error";
-  }
+  const session = readSession(request);
+  const configError = deviceFlowEnabled() || session ? sessionConfigError() ?? undefined : undefined;
 
-  const machine: AuthStatusResponse["machine"] = { allowed: machineLoginAllowed(), signedIn: false };
+  const machine: AuthStatusResponse["machine"] = { allowed: machineLoginAllowedFor(request), signedIn: false };
   if (machine.allowed && !session) {
     try {
       const status = await copilotProvider.getMachineAuthStatus();

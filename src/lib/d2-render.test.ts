@@ -38,6 +38,7 @@ describe("renderD2 against the D2 wrapper's single-request limitation", () => {
   });
   afterEach(() => {
     delete process.env.DIAGRAM_AGENT_RENDER_TIMEOUT_MS;
+    delete process.env.DIAGRAM_AGENT_RENDER_QUEUE_LIMIT;
   });
 
   it("serialises concurrent renders so each caller gets its own diagram", async () => {
@@ -57,5 +58,28 @@ describe("renderD2 against the D2 wrapper's single-request limitation", () => {
     const ok = await renderD2("recovered");
     expect(ok.svg).toContain('data-code="recovered"');
     expect(fake.instances).toBe(before.instances + 1);
+  });
+
+  it("rejects new work when the render queue is full", async () => {
+    process.env.DIAGRAM_AGENT_RENDER_TIMEOUT_MS = "30";
+    process.env.DIAGRAM_AGENT_RENDER_QUEUE_LIMIT = "1";
+    fake.hang = true;
+    const first = renderD2("first");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = renderD2("second");
+    await expect(renderD2("third")).rejects.toMatchObject({ name: "D2BusyError" });
+    await expect(first).rejects.toBeInstanceOf(D2RenderError);
+    await expect(second).rejects.toBeInstanceOf(D2RenderError);
+  });
+
+  it("skips queued work whose signal is aborted before it starts", async () => {
+    process.env.DIAGRAM_AGENT_RENDER_TIMEOUT_MS = "30";
+    fake.hang = true;
+    const first = renderD2("first");
+    const controller = new AbortController();
+    const second = renderD2("second", { signal: controller.signal });
+    controller.abort();
+    await expect(first).rejects.toBeInstanceOf(D2RenderError);
+    await expect(second).rejects.toMatchObject({ name: "AbortError" });
   });
 });

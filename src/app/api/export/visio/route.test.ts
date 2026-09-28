@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../../_test-helpers";
 
 vi.mock("@/lib/d2-to-vsdx", () => ({
-  d2ToVsdx: async (_code: string) => Buffer.from("PK\x03\x04fake-vsdx-zip"),
+  d2ToVsdx: async () => Buffer.from("PK\x03\x04fake-vsdx-zip"),
 }));
 
 async function loadRoute() {
@@ -10,6 +10,12 @@ async function loadRoute() {
 }
 
 describe("POST /api/export/visio", () => {
+  const env = process.env as Record<string, string | undefined>;
+  const savedEnv = env.NODE_ENV;
+  afterEach(() => {
+    env.NODE_ENV = savedEnv;
+  });
+
   it("returns 400 when d2Code missing", async () => {
     const { POST } = await loadRoute();
     const res = await POST(makeJsonRequest({}));
@@ -51,5 +57,12 @@ describe("POST /api/export/visio", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toMatch(/conversion exploded/);
+  });
+
+  it("requires credentials in production", async () => {
+    env.NODE_ENV = "production";
+    const { POST } = await loadRoute();
+    const res = await POST(makeJsonRequest({ d2Code: "x" }));
+    expect(res.status).toBe(401);
   });
 });

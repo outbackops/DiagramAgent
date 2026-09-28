@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const endpoint = vi.hoisted(() => ({ value: "https://test-endpoint.openai.azure.com" }));
 
@@ -39,9 +39,15 @@ function sse(chunks: string[]) {
 }
 
 describe("AzureProvider", () => {
+  const savedAzureUsers = process.env.DIAGRAM_AGENT_AZURE_USERS;
   beforeEach(() => {
     endpoint.value = "https://test-endpoint.openai.azure.com";
+    delete process.env.DIAGRAM_AGENT_AZURE_USERS;
     vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    if (savedAzureUsers === undefined) delete process.env.DIAGRAM_AGENT_AZURE_USERS;
+    else process.env.DIAGRAM_AGENT_AZURE_USERS = savedAzureUsers;
   });
 
   it("is only configured when an endpoint is set", async () => {
@@ -49,13 +55,32 @@ describe("AzureProvider", () => {
     expect(provider.isConfigured()).toBe(true);
     endpoint.value = "";
     expect(provider.isConfigured()).toBe(false);
-    expect(await provider.listModels()).toEqual([]);
+    expect(await provider.listModels({ kind: "machine" })).toEqual([]);
     await expect(provider.complete(request())).rejects.toMatchObject({ code: "not_configured" });
   });
 
   it("lists the static deployment catalog", async () => {
-    const models = await new AzureProvider().listModels();
+    const models = await new AzureProvider().listModels({ kind: "machine" });
     expect(models.find((m) => m.id === "gpt-4o")).toMatchObject({ provider: "azure", vision: true, reasoningEfforts: [] });
+  });
+
+  it("only exposes Azure to machine credentials or allowlisted GitHub users", async () => {
+    const provider = new AzureProvider();
+    expect(await provider.listModels({ kind: "github-token", token: "t", login: "octocat" })).toEqual([]);
+    process.env.DIAGRAM_AGENT_AZURE_USERS = "OCTOCAT";
+    expect(await provider.listModels({ kind: "github-token", token: "t", login: "octocat" })).not.toEqual([]);
+    await expect(provider.complete(request({ credentials: { kind: "github-token", token: "t", login: "someone" } }))).rejects.toMatchObject({
+      code: "forbidden",
+    });
+  });
+
+  it("rejects already-aborted requests before fetch", async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(new AzureProvider().complete(request({ signal: controller.signal }))).rejects.toMatchObject({ code: "aborted" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("sends system, history and prompt as chat messages with Entra auth", async () => {

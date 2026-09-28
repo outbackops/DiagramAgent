@@ -21,6 +21,57 @@ export function machineLoginAllowed(): boolean {
   return envFlag("DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN") ?? process.env.NODE_ENV !== "production";
 }
 
+function allowedHosts(): Set<string> {
+  return new Set(
+    (process.env.DIAGRAM_AGENT_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function hostName(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(`http://${value}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isTrustedHost(hostname: string | null): boolean {
+  if (!hostname) return false;
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1" || allowedHosts().has(hostname);
+}
+
+export function isLoopbackRequest(request: Request): boolean {
+  let urlHost: string | null = null;
+  try {
+    urlHost = new URL(request.url).host;
+  } catch {
+    urlHost = null;
+  }
+  const requestHost = hostName(request.headers.get("host") ?? urlHost);
+  if (!isTrustedHost(requestHost)) return false;
+
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return isTrustedHost(new URL(origin).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Machine login for this request: enabled by config and addressed to a loopback
+ * (or allow-listed) host, so a page reached through a LAN address or a rebinding
+ * DNS name can't borrow the host's GitHub session.
+ */
+export function machineLoginAllowedFor(request: Request): boolean {
+  return machineLoginAllowed() && isLoopbackRequest(request);
+}
+
 /** GitHub OAuth App client ID used for the in-app device-code sign-in. */
 export function deviceFlowClientId(): string | null {
   return process.env.GITHUB_OAUTH_CLIENT_ID?.trim() || null;

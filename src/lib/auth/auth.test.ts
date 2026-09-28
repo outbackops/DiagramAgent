@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { seal, unseal } from "./seal";
+import { seal, sessionConfigError, unseal } from "./seal";
 import { SESSION_COOKIE, clearSessionCookie, getRequestCredentials, readSession, requireCredentials, sessionCookie } from "./session";
 import { machineLoginAllowed, deviceFlowEnabled } from "./policy";
 import { fetchGitHubLogin, pollDeviceFlow, startDeviceFlow } from "./device-flow";
 
-const ENV_KEYS = ["DIAGRAM_AGENT_SESSION_SECRET", "DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN", "GITHUB_OAUTH_CLIENT_ID", "NODE_ENV"] as const;
+const ENV_KEYS = ["DIAGRAM_AGENT_SESSION_SECRET", "DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN", "DIAGRAM_AGENT_ALLOWED_HOSTS", "GITHUB_OAUTH_CLIENT_ID", "NODE_ENV"] as const;
 const saved: Record<string, string | undefined> = {};
 const env = process.env as Record<string, string | undefined>;
 
@@ -13,6 +13,7 @@ beforeEach(() => {
   for (const k of ENV_KEYS) saved[k] = env[k];
   env.DIAGRAM_AGENT_SESSION_SECRET = "x".repeat(40);
   delete env.DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN;
+  delete env.DIAGRAM_AGENT_ALLOWED_HOSTS;
   delete env.GITHUB_OAUTH_CLIENT_ID;
 });
 
@@ -53,6 +54,12 @@ describe("seal / unseal", () => {
     expect(unseal(null, "session")).toBeNull();
   });
 
+  it("rejects truncated auth tags before decrypting", () => {
+    const parts = seal({ a: 1 }, "session").split(".");
+    parts[3] = parts[3].slice(0, -3);
+    expect(unseal(parts.join("."), "session")).toBeNull();
+  });
+
   it("does not leak the token in the sealed value", () => {
     expect(seal({ token: "gho_supersecret" }, "session")).not.toContain("gho_supersecret");
   });
@@ -66,6 +73,16 @@ describe("seal / unseal", () => {
     delete env.DIAGRAM_AGENT_SESSION_SECRET;
     env.NODE_ENV = "production";
     expect(() => seal({}, "session")).toThrow(/DIAGRAM_AGENT_SESSION_SECRET/);
+  });
+
+  it("reports production session configuration errors without throwing", () => {
+    env.NODE_ENV = "production";
+    delete env.DIAGRAM_AGENT_SESSION_SECRET;
+    expect(sessionConfigError()).toMatch(/DIAGRAM_AGENT_SESSION_SECRET/);
+    env.DIAGRAM_AGENT_SESSION_SECRET = "short";
+    expect(sessionConfigError()).toMatch(/at least 32/);
+    env.DIAGRAM_AGENT_SESSION_SECRET = "x".repeat(40);
+    expect(sessionConfigError()).toBeNull();
   });
 });
 
@@ -90,6 +107,10 @@ describe("session cookie", () => {
     expect(readSession(requestWithCookie(`${SESSION_COOKIE}=${encodeURIComponent(expired)}`))).toBeNull();
   });
 
+  it("ignores malformed percent-encoded cookies", () => {
+    expect(readSession(requestWithCookie(`${SESSION_COOKIE}=%E0%A4%A`))).toBeNull();
+  });
+
   it("clears the cookie", () => {
     expect(clearSessionCookie(requestWithCookie())).toContain("Max-Age=0");
   });
@@ -105,6 +126,19 @@ describe("request credentials", () => {
     env.NODE_ENV = "development";
     expect(machineLoginAllowed()).toBe(true);
     expect(getRequestCredentials(requestWithCookie())).toEqual({ kind: "machine" });
+  });
+
+  it("does not lend machine login to non-loopback hosts", () => {
+    env.NODE_ENV = "development";
+    expect(getRequestCredentials(requestWithCookie(undefined, "http://attacker.example/api/x"))).toBeNull();
+    expect(getRequestCredentials(new Request("http://localhost:3000/api/x", { headers: { host: "attacker.example" } }))).toBeNull();
+    expect(getRequestCredentials(requestWithCookie(undefined, "http://192.168.1.10:3000/api/x"))).toBeNull();
+  });
+
+  it("lends machine login to allowlisted hosts", () => {
+    env.NODE_ENV = "development";
+    env.DIAGRAM_AGENT_ALLOWED_HOSTS = "diagrams.internal";
+    expect(getRequestCredentials(requestWithCookie(undefined, "http://diagrams.internal/api/x"))).toEqual({ kind: "machine" });
   });
 
   it("never lends the machine login to anonymous requests in production", () => {

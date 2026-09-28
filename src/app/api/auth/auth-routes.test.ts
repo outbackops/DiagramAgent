@@ -70,6 +70,38 @@ describe("GET /api/auth/status", () => {
     expect(mocks.machineStatus).not.toHaveBeenCalled();
   });
 
+  it("doesn't offer or reveal the machine login to a non-loopback host", async () => {
+    const res = await status(new Request("http://192.168.1.20:3000/api/auth/status", { headers: { host: "192.168.1.20:3000" } }) as never);
+    const body = await res.json();
+    expect(body).toMatchObject({ signedIn: false, login: null, source: null, machine: { allowed: false, signedIn: false } });
+    expect(mocks.machineStatus).not.toHaveBeenCalled();
+  });
+
+  it("honours DIAGRAM_AGENT_ALLOWED_HOSTS for the machine login", async () => {
+    env.DIAGRAM_AGENT_ALLOWED_HOSTS = "devbox.internal";
+    const res = await status(new Request("http://devbox.internal:3000/api/auth/status", { headers: { host: "devbox.internal:3000" } }) as never);
+    expect(await res.json()).toMatchObject({ signedIn: true, source: "machine", machine: { allowed: true } });
+  });
+
+  it("reports session config errors when sign-in is enabled", async () => {
+    env.NODE_ENV = "production";
+    env.GITHUB_OAUTH_CLIENT_ID = "Iv1.test";
+    delete env.DIAGRAM_AGENT_SESSION_SECRET;
+    const body = await (await status(new Request("http://localhost/api/auth/status") as never)).json();
+    expect(body.configError).toMatch(/DIAGRAM_AGENT_SESSION_SECRET/);
+  });
+
+  it("ignores malformed session cookies without config errors", async () => {
+    env.NODE_ENV = "production";
+    delete env.GITHUB_OAUTH_CLIENT_ID;
+    delete env.DIAGRAM_AGENT_SESSION_SECRET;
+    const body = await (
+      await status(new Request("http://localhost/api/auth/status", { headers: { cookie: "da_session=%E0%A4%A" } }) as never)
+    ).json();
+    expect(body.signedIn).toBe(false);
+    expect(body.configError).toBeUndefined();
+  });
+
   it("surfaces runtime failures instead of throwing", async () => {
     mocks.machineStatus.mockRejectedValueOnce(new Error("spawn failed"));
     const res = await status(new Request("http://localhost/api/auth/status") as never);

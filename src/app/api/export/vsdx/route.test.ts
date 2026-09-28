@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../../_test-helpers";
 
 vi.mock("@/lib/d2-to-drawio", () => ({
@@ -14,6 +14,12 @@ async function loadRoute() {
 // (despite the directory name). The actual VSDX export lives at
 // src/app/api/export/visio/route.ts.
 describe("POST /api/export/vsdx (drawio output)", () => {
+  const env = process.env as Record<string, string | undefined>;
+  const savedEnv = env.NODE_ENV;
+  afterEach(() => {
+    env.NODE_ENV = savedEnv;
+  });
+
   it("returns 400 when d2Code missing", async () => {
     const { POST } = await loadRoute();
     const res = await POST(makeJsonRequest({}));
@@ -45,5 +51,12 @@ describe("POST /api/export/vsdx (drawio output)", () => {
     const { POST } = await loadRoute();
     const res = await POST(makeJsonRequest({ d2Code: "x" }));
     expect(res.headers.get("Content-Disposition")).toMatch(/Architecture/i);
+  });
+
+  it("requires credentials in production", async () => {
+    env.NODE_ENV = "production";
+    const { POST } = await loadRoute();
+    const res = await POST(makeJsonRequest({ d2Code: "x" }));
+    expect(res.status).toBe(401);
   });
 });

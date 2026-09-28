@@ -54,8 +54,22 @@ export class D2RenderError extends Error {
   }
 }
 
+export class D2BusyError extends D2RenderError {
+  constructor() {
+    super("Renderer is busy, try again shortly");
+    this.name = "D2BusyError";
+  }
+}
+
+function abortError(): Error {
+  const err = new Error("Request was cancelled");
+  err.name = "AbortError";
+  return err;
+}
+
 /** Per-step (layout, rendering) limit; overridable for slow machines and tests. */
 const stepTimeoutMs = () => Number(process.env.DIAGRAM_AGENT_RENDER_TIMEOUT_MS) || 45_000;
+const queueLimit = () => Number(process.env.DIAGRAM_AGENT_RENDER_QUEUE_LIMIT) || 8;
 
 let d2Promise: Promise<D2Like> | null = null;
 
@@ -79,9 +93,17 @@ function discardD2(instance: D2Like) {
 // the earlier promise (it never settles) and can receive each other's
 // results. Every compile/render therefore runs strictly one at a time.
 let queue: Promise<unknown> = Promise.resolve();
+let pending = 0;
 
-function exclusive<T>(task: () => Promise<T>): Promise<T> {
-  const run = queue.then(task, task);
+function exclusive<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (pending >= queueLimit()) throw new D2BusyError();
+  pending++;
+  const runTask = async () => {
+    pending--;
+    if (signal?.aborted) throw abortError();
+    return task();
+  };
+  const run = queue.then(runTask, runTask);
   queue = run.catch(() => undefined);
   return run;
 }
@@ -129,7 +151,7 @@ function leafObstacles(diagram: CompiledDiagram): Rect[] {
     .map((s) => ({ x: s.pos.x, y: s.pos.y, w: s.width, h: s.height }));
 }
 
-export async function renderD2(code: string): Promise<RenderResult> {
+export async function renderD2(code: string, options: { signal?: AbortSignal } = {}): Promise<RenderResult> {
   return exclusive(async () => {
     const d2 = await getD2();
     try {
@@ -162,5 +184,5 @@ export async function renderD2(code: string): Promise<RenderResult> {
       if (err instanceof D2RenderError) throw err;
       throw new D2RenderError(formatD2Error(err));
     }
-  });
+  }, options.signal);
 }

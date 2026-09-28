@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   let body: ReturnType<typeof GenerateBody.parse>;
   let ctx: Awaited<ReturnType<typeof resolveStepContext>>;
   try {
-    body = parseBody(GenerateBody, await readJsonBody(request));
+    body = parseBody(GenerateBody, await readJsonBody(request, 1_000_000));
     ctx = await resolveStepContext(request, body.model);
   } catch (err) {
     return jsonError(err, "Generate API error");
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
 
   const abort = new AbortController();
   request.signal.addEventListener("abort", () => abort.abort(), { once: true });
+  if (request.signal.aborted) abort.abort();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
