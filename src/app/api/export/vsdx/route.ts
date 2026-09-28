@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { guardApiRequest } from "@/lib/api/http";
 import { errorMessage } from "@/lib/error-message";
 import { d2ToDrawio } from "@/lib/d2-to-drawio";
 
@@ -11,6 +12,8 @@ import { d2ToDrawio } from "@/lib/d2-to-drawio";
  * exported to Visio (.vsdx) from draw.io's File → Export menu.
  */
 export async function POST(request: NextRequest) {
+  const blocked = guardApiRequest(request);
+  if (blocked) return blocked;
   try {
     const { d2Code, title } = await request.json();
 

@@ -13,14 +13,18 @@
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
+    "@github/copilot-sdk": "^1.0.14",
     "@monaco-editor/react": "^4.7.0",
     "@terrastruct/d2": "^0.1.33",
     "cheerio": "^1.2.0",
+    "dompurify": "^3.4.15",
     "jszip": "^3.10.1",
+    "lucide-react": "^1.47.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

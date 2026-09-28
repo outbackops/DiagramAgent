@@ -1,25 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardApiRequest, readJsonBody } from "@/lib/api/http";
 import { errorMessage } from "@/lib/error-message";
-import sharp from "sharp";
+import { svgToPng } from "@/lib/svg-raster";
+
+export const dynamic = "force-dynamic";
+
+const MAX_SVG_LENGTH = 8_000_000;
 
 export async function POST(request: NextRequest) {
+  const blocked = guardApiRequest(request);
+  if (blocked) return blocked;
+
+  const body = await readJsonBody(request);
+  const svg = body?.svg;
+  if (typeof svg !== "string" || !svg) {
+    return NextResponse.json({ error: "SVG content is required" }, { status: 400 });
+  }
+  if (svg.length > MAX_SVG_LENGTH) {
+    return NextResponse.json({ error: "SVG is too large" }, { status: 413 });
+  }
+
   try {
-    const { svg } = await request.json();
-
-    if (!svg) {
-      return new Response(JSON.stringify({ error: "SVG content is required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const svgBuffer = Buffer.from(svg);
-    // Use higher density for better quality export
-    const pngBuffer = await sharp(svgBuffer, { density: 300 })
-      .png()
-      .toBuffer();
-
-    return new Response(new Uint8Array(pngBuffer), {
+    const png = await svgToPng(svg, { density: 300, maxWidth: 8000, maxHeight: 8000 });
+    return new Response(new Uint8Array(png), {
       status: 200,
       headers: {
         "Content-Type": "image/png",
@@ -28,9 +31,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("PNG export error:", error);
-    return new Response(JSON.stringify({ error: errorMessage(error) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: errorMessage(error) || "PNG export failed" }, { status: 500 });
   }
 }

@@ -1,15 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { stubAzureFetch, stubAzureError, makeJsonRequest } from "../_test-helpers";
-import { getRoleTokenLimit } from "@/lib/models";
+// @vitest-environment node
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@/lib/azure-auth", () => ({
-  getAzureEndpoint: () => "https://test-endpoint.openai.azure.com",
-  getAuthHeaders: async () => ({ "api-key": "test-key" }),
-}));
+vi.mock("@/lib/llm", async () => (await import("../_test-helpers")).llmModuleMock());
 
-async function loadRoute() {
-  return import("./route");
-}
+import { POST } from "./route";
+import { llm, makeJsonRequest } from "../_test-helpers";
+import { LlmError } from "@/lib/llm/errors";
+import { PLAN_SYSTEM_PROMPT } from "@/lib/pipeline/prompts";
 
 const VALID_PLAN = {
   pattern: "HA/DR with SQL Always On",
@@ -21,78 +18,48 @@ const VALID_PLAN = {
 
 describe("POST /api/plan", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    llm.reset();
+    llm.text = JSON.stringify(VALID_PLAN);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns 400 when prompt is missing or not a string", async () => {
+    expect((await POST(makeJsonRequest({}))).status).toBe(400);
+    expect((await POST(makeJsonRequest({ prompt: ["array"] }))).status).toBe(400);
   });
 
-  it("returns 400 when prompt is missing", async () => {
-    stubAzureFetch(VALID_PLAN);
-    const { POST } = await loadRoute();
-    const res = await POST(makeJsonRequest({}));
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 400 when prompt is non-string", async () => {
-    stubAzureFetch(VALID_PLAN);
-    const { POST } = await loadRoute();
-    const res = await POST(makeJsonRequest({ prompt: ["array"] }));
-    expect(res.status).toBe(400);
-  });
-
-  it("returns parsed plan on a valid Azure response", async () => {
-    const fetchSpy = stubAzureFetch(VALID_PLAN);
-    const { POST } = await loadRoute();
+  it("returns the parsed plan", async () => {
     const res = await POST(makeJsonRequest({ prompt: "HA Azure SQL setup" }));
-
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.plan).toMatchObject({
-      pattern: "HA/DR with SQL Always On",
-      provider: "Azure",
-    });
-
-    // Snapshot what went to Azure
-    const sent = fetchSpy.lastBody();
-    expect(sent).toMatchObject({
-      messages: expect.any(Array),
-      max_completion_tokens: getRoleTokenLimit("planner"),
-    });
-    const messages = sent.messages as Array<{ role: string; content: string }>;
-    expect(messages[1].content).toContain("HA Azure SQL setup");
+    expect(body.plan).toMatchObject({ pattern: "HA/DR with SQL Always On", provider: "Azure" });
+    const call = llm.lastCall();
+    expect(call.system).toBe(PLAN_SYSTEM_PROMPT);
+    expect(call.prompt).toContain("HA Azure SQL setup");
+    expect(call.maxOutputTokens).toBe(8000);
   });
 
-  it("includes analysis context in user prompt when provided", async () => {
-    const fetchSpy = stubAzureFetch(VALID_PLAN);
-    const { POST } = await loadRoute();
-    await POST(
-      makeJsonRequest({
-        prompt: "anything",
-        analysis: { pattern: "X", provider: "Y" },
-      })
-    );
-    const sent = fetchSpy.lastBody();
-    const messages = sent.messages as Array<{ role: string; content: string }>;
-    expect(messages[1].content).toContain("Expert analysis context");
-    expect(messages[1].content).toContain('"pattern": "X"');
+  it("includes analysis context when provided", async () => {
+    await POST(makeJsonRequest({ prompt: "anything", analysis: { pattern: "X", provider: "Y" } }));
+    expect(llm.lastCall().prompt).toContain("Expert analysis context");
+    expect(llm.lastCall().prompt).toContain('"pattern": "X"');
   });
 
-  it("returns 422 on malformed plan JSON", async () => {
-    stubAzureFetch("not valid json {");
-    const { POST } = await loadRoute();
-    const res = await POST(makeJsonRequest({ prompt: "anything" }));
-    expect(res.status).toBe(422);
+  it("returns 422 on malformed or non-object plans", async () => {
+    llm.text = "not valid json {";
+    expect((await POST(makeJsonRequest({ prompt: "anything" }))).status).toBe(422);
+    llm.text = "[1, 2, 3]";
+    expect((await POST(makeJsonRequest({ prompt: "anything" }))).status).toBe(422);
   });
 
-  it("propagates upstream Azure errors", async () => {
-    stubAzureError(429, "rate limited");
-    const { POST } = await loadRoute();
-    const res = await POST(makeJsonRequest({ prompt: "anything" }));
-    expect(res.status).toBe(429);
+  it("propagates provider errors", async () => {
+    llm.error = new LlmError("rate_limited", "rate limited");
+    expect((await POST(makeJsonRequest({ prompt: "anything" }))).status).toBe(429);
   });
 
-  it("rejects non-object plan responses (zod refine)", async () => {
-    stubAzureFetch("[1, 2, 3]");
-    const { POST } = await loadRoute();
-    const res = await POST(makeJsonRequest({ prompt: "anything" }));
-    expect(res.status).toBe(422);
+  it("rejects oversized analysis payloads", async () => {
+    const res = await POST(makeJsonRequest({ prompt: "x", analysis: { blob: "a".repeat(120_000) } }));
+    expect(res.status).toBe(400);
   });
 });

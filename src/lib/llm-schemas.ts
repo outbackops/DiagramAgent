@@ -108,6 +108,19 @@ export function stripCodeFences(content: string): string {
 }
 
 /**
+ * Find the outermost JSON object/array in text that has prose around it
+ * (e.g. "Here is the plan: {...}"). Returns null when none is found.
+ */
+export function extractJsonBlock(text: string): string | null {
+  const start = text.search(/[[{]/);
+  if (start < 0) return null;
+  const open = text[start];
+  const close = open === "{" ? "}" : "]";
+  const end = text.lastIndexOf(close);
+  return end > start ? text.slice(start, end + 1) : null;
+}
+
+/**
  * Parse a model JSON response into a typed shape.
  * Returns `{ ok: true, data }` on success, `{ ok: false, error, raw }` on failure.
  * Does NOT throw — callers should branch on `result.ok`.
@@ -121,11 +134,17 @@ export function parseLlmJson<T>(
   try {
     parsed = JSON.parse(cleaned);
   } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : "JSON parse failed",
-      raw: content,
-    };
+    const block = extractJsonBlock(cleaned);
+    try {
+      if (!block) throw e;
+      parsed = JSON.parse(block);
+    } catch {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "JSON parse failed",
+        raw: content,
+      };
+    }
   }
   const result = schema.safeParse(parsed);
   if (!result.success) {
