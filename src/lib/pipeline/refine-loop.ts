@@ -81,6 +81,8 @@ export interface PipelineResult {
   reviews: number;
   rounds: RoundRecord[];
   plan: Record<string, unknown> | null;
+  /** Round whose candidate was kept (null when nothing rendered). */
+  bestRound: number | null;
 }
 
 export class PipelineAbortError extends Error {
@@ -138,10 +140,20 @@ ${numbered(issues.length > 0 ? issues : ["Improve overall clarity and layout"])}
 Suggested fixes:
 ${numbered(fixes.length > 0 ? fixes : ["Tighten grouping and alignment"])}
 
-Fix these issues in the D2 code. Maintain the overall architecture but improve layout, grouping, connections, and completeness. Output the COMPLETE updated D2 code.`;
+Fix these issues in the D2 code. Maintain the overall architecture but improve layout, grouping, connections, and completeness.
+
+If the issues mention extreme aspect ratio, long horizontal strip, backward flow, detached labels, or long crossing telemetry/security lines, do a layout rewrite instead of local edits:
+1. Reduce top-level horizontal siblings; keep global direction right, but add local direction: down inside operations, security, observability, management, CI/CD, and other sidecar containers.
+2. Use compact two-row or two-column grouping for complex systems instead of one long chain.
+3. Move external actors next to the boundary they connect to.
+4. Move monitoring/security/identity/backup sidecars near the resources they serve.
+5. Collapse repeated telemetry or logging edges into a small number of labelled aggregate edges when that preserves intent.
+
+Output the COMPLETE updated D2 code.`;
 }
 
 interface Candidate {
+  round: number;
   code: string;
   svg: string;
   quality: QualityReport | null;
@@ -149,10 +161,10 @@ interface Candidate {
   score: number;
 }
 
-/** Comparable 0–10 score: the reviewer's score when available, else deterministic quality. */
+/** Comparable 0–10 score: the reviewer's score when available, else deterministic quality. Quality breaks review ties. */
 function candidateScore(quality: QualityReport | null, assessment: ReviewAssessment | null): number {
   const penalty = hasCriticalFailure(quality) ? 3 : 0;
-  if (assessment) return assessment.score - penalty;
+  if (assessment) return assessment.score - penalty + (quality ? quality.score / 1000 : 0);
   return (quality ? quality.score / 10 : 5) - penalty;
 }
 
@@ -236,7 +248,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
 
     const score = candidateScore(rendered.quality, assessment);
     rounds.push({ round, reviewScore: assessment?.score, qualityScore: rendered.quality?.score });
-    const candidate: Candidate = { code, svg: rendered.svg, quality: rendered.quality, assessment, score };
+    const candidate: Candidate = { round, code, svg: rendered.svg, quality: rendered.quality, assessment, score };
     if (!best || score > best.score) {
       best = candidate;
       nonImproving = 0;
@@ -259,7 +271,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   }
 
   if (!best) {
-    return { code, svg: null, quality: null, assessment: null, outcome: "render_failed", refinements, reviews, rounds, plan };
+    return { code, svg: null, quality: null, assessment: null, outcome: "render_failed", refinements, reviews, rounds, plan, bestRound: null };
   }
 
   const bestPassed = best.assessment ? best.assessment.pass && !hasCriticalFailure(best.quality) : false;
@@ -274,5 +286,6 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
     reviews,
     rounds,
     plan,
+    bestRound: best.round,
   };
 }

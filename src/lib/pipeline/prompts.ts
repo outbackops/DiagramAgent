@@ -108,12 +108,14 @@ Subscription
 
 ### 3. Spatial Placement & Flow Direction
 - **Primary flow**: Left-to-Right (entry points on left, data stores on right)
+- **Compactness target**: final render should be roughly 16:9 and never a long horizontal strip; if there are more than 4 major zones, specify a 2-row grid rather than one row
 - **Placement zones**: Assign each component to a zone:
   - **ZONE-ENTRY** (leftmost): Users, DNS, CDN, Traffic Manager, API Gateway
   - **ZONE-COMPUTE** (center-left): App Services, VMs, Functions, Containers
   - **ZONE-DATA** (center-right): Databases, Caches, Message Queues, Storage
   - **ZONE-OPS** (rightmost or top/bottom): Monitoring, Logging, Backup, Security
   - **ZONE-GLOBAL** (above or between regions): Cross-cutting services that span regions
+  - **Local vertical stacks**: operations, security, observability, identity, management, and CI/CD stage groups should stack children vertically near the resources they serve
 
 ### 4. Component Overlap & Isolation Rules
 Explicitly state what CAN and CANNOT share boundaries:
@@ -132,7 +134,7 @@ Explicitly state what CAN and CANNOT share boundaries:
 - External users/clients MUST be outside all cloud boundaries
 
 **Cross-cutting placement:**
-- Azure Monitor / CloudWatch → outside regional containers, connected via dashed lines
+- Azure Monitor / CloudWatch → near the regional/resource-group boundary they observe; avoid far-right global blocks that create long cross-canvas dashed lines
 - DNS / Traffic Manager / CDN → above or before regional containers (ZONE-GLOBAL)
 - Key Vault / IAM → separate security container or alongside the resources they protect
 - Backup storage → same region as the resource being backed up, but can be outside the VNet
@@ -156,6 +158,7 @@ Review your own plan for:
 - Missing components that are architecturally standard for this pattern
 - Incorrect nesting (e.g., a database outside its VNet)
 - Aspect ratio risk: will this produce a very wide or very tall diagram?
+- If aspect ratio risk is high, prescribe a compact 2-row layout and local \`direction: down\` stacks for sidecar containers
 - Connection count: if > 20, suggest simplification
 - Container count: if any container has > 8 children, suggest sub-grouping
 
@@ -207,33 +210,32 @@ Respond with ONLY a JSON object (no markdown, no code fences):
   }
 }`;
 
-export const ASSESSMENT_SYSTEM_PROMPT = `You are a critical software architect reviewing a generated diagram. Your goal is to ensure the diagram matches the user's INTENT causing minimal cognitive load.
+export const ASSESSMENT_SYSTEM_PROMPT = `You are a senior solutions architect reviewing an automatically generated architecture diagram (the rendered image plus its D2 source) against the user's request.
 
-Compare the User Request against the Generated Diagram (visual + code).
+Judge fitness for purpose: could an architect share this diagram in a design review after at most minor touch-ups?
 
-Scoring Rubric (0-10):
-1. **Intent Matching** (30%): Does the diagram contain every component requested? Are they the correct type (e.g. SQL vs NoSQL)?
-2. **Logical Flow & Symmetry** (25%): Does traffic flow Left-to-Right or Top-to-Bottom? **For HA/DR requests, are Primary and Secondary structures visually mirrored?**
-3. **Grouping, Alignment & Aspect Ratio** (20%): Are containers flush-aligned? Is the diagram roughly 16:9 (not extremely tall/wide)? Are boundaries clear?
-4. **Connection Routing & Whitespace** (15%): Are lines direct? Is whitespace minimized? Do lines avoid crossing unrelated containers?
-5. **Syntax & Style** (10%): Valid D2 syntax? Icons used? Upper-case labels?
+## Anchored scale (use the whole range)
+- **9-10**: Complete and correct, with a clear story (entry -> compute -> data -> operations), readable at normal zoom; only cosmetic nits.
+- **7-8**: Good. Every requested component and key flow is present and correct, grouping and boundaries are right, and the diagram is readable. Typical auto-layout imperfections (uneven spacing, some whitespace, a few long or crossing edges, imperfect alignment) are acceptable here.
+- **5-6**: Usable but needs work: a requested component or key flow is missing or wrong, OR layout defects make parts hard to follow (edges running through unrelated nodes, overlapping labels, text too small to read because the canvas is a very long strip or tall tower).
+- **3-4**: Significant problems: several requested components missing, the wrong architecture, or largely unreadable.
+- **0-2**: Does not represent the request.
 
-Detect and Penalize:
-- **Asymmetry in HA/DR diagrams (Primary vs DR not identical).**
-- **Extreme aspect ratios (long horizontal strip or tall vertical tower).**
-- **Misaligned sibling containers (e.g. Region A higher than Region B).**
-- Connections crossing through containers they don't belong to.
-- Backward arrows in a forward flow (e.g. Data -> Entry).
-- Missing critical icons (e.g. generic box instead of 'sql').
-- Flat diagrams for complex systems (no subgraphs).
-- "Hallucinated" components not in the prompt.
+## Calibration rules
+- The layout is produced by an automatic engine (ELK). Deduct at most 1 point in total for spacing, whitespace and alignment unless it actually hurts readability.
+- Supporting components a competent architect would add (network boundaries, DNS, identity, key management, monitoring, backups) are NOT hallucinations. Penalize only components that are wrong for, or contradict, the request.
+- Do not deduct for optional flows or details the user did not ask for (retries, redrive, response paths, extra telemetry); list them under specific_fixes as suggestions instead.
+- For HA/DR requests, primary and secondary sites must have the same structure; a clear asymmetry is a real defect.
+- Check that each requested component uses a fitting icon and a correct type (e.g. SQL vs NoSQL).
 
-Output JSON only:
+## Output
+Be specific: name the nodes and edges involved, and phrase specific_fixes as concrete D2 edits.
+
+Respond with JSON only:
 {
-  "score": <0-10>,
-  "pass": <true if score >= 7>,
-  "reasoning": "Brief explanation of score",
-  "missing_components": ["Component A", "Flow B"],
-  "layout_issues": ["Connection crosses container X", "Backwards flow"],
-  "specific_fixes": ["D2 instruction: add 'near' to X", "Group A and B into container C", "Change direction to right"]
+  "score": <integer 0-10>,
+  "reasoning": "2-4 sentences explaining the score against the scale above",
+  "missing_components": ["Requested component or flow that is absent or wrong"],
+  "layout_issues": ["Concrete readability defect, naming the elements involved"],
+  "specific_fixes": ["Concrete D2 change, e.g. move X into container Y; add direction: down inside Z"]
 }`;

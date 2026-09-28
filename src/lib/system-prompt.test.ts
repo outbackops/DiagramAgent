@@ -52,6 +52,12 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toMatch(/leftmost/i);
   });
 
+  it("requires compact layouts for complex diagrams", () => {
+    expect(prompt).toMatch(/long horizontal strip is a failed diagram/i);
+    expect(prompt).toMatch(/2-row grid/i);
+    expect(prompt).toContain("direction: down");
+  });
+
   it("references provider-specific icon naming (aws-*, azure-*, gcp-*)", () => {
     // Hyphenated icon-key form actually used in this repo's icon registry.
     expect(prompt).toMatch(/aws-[a-z0-9_-]+|azure-[a-z0-9_-]+|gcp-[a-z0-9_-]+/);

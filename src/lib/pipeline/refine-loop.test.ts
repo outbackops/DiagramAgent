@@ -12,7 +12,7 @@ const goodQuality: QualityReport = {
   score: 92,
   grade: "A",
   checks: [{ id: "connections", label: "Components are connected", severity: "critical", status: "pass", detail: "4 connections" }],
-  metrics: { nodes: 5, containers: 1, connections: 4, maxDepth: 2, width: 800, height: 400, aspectRatio: 2, iconCoverage: 1, labelCoverage: 1, crossings: 0, orphans: 0 },
+  metrics: { nodes: 5, containers: 1, connections: 4, maxDepth: 2, width: 800, height: 400, aspectRatio: 2, iconCoverage: 1, labelCoverage: 1, crossings: 0, orphans: 0, edgesThroughNodes: 0 },
 };
 const brokenQuality: QualityReport = {
   ...goodQuality,
@@ -106,8 +106,16 @@ describe("runDiagramPipeline", () => {
     const { steps } = makeSteps({ scores: [6, 4] });
     const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1 });
     expect(result.code).toBe("v1");
+    expect(result.bestRound).toBe(0);
     expect(result.assessment?.score).toBe(6);
     expect(result.rounds.map((r) => r.reviewScore)).toEqual([6, 4]);
+  });
+
+  it("breaks review-score ties with deterministic quality", async () => {
+    const better: QualityReport = { ...goodQuality, score: 97 };
+    const { steps } = makeSteps({ scores: [6, 6], qualities: { v2: better } });
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1 });
+    expect(result).toMatchObject({ code: "v2", bestRound: 1 });
   });
 
   it("stops after two non-improving rounds", async () => {
