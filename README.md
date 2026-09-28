@@ -9,7 +9,7 @@ Describe a system in plain language and get a clean, editable architecture diagr
 - **Sign in with your GitHub/Copilot identity** — uses the account signed in on your machine (`gh auth login` / `copilot login`), or an in-app *Sign in with GitHub* device-code flow. Organizations that federate GitHub with **Microsoft Entra ID** sign in through Entra as part of GitHub's normal sign-in.
 - **Pick any model you're entitled to** — the model picker lists your Copilot catalog (Claude, GPT, Grok and more — whatever your plan includes) with vision/reasoning badges and a reasoning-effort control. Default: `claude-opus-5.5` @ `medium`.
 - **A real pipeline, not a single prompt** — optional clarifying questions → architecture plan → D2 generation (streamed live) → render → deterministic quality checks → vision review → targeted refinement. Every refinement is re-checked and the best version wins.
-- **Quality you can see** — a *Quality* tab scores every render (0–100) with 15 deterministic checks (phantom nodes, unknown icons, overlaps, crossings, aspect ratio, orphans, label coverage, …); a *Review* tab shows the vision model's score, findings and fixes per round.
+- **Quality you can see** — a *Quality* tab scores every render (0–100) with 16 deterministic checks (phantom nodes, unknown icons, overlaps, edges through nodes, crossings, aspect ratio, orphans, label coverage, …); a *Review* tab shows the vision model's score, findings and fixes per round.
 - **Edit however you like** — chat ("add a Redis cache"), edit the D2 in a syntax-highlighted editor, or click elements on the canvas to relabel, delete, connect, or drag them into another container.
 - **Export** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io, native Visio `.vsdx`, or raw `.d2`.
 - **Polished UX** — resizable panels, light/dark/system themes, live progress with timings, stop at any time (<kbd>Esc</kbd>), keyboard shortcuts, and state that survives reloads.
@@ -38,9 +38,9 @@ DiagramAgent talks to models through the [GitHub Copilot SDK](https://github.com
 | Mode | When | How it works |
 |------|------|--------------|
 | **This machine's login** | Default for `npm run dev` | The server uses the GitHub account signed in via `gh auth login` or `copilot login`. The account menu shows *Signed in on this machine*. |
-| **In-app GitHub sign-in** | When `GITHUB_OAUTH_CLIENT_ID` is set | *Sign in with GitHub* shows a device code; approve it on github.com (Entra ID SSO/EMU users are routed through Entra automatically). The token is kept server-side in an AES-256-GCM-encrypted, `HttpOnly`, `SameSite=Lax` cookie and is never exposed to browser JavaScript. |
+| **In-app GitHub sign-in** | When `GITHUB_OAUTH_CLIENT_ID` is set | *Sign in with GitHub* shows a device code; approve it on github.com (Entra ID SSO/EMU users are routed through Entra automatically). The token is sealed with AES-256-GCM into an `HttpOnly`, `SameSite=Lax` cookie that expires after 8 hours: it lives in your browser, page scripts can't read it, and it's useless without the server's secret. Signing out clears the cookie but doesn't revoke the app on GitHub; do that under *Settings → Applications*. |
 
-Production builds **refuse** the machine login unless you opt in with `DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN=true` — a hosted instance never lends its operator's Copilot seat to anonymous visitors.
+Production builds **refuse** the machine login unless you opt in with `DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN=true` — a hosted instance never lends its operator's Copilot seat to anonymous visitors. Even when it's allowed, the machine login only serves requests addressed to `localhost`, `127.0.0.1` or `[::1]` (add trusted names with `DIAGRAM_AGENT_ALLOWED_HOSTS`), so the app opened through a LAN address or a rebinding DNS name can't borrow your GitHub session. `npm run dev` listens on `127.0.0.1` only for the same reason; `npm run dev -- -H 0.0.0.0` opens it up, and other devices then need the in-app sign-in.
 
 To enable in-app sign-in, register a GitHub OAuth App (or GitHub App) with **Enable Device Flow** checked and set:
 
@@ -57,7 +57,7 @@ DIAGRAM_AGENT_SESSION_SECRET=<32+ random characters>  # required in production
 - Change the default with `DIAGRAM_AGENT_DEFAULT_MODEL=copilot:<model>@<effort>`. If the default isn't in an account's catalog, the next best available model is chosen.
 - Unknown model IDs are rejected server-side (the Copilot runtime would otherwise silently fall back to another model).
 
-**Optional: Azure OpenAI.** Set `AZURE_AI_FOUNDRY_ENDPOINT` to also list your Azure OpenAI / AI Foundry deployments in the picker. Those calls authenticate with Microsoft Entra ID through `DefaultAzureCredential` (`az login`, managed identity, …) — no keys.
+**Optional: Azure OpenAI.** Set `AZURE_AI_FOUNDRY_ENDPOINT` to also list your Azure OpenAI / AI Foundry deployments in the picker. Those calls authenticate with Microsoft Entra ID through `DefaultAzureCredential` (`az login`, managed identity, …) — no keys. Because that is the *server's* Azure identity, Azure models are offered only to the machine login and to GitHub users listed in `DIAGRAM_AGENT_AZURE_USERS` (`*` = everyone signed in).
 
 ## How it works
 
@@ -87,7 +87,7 @@ npx tsc --noEmit
 npm run eval:diagrams     # live end-to-end eval against real Copilot models (see below)
 ```
 
-- **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real outputs from the pipeline that passed review. `src/test/diagram-fixtures.test.ts` renders each with the real D2 engine (no network) and asserts quality score, no critical failures, keyword coverage, and that draw.io/Visio export works.
+- **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` renders each with the real D2 engine (no network) and asserts quality score, no critical failures, keyword coverage, and that draw.io/Visio export works.
 - **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures`.
 
 ### Latest eval (2026-09-28)
@@ -129,13 +129,18 @@ Real pipeline output (golden fixtures), rendered by the app:
 | `GITHUB_OAUTH_CLIENT_ID` | — | Enables in-app *Sign in with GitHub* (device flow) |
 | `DIAGRAM_AGENT_SESSION_SECRET` | per-process random key in dev | Encrypts the session cookie; required in production with in-app sign-in |
 | `DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN` | `true` in dev, `false` in production | Let requests use the server machine's GitHub login |
-| `DIAGRAM_AGENT_COPILOT_HOME` | `<tmp>/diagram-agent/copilot` | Copilot runtime state directory |
+| `DIAGRAM_AGENT_ALLOWED_HOSTS` | — | Extra host names (comma-separated) that may use the machine login besides loopback |
+| `DIAGRAM_AGENT_COPILOT_HOME` | `~/.diagram-agent/copilot` | Copilot runtime state directory (kept apart from your `~/.copilot`) |
 | `AZURE_AI_FOUNDRY_ENDPOINT` | — | Optional Azure OpenAI / AI Foundry endpoint (Entra ID auth) |
+| `DIAGRAM_AGENT_AZURE_USERS` | — | GitHub logins (comma-separated, or `*`) allowed to use the Azure models besides the machine login |
+| `DIAGRAM_AGENT_RENDER_TIMEOUT_MS` | `45000` | Per-step D2 layout/render limit before the renderer is recycled |
+| `DIAGRAM_AGENT_RENDER_QUEUE_LIMIT` | `8` | Renders allowed to wait for the (single) D2 engine before `/api/render` answers 503 |
 
 ## Security
 
 - No keys or tokens in the repo; `.env*` is git-ignored and CI runs a full-history [gitleaks](https://github.com/gitleaks/gitleaks) scan on every push and PR.
-- API routes accept JSON only, reject cross-site/cross-origin browser requests, and bound payload sizes — a random web page can't spend your Copilot quota through your browser.
+- API routes accept JSON only, reject cross-site/cross-origin browser requests, and cap request bodies (413) — a random web page can't spend your Copilot quota through your browser.
+- Every model, render and export route needs a credential: an in-app sign-in, or the machine login where it's allowed (see above).
 - Rendered SVG is sanitised (DOMPurify) before it is inserted into the page, because labels, links and tooltips are model-generated.
 - Errors returned to the browser never include upstream payloads or stack traces.
 
