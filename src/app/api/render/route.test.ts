@@ -22,7 +22,7 @@ vi.mock("@/lib/icon-registry", () => ({
 }));
 
 vi.mock("@/lib/svg-orthogonal", () => ({
-  convertConnectionsToOrthogonal: (svg: string) => svg + "<!-- orthogonal-pass -->",
+  orthogonalizeConnections: (svg: string) => ({ svg: svg + "<!-- orthogonal-pass -->", routes: new Map() }),
 }));
 
 const quality = vi.hoisted(() => ({

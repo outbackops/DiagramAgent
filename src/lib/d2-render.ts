@@ -1,5 +1,5 @@
 import { resolveIconsInD2Code } from "@/lib/icon-registry";
-import { convertConnectionsToOrthogonal } from "@/lib/svg-orthogonal";
+import { orthogonalizeConnections, type Rect } from "@/lib/svg-orthogonal";
 import { errorMessage } from "@/lib/error-message";
 
 /**
@@ -43,6 +43,8 @@ type D2Like = {
     renderOptions: Record<string, unknown>;
   }>;
   render: (diagram: unknown, opts: Record<string, unknown>) => Promise<string>;
+  /** Node worker_threads Worker hosting the WASM runtime. */
+  worker?: { terminate?: () => unknown };
 };
 
 export class D2RenderError extends Error {
@@ -51,6 +53,9 @@ export class D2RenderError extends Error {
     this.name = "D2RenderError";
   }
 }
+
+/** Per-step (layout, rendering) limit; overridable for slow machines and tests. */
+const stepTimeoutMs = () => Number(process.env.DIAGRAM_AGENT_RENDER_TIMEOUT_MS) || 45_000;
 
 let d2Promise: Promise<D2Like> | null = null;
 
@@ -62,6 +67,39 @@ function getD2(): Promise<D2Like> {
       throw err;
     });
   return d2Promise;
+}
+
+/** Throw away a wedged instance; the next render starts a fresh worker. */
+function discardD2(instance: D2Like) {
+  void Promise.resolve(instance.worker?.terminate?.()).catch(() => {});
+  d2Promise = null;
+}
+
+// The D2 JS wrapper tracks a single pending request: overlapping calls orphan
+// the earlier promise (it never settles) and can receive each other's
+// results. Every compile/render therefore runs strictly one at a time.
+let queue: Promise<unknown> = Promise.resolve();
+
+function exclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function step<T>(instance: D2Like, work: Promise<T>, what: string): Promise<T> {
+  const limit = stepTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      discardD2(instance);
+      reject(new D2RenderError(`Diagram ${what} took longer than ${Math.round(limit / 1000)}s. Simplify the diagram and try again.`));
+    }, limit);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** D2 reports compile errors as a JSON array of {errmsg}; flatten that to text. */
@@ -83,18 +121,46 @@ function toCompiledDiagram(raw: unknown): CompiledDiagram {
   return { shapes: d.shapes ?? [], connections: d.connections ?? [] };
 }
 
+/** Boxes of leaf shapes — what a connection must not run through. */
+function leafObstacles(diagram: CompiledDiagram): Rect[] {
+  const ids = diagram.shapes.map((s) => s.id);
+  return diagram.shapes
+    .filter((s) => !ids.some((other) => other.startsWith(`${s.id}.`)))
+    .map((s) => ({ x: s.pos.x, y: s.pos.y, w: s.width, h: s.height }));
+}
+
 export async function renderD2(code: string): Promise<RenderResult> {
-  const d2 = await getD2();
-  try {
-    const compiled = await d2.compile(resolveIconsInD2Code(code), { layout: "elk", sketch: false, pad: 40 });
-    const svg = await d2.render(compiled.diagram, {
-      ...compiled.renderOptions,
-      themeID: 0,
-      center: true,
-      noXMLTag: true,
-    });
-    return { svg: convertConnectionsToOrthogonal(svg, 8), diagram: toCompiledDiagram(compiled.diagram) };
-  } catch (err) {
-    throw new D2RenderError(formatD2Error(err));
-  }
+  return exclusive(async () => {
+    const d2 = await getD2();
+    try {
+      const compiled = await step(d2, d2.compile(resolveIconsInD2Code(code), { layout: "elk", sketch: false, pad: 40 }), "layout");
+      if (!compiled || typeof compiled !== "object" || !("diagram" in compiled)) {
+        throw new D2RenderError("D2 returned no diagram");
+      }
+      const diagram = toCompiledDiagram(compiled.diagram);
+      const svg = await step(
+        d2,
+        d2.render(compiled.diagram, {
+          ...compiled.renderOptions,
+          themeID: 0,
+          center: true,
+          noXMLTag: true,
+        }),
+        "rendering",
+      );
+      if (typeof svg !== "string" || !svg.trimStart().startsWith("<")) {
+        throw new D2RenderError("D2 returned an invalid SVG");
+      }
+      const result = orthogonalizeConnections(svg, { obstacles: leafObstacles(diagram) });
+      // Score what users see: replace ELK routes with the final post-processed ones.
+      diagram.connections = diagram.connections.map((c) => {
+        const route = result.routes.get(c.id);
+        return route ? { ...c, route } : c;
+      });
+      return { svg: result.svg, diagram };
+    } catch (err) {
+      if (err instanceof D2RenderError) throw err;
+      throw new D2RenderError(formatD2Error(err));
+    }
+  });
 }
