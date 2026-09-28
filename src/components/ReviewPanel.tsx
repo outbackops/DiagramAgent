@@ -1,11 +1,12 @@
 "use client";
 
-import { Eye, ListChecks, Puzzle, Wrench } from "lucide-react";
+import { Eye, ListChecks, Puzzle, Wand2, Wrench } from "lucide-react";
 import type { RunRecord } from "@/hooks/useDiagramAgent";
 import type { CatalogModel } from "@/lib/llm/types";
+import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 import { modelLabel } from "./RunCard";
 import { ScoreRing } from "./QualityPanel";
-import { Badge } from "./ui/primitives";
+import { Badge, Button } from "./ui/primitives";
 
 function Section({ icon, title, items }: { icon: React.ReactNode; title: string; items?: string[] }) {
   if (!items || items.length === 0) return null;
@@ -27,9 +28,22 @@ function Section({ icon, title, items }: { icon: React.ReactNode; title: string;
   );
 }
 
-export default function ReviewPanel({ run, models, reviewEnabled }: { run: RunRecord | null; models: CatalogModel[]; reviewEnabled: boolean }) {
+export default function ReviewPanel({
+  run,
+  models,
+  reviewEnabled,
+  canApply = false,
+  onApply,
+}: {
+  run: RunRecord | null;
+  models: CatalogModel[];
+  reviewEnabled: boolean;
+  canApply?: boolean;
+  onApply?: (assessment: ReviewAssessment) => void;
+}) {
   const reviews = run?.reviews ?? [];
-  const latest = reviews[reviews.length - 1];
+  // Show the review of the version on the canvas (the kept round), not simply the latest one.
+  const latest = reviews.find((r) => r.round === run?.bestRound) ?? reviews[reviews.length - 1];
 
   if (!latest) {
     return (
@@ -46,8 +60,11 @@ export default function ReviewPanel({ run, models, reviewEnabled }: { run: RunRe
     );
   }
 
-  const best = run?.reviewScore;
   const a = latest.assessment;
+  const keptLabel =
+    reviews.length > 1 && run?.bestRound !== undefined
+      ? `Showing the ${latest.round === 0 ? "first draft" : `round ${latest.round}`} review — the version on the canvas.`
+      : null;
 
   return (
     <div className="scroll-thin h-full overflow-y-auto p-4">
@@ -59,11 +76,24 @@ export default function ReviewPanel({ run, models, reviewEnabled }: { run: RunRe
             <Badge tone={a.pass ? "green" : "amber"}>{a.pass ? "Passed" : "Needs work"}</Badge>
           </p>
           <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">by {modelLabel(run?.reviewer, models)}</p>
-          {best !== undefined && best !== a.score && <p className="mt-0.5 text-[11px] text-zinc-400">Kept the best round (score {best}/10).</p>}
+          {keptLabel && <p className="mt-0.5 text-[11px] text-zinc-400">{keptLabel}</p>}
         </div>
       </div>
 
       {a.reasoning && <p className="mt-4 text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-300">{a.reasoning}</p>}
+      {onApply && (a.layout_issues?.length || a.specific_fixes?.length || a.missing_components?.length) ? (
+        <Button
+          variant="primary"
+          size="sm"
+          className="mt-3"
+          icon={<Wand2 className="size-3.5" />}
+          disabled={!canApply}
+          onClick={() => onApply(a)}
+          title="Run another refinement round using these findings"
+        >
+          Apply suggested fixes
+        </Button>
+      ) : null}
       <Section icon={<Puzzle className="size-3.5 text-rose-500" />} title="Missing components" items={a.missing_components} />
       <Section icon={<ListChecks className="size-3.5 text-amber-500" />} title="Layout issues" items={a.layout_issues} />
       <Section icon={<Wrench className="size-3.5 text-indigo-500" />} title="Suggested fixes" items={a.specific_fixes} />
@@ -82,6 +112,7 @@ export default function ReviewPanel({ run, models, reviewEnabled }: { run: RunRe
                   />
                 </span>
                 <span className="w-9 shrink-0 text-right tabular-nums text-zinc-600 dark:text-zinc-300">{r.assessment.score}/10</span>
+                <span className="w-9 shrink-0 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{r.round === run?.bestRound ? "kept" : ""}</span>
               </li>
             ))}
           </ol>

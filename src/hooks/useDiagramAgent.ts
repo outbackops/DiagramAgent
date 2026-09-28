@@ -7,6 +7,7 @@ import { api } from "@/lib/client/api";
 import type { ChatTurn, ModelSelection } from "@/lib/llm/types";
 import { cleanD2Output } from "@/lib/pipeline/d2-text";
 import {
+  reviewFixPrompt,
   runDiagramPipeline,
   type PipelineEvent,
   type PipelineOutcome,
@@ -46,6 +47,8 @@ export interface RunRecord {
   qualityScore?: number;
   qualityGrade?: string;
   refinements?: number;
+  /** Round whose candidate was kept; its review is the one that matches the canvas. */
+  bestRound?: number;
   reviews: ReviewRecord[];
   notes: string[];
   error?: string;
@@ -275,6 +278,7 @@ export function useDiagramAgent(models: AgentModels) {
           qualityScore: result.quality?.score,
           qualityGrade: result.quality?.grade,
           refinements: result.refinements,
+          bestRound: result.bestRound ?? undefined,
         }));
       } catch (err) {
         const now = Date.now();
@@ -390,6 +394,15 @@ export function useDiagramAgent(models: AgentModels) {
     [busy, code, pushItem, startRun],
   );
 
+  const applyReview = useCallback(
+    (assessment: ReviewAssessment) => {
+      if (busy !== "idle" || !code.trim()) return;
+      pushItem({ id: newId(), kind: "user", text: "Apply the reviewer's suggested fixes", at: Date.now() });
+      void startRun({ prompt: reviewFixPrompt(assessment, null), mode: "edit", existingCode: code });
+    },
+    [busy, code, pushItem, startRun],
+  );
+
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -420,5 +433,6 @@ export function useDiagramAgent(models: AgentModels) {
     retryRun,
     reset,
     fixRenderError,
+    applyReview,
   };
 }

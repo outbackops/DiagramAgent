@@ -4,6 +4,7 @@ import { Check, Copy, Lock, PanelRightClose } from "lucide-react";
 import { useState } from "react";
 import type { RunRecord } from "@/hooks/useDiagramAgent";
 import type { CatalogModel } from "@/lib/llm/types";
+import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 import CodeEditor from "./CodeEditor";
 import QualityPanel from "./QualityPanel";
@@ -25,6 +26,8 @@ export default function Inspector({
   run,
   models,
   reviewEnabled,
+  canApplyReview,
+  onApplyReview,
 }: {
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
@@ -38,6 +41,8 @@ export default function Inspector({
   run: RunRecord | null;
   models: CatalogModel[];
   reviewEnabled: boolean;
+  canApplyReview: boolean;
+  onApplyReview: (assessment: ReviewAssessment) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const tabs: Array<{ id: InspectorTab; label: string; badge?: string }> = [
@@ -100,7 +105,7 @@ export default function Inspector({
       <div className="min-h-0 flex-1" role="tabpanel">
         {tab === "code" && <CodeEditor code={code} onChange={onCodeChange} readOnly={readOnly} theme={theme} />}
         {tab === "quality" && <QualityPanel quality={quality} loading={qualityLoading} />}
-        {tab === "review" && <ReviewPanel run={run} models={models} reviewEnabled={reviewEnabled} />}
+        {tab === "review" && <ReviewPanel run={run} models={models} reviewEnabled={reviewEnabled} canApply={canApplyReview} onApply={onApplyReview} />}
       </div>
     </aside>
   );

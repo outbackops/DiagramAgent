@@ -385,6 +385,8 @@ function Workspace() {
                 run={latestRun}
                 models={choice.models}
                 reviewEnabled={agent.settings.review}
+                canApplyReview={agent.busy === "idle" && Boolean(agent.code.trim())}
+                onApplyReview={agent.applyReview}
               />
             </div>
           </>

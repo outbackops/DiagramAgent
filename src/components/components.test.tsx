@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import ClarifyPanel, { type ClarifyQuestion } from "./ClarifyPanel";
 import ModelPicker from "./ModelPicker";
+import ReviewPanel from "./ReviewPanel";
 import RunCard from "./RunCard";
 import type { RunRecord } from "@/hooks/useDiagramAgent";
 import type { CatalogModel } from "@/lib/llm/types";
@@ -120,11 +121,49 @@ function run(overrides: Partial<RunRecord>): RunRecord {
   };
 }
 
+describe("ReviewPanel", () => {
+  const assessment = { score: 6, pass: false, reasoning: "Readable but cluttered.", layout_issues: ["Edge crosses the Data zone"], specific_fixes: ["Move Redis next to the API"] };
+
+  it("offers to apply the reviewer's fixes", () => {
+    const onApply = vi.fn();
+    render(<ReviewPanel run={run({ reviews: [{ round: 0, assessment }], reviewer: DEFAULT })} models={MODELS} reviewEnabled canApply onApply={onApply} />);
+    expect(screen.getByText("Readable but cluttered.")).toBeTruthy();
+    expect(screen.getByText("Edge crosses the Data zone")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggested fixes" }));
+    expect(onApply).toHaveBeenCalledWith(assessment);
+  });
+
+  it("shows the review of the kept round, not the latest one", () => {
+    const later = { ...assessment, score: 5, reasoning: "Refinement made it worse." };
+    render(
+      <ReviewPanel
+        run={run({ bestRound: 0, reviews: [{ round: 0, assessment }, { round: 1, assessment: later }] })}
+        models={MODELS}
+        reviewEnabled
+      />,
+    );
+    expect(screen.getByText("Readable but cluttered.")).toBeTruthy();
+    expect(screen.queryByText("Refinement made it worse.")).toBeNull();
+    expect(screen.getByText(/first draft review/)).toBeTruthy();
+    expect(screen.getByText("kept")).toBeTruthy();
+  });
+
+  it("disables the action while a run is in progress", () => {
+    render(<ReviewPanel run={run({ reviews: [{ round: 0, assessment }] })} models={MODELS} reviewEnabled canApply={false} onApply={() => {}} />);
+    expect(screen.getByRole("button", { name: "Apply suggested fixes" })).toHaveProperty("disabled", true);
+  });
+
+  it("explains when review is off", () => {
+    render(<ReviewPanel run={null} models={MODELS} reviewEnabled={false} />);
+    expect(screen.getByText(/turned off/)).toBeTruthy();
+  });
+});
+
 describe("RunCard", () => {
   it("summarises a verified run", () => {
     render(<RunCard run={run({ outcome: "verified", reviewScore: 8, qualityScore: 92, qualityGrade: "A", refinements: 1 })} models={MODELS} />);
     expect(screen.getByText("Diagram ready")).toBeTruthy();
-    expect(screen.getByText("Verified")).toBeTruthy();
+    expect(screen.getByText("Passed review")).toBeTruthy();
     expect(screen.getByText("Review 8/10")).toBeTruthy();
     expect(screen.getByText("Quality 92 · A")).toBeTruthy();
     expect(screen.getByText("1m 05s")).toBeTruthy();

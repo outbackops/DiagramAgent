@@ -57,11 +57,11 @@ function StepRow({ step, now }: { step: RunStep; now: number }) {
   );
 }
 
-const OUTCOME: Record<string, { label: string; tone: "green" | "amber" | "sky" | "rose" }> = {
-  verified: { label: "Verified", tone: "green" },
-  best_effort: { label: "Best effort", tone: "amber" },
-  unreviewed: { label: "Not reviewed", tone: "sky" },
-  render_failed: { label: "Render failed", tone: "rose" },
+const OUTCOME: Record<string, { label: string; tone: "green" | "amber" | "sky" | "rose"; title: string }> = {
+  verified: { label: "Passed review", tone: "green", title: "The reviewer scored the diagram 7/10 or higher" },
+  best_effort: { label: "Reviewed", tone: "amber", title: "Best version kept; see the Review tab for suggested fixes" },
+  unreviewed: { label: "Not reviewed", tone: "sky", title: "Vision review was off or unavailable" },
+  render_failed: { label: "Render failed", tone: "rose", title: "The generated D2 did not compile" },
 };
 
 export default function RunCard({
@@ -128,7 +128,11 @@ export default function RunCard({
 
       {run.status === "done" && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {outcome && <Badge tone={outcome.tone}>{outcome.label}</Badge>}
+          {outcome && (
+            <Badge tone={outcome.tone} title={outcome.title}>
+              {outcome.label}
+            </Badge>
+          )}
           {run.reviewScore !== undefined && <Badge tone="indigo">Review {run.reviewScore}/10</Badge>}
           {run.qualityScore !== undefined && (
             <Badge tone={run.qualityScore >= 85 ? "green" : run.qualityScore >= 70 ? "amber" : "rose"}>
