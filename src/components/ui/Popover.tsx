@@ -47,6 +47,8 @@ export function Popover({
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Handled here: don't let the page's global Esc (stop generation) fire too.
+        e.preventDefault();
         close();
         (rootRef.current?.querySelector("[aria-haspopup]") as HTMLElement | null)?.focus();
       }

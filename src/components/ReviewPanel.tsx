@@ -42,19 +42,25 @@ export default function ReviewPanel({
   onApply?: (assessment: ReviewAssessment) => void;
 }) {
   const reviews = run?.reviews ?? [];
-  // Show the review of the version on the canvas (the kept round), not simply the latest one.
-  const latest = reviews.find((r) => r.round === run?.bestRound) ?? reviews[reviews.length - 1];
+  // Show the review of the version on the canvas (the kept round, which a
+  // cancelled run records too). While a run is going there is no kept round
+  // yet, so show the latest review.
+  const kept = run !== null && run.status !== "running" && run.bestRound !== undefined;
+  const latest = kept ? reviews.find((r) => r.round === run.bestRound) : reviews[reviews.length - 1];
 
   if (!latest) {
+    const keptUnreviewed = kept && reviews.length > 0;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-zinc-400">
         <Eye className="size-6" />
         <p className="max-w-64 text-[13px]">
-          {reviewEnabled
-            ? run?.status === "running"
-              ? "The reviewer looks at the rendered image once the first draft is ready."
-              : "After each generation, a vision model inspects the rendered diagram and its findings show up here."
-            : "Vision review is turned off in Generation settings."}
+          {keptUnreviewed
+            ? "The version on the canvas wasn't reviewed — its review failed or was skipped, so earlier findings don't apply to it."
+            : reviewEnabled
+              ? run?.status === "running"
+                ? "The reviewer looks at the rendered image once the first draft is ready."
+                : "After each generation, a vision model inspects the rendered diagram and its findings show up here."
+              : "Vision review is turned off in Generation settings."}
         </p>
       </div>
     );
@@ -62,7 +68,7 @@ export default function ReviewPanel({
 
   const a = latest.assessment;
   const keptLabel =
-    reviews.length > 1 && run?.bestRound !== undefined
+    kept && reviews.length > 1
       ? `Showing the ${latest.round === 0 ? "first draft" : `round ${latest.round}`} review — the version on the canvas.`
       : null;
 

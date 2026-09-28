@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Box, Link2, Trash2, X } from "lucide-react";
 import { IconButton } from "./ui/primitives";
 
@@ -25,6 +25,8 @@ interface ElementEditorProps {
 
 export default function ElementEditor({ selected, connectMode, onUpdateLabel, onDelete, onStartConnect, onCancelConnect, onDeselect }: ElementEditorProps) {
   const [labelValue, setLabelValue] = useState("");
+  // Set before a programmatic blur so onBlur doesn't save again (Enter) or save a discarded edit (Esc).
+  const skipBlurSave = useRef(false);
 
   // Reset the draft label whenever a different element is selected.
   useEffect(() => {
@@ -33,6 +35,10 @@ export default function ElementEditor({ selected, connectMode, onUpdateLabel, on
   }, [selected]);
 
   const save = useCallback(() => {
+    if (skipBlurSave.current) {
+      skipBlurSave.current = false;
+      return;
+    }
     if (selected && labelValue.trim() && labelValue.trim() !== (selected.label ?? "")) {
       onUpdateLabel(selected.path, labelValue.trim(), selected.isConnection);
     }
@@ -76,8 +82,13 @@ export default function ElementEditor({ selected, connectMode, onUpdateLabel, on
             if (e.key === "Enter") {
               e.preventDefault();
               save();
+              skipBlurSave.current = true;
               (e.target as HTMLInputElement).blur();
             } else if (e.key === "Escape") {
+              // Discard the draft; also keep the page-level Esc (deselect / stop) from firing.
+              e.preventDefault();
+              e.stopPropagation();
+              skipBlurSave.current = true;
               setLabelValue(selected.label || "");
               (e.target as HTMLInputElement).blur();
             }

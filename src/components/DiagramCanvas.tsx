@@ -215,7 +215,24 @@ export default function DiagramCanvas({
         </div>
       </div>
 
-      {showError && (
+      {showError && render.errorKind === "unavailable" && (
+        <div className="absolute inset-x-0 top-14 flex justify-center px-4">
+          <div role="alert" className="flex w-full max-w-lg animate-slide-up items-start gap-3 rounded-xl border border-amber-200 bg-white p-3 shadow-lg dark:border-amber-500/30 dark:bg-zinc-900">
+            <AlertOctagon className="mt-0.5 size-4 shrink-0 text-amber-500" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">Couldn&apos;t render the diagram right now</p>
+              <p className="mt-0.5 line-clamp-3 break-words text-[12px] text-zinc-600 dark:text-zinc-300">{render.error}</p>
+              <div className="mt-2 flex gap-2">
+                <Button variant="secondary" size="xs" onClick={render.retry}>
+                  Try again
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showError && render.errorKind !== "unavailable" && (
         <div className="absolute inset-x-0 top-14 flex justify-center px-4">
           <div role="alert" className="flex w-full max-w-lg animate-slide-up items-start gap-3 rounded-xl border border-rose-200 bg-white p-3 shadow-lg dark:border-rose-500/30 dark:bg-zinc-900">
             <AlertOctagon className="mt-0.5 size-4 shrink-0 text-rose-500" />

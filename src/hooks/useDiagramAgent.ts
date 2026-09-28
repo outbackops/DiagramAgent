@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClarifyAnswers, ClarifyQuestion } from "@/components/ClarifyPanel";
 import { resolveAnswerSpecs } from "@/lib/clarify-utils";
-import { api } from "@/lib/client/api";
+import { api, isD2SyntaxError } from "@/lib/client/api";
 import type { ChatTurn, ModelSelection } from "@/lib/llm/types";
 import { cleanD2Output } from "@/lib/pipeline/d2-text";
 import {
+  PipelineAbortError,
+  RenderUnavailableError,
   reviewFixPrompt,
   runDiagramPipeline,
   type PipelineEvent,
@@ -76,9 +78,11 @@ export interface ClarifyState {
 export type AgentBusy = "idle" | "clarifying" | "running";
 
 const MAX_ITEMS = 120;
+/** Matches the server's per-turn history limit (src/lib/api/schemas.ts). */
+const HISTORY_TURN_LIMIT = 20_000;
 const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-const isAbort = (err: unknown) => err instanceof Error && err.name === "AbortError";
+const isAbort = (err: unknown) => typeof err === "object" && err !== null && (err as { name?: unknown }).name === "AbortError";
 
 const isItems = (v: unknown): v is ChatItem[] =>
   Array.isArray(v) && v.every((i) => i && typeof i === "object" && typeof (i as ChatItem).id === "string" && typeof (i as ChatItem).kind === "string");
@@ -133,6 +137,10 @@ function applyEvent(run: RunRecord, event: PipelineEvent, now: number): RunRecor
         steps: patchLast("reviewing", { status: "failed", endedAt: now, detail: "Review unavailable" }),
         notes: [...run.notes, `Review failed: ${event.message}`],
       };
+    case "refine_error": {
+      const steps = run.steps.map((s) => (s.status === "active" ? { ...s, status: "failed" as const, endedAt: now, detail: "Model call failed" } : s));
+      return { ...run, steps, notes: [...run.notes, `Refinement stopped: ${event.message}. Kept the best version so far.`] };
+    }
     default:
       return run;
   }
@@ -180,11 +188,20 @@ export function useDiagramAgent(models: AgentModels) {
     // One-off migration of persisted state from the previous UI version.
     setItems((current) => {
       const base = current.length === 0 && legacy ? legacy : current;
-      return base.map((item) =>
-        item.kind === "run" && item.run.status === "running"
-          ? { ...item, run: { ...item.run, status: "cancelled", notes: [...item.run.notes, "Interrupted by a page reload"] } }
-          : item,
-      );
+      return base.map((item) => {
+        if (item.kind !== "run" || item.run.status !== "running") return item;
+        const endedAt = Math.max(item.run.startedAt, ...item.run.steps.map((s) => s.endedAt ?? s.startedAt));
+        return {
+          ...item,
+          run: {
+            ...item.run,
+            status: "cancelled",
+            endedAt,
+            steps: item.run.steps.map((s) => (s.status === "active" ? { ...s, status: "failed" as const, endedAt } : s)),
+            notes: [...(item.run.notes ?? []), "Interrupted by a page reload"],
+          },
+        };
+      });
     });
   }, [setItems]);
 
@@ -225,6 +242,8 @@ export function useDiagramAgent(models: AgentModels) {
       };
       pushItem({ id: `run-${run.id}`, kind: "run", run, at: run.startedAt });
       setBusy("running");
+      // Streaming writes straight into the editor; this is what to put back if the run is stopped or fails.
+      const baseline = input.mode === "edit" ? (input.existingCode ?? "") : "";
       if (input.mode === "create") setCode("");
 
       const steps: PipelineSteps = {
@@ -250,7 +269,15 @@ export function useDiagramAgent(models: AgentModels) {
           setCode(cleaned);
           return cleaned;
         },
-        render: (candidate, signal) => api.render(candidate, signal),
+        render: async (candidate, signal) => {
+          try {
+            return await api.render(candidate, signal);
+          } catch (err) {
+            // Only a 422 means the D2 is wrong; anything else must not trigger a syntax-fix round.
+            if (isAbort(err) || isD2SyntaxError(err)) throw err;
+            throw new RenderUnavailableError(errText(err));
+          }
+        },
         assess: reviewEnabled
           ? async (review, signal) => (await api.assess({ svg: review.svg, prompt: review.prompt, d2Code: review.code }, reviewer, signal)).assessment
           : undefined,
@@ -283,16 +310,34 @@ export function useDiagramAgent(models: AgentModels) {
       } catch (err) {
         const now = Date.now();
         const cancelled = isAbort(err) || controller.signal.aborted;
+        const kept =
+          err instanceof PipelineAbortError && err.bestCode
+            ? { code: err.bestCode, round: err.bestRound }
+            : err instanceof RenderUnavailableError && err.candidate
+              ? { code: err.candidate.code, round: null }
+              : null;
+        // Never leave half-streamed output in place of the user's diagram. Skip
+        // when a newer run or a reset has taken over the editor.
+        if (abortRef.current === controller) {
+          setCode(kept ? kept.code : baseline);
+        }
         updateRun(run.id, (r) => ({
           ...r,
           status: cancelled ? "cancelled" : "failed",
           endedAt: now,
           error: cancelled ? undefined : errText(err),
           steps: r.steps.map((s) => (s.status === "active" ? { ...s, status: cancelled ? "done" : "failed", endedAt: now } : s)),
+          // Lets the Review tab show the review of the version left on the canvas.
+          ...(kept && kept.round !== null ? { bestRound: kept.round } : {}),
         }));
       } finally {
-        if (abortRef.current === controller) abortRef.current = null;
-        setBusy("idle");
+        // A newer run (or a reset) owns the busy state now; don't clobber it.
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          setBusy("idle");
+        } else if (abortRef.current === null) {
+          setBusy("idle");
+        }
       }
     },
     [pushItem, reviewer, reviewerSupportsVision, selection, setCode, settings.refinements, settings.review, updateRun],
@@ -300,7 +345,7 @@ export function useDiagramAgent(models: AgentModels) {
 
   const priorRequests = useCallback((): ChatTurn[] => {
     const users = items.filter((i): i is Extract<ChatItem, { kind: "user" }> => i.kind === "user");
-    return users.slice(-6).map((u) => ({ role: "user", content: u.text }));
+    return users.slice(-6).map((u) => ({ role: "user", content: u.text.slice(0, HISTORY_TURN_LIMIT) }));
   }, [items]);
 
   const askClarify = useCallback(
@@ -374,6 +419,7 @@ export function useDiagramAgent(models: AgentModels) {
   const retryRun = useCallback(
     (run: RunRecord) => {
       if (busy !== "idle") return;
+      setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Try again", at: Date.now() });
       if (run.mode === "create") {
         void startRun({ prompt: run.prompt, mode: "create" });
@@ -388,6 +434,7 @@ export function useDiagramAgent(models: AgentModels) {
     (message: string) => {
       if (busy !== "idle" || !code.trim()) return;
       const prompt = `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`;
+      setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Fix the rendering error", at: Date.now() });
       void startRun({ prompt, mode: "edit", existingCode: code });
     },
@@ -397,6 +444,7 @@ export function useDiagramAgent(models: AgentModels) {
   const applyReview = useCallback(
     (assessment: ReviewAssessment) => {
       if (busy !== "idle" || !code.trim()) return;
+      setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Apply the reviewer's suggested fixes", at: Date.now() });
       void startRun({ prompt: reviewFixPrompt(assessment, null), mode: "edit", existingCode: code });
     },

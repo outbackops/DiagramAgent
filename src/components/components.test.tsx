@@ -153,6 +153,26 @@ describe("ReviewPanel", () => {
     expect(screen.getByRole("button", { name: "Apply suggested fixes" })).toHaveProperty("disabled", true);
   });
 
+  it("doesn't show another round's findings when the kept version wasn't reviewed", () => {
+    render(<ReviewPanel run={run({ bestRound: 1, reviews: [{ round: 0, assessment }] })} models={MODELS} reviewEnabled canApply onApply={() => {}} />);
+    expect(screen.getByText(/wasn't reviewed/)).toBeTruthy();
+    expect(screen.queryByText("Readable but cluttered.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply suggested fixes" })).toBeNull();
+  });
+
+  it("shows the latest review while a run is still going", () => {
+    const later = { ...assessment, reasoning: "Second look." };
+    render(<ReviewPanel run={run({ status: "running", bestRound: 0, reviews: [{ round: 0, assessment }, { round: 1, assessment: later }] })} models={MODELS} reviewEnabled />);
+    expect(screen.getByText("Second look.")).toBeTruthy();
+  });
+
+  it("follows the version left on the canvas after a cancel", () => {
+    const later = { ...assessment, score: 4, reasoning: "Round 1 regressed." };
+    render(<ReviewPanel run={run({ status: "cancelled", bestRound: 0, reviews: [{ round: 0, assessment }, { round: 1, assessment: later }] })} models={MODELS} reviewEnabled />);
+    expect(screen.getByText("Readable but cluttered.")).toBeTruthy();
+    expect(screen.queryByText("Round 1 regressed.")).toBeNull();
+  });
+
   it("explains when review is off", () => {
     render(<ReviewPanel run={null} models={MODELS} reviewEnabled={false} />);
     expect(screen.getByText(/turned off/)).toBeTruthy();

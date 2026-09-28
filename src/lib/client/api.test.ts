@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { api, ApiError, safeFileName } from "./api";
+import { api, ApiError, isD2SyntaxError, safeFileName } from "./api";
 
 function sseResponse(frames: string[]) {
   const encoder = new TextEncoder();
@@ -92,6 +92,46 @@ describe("api.render", () => {
     resolve(Response.json({ svg: "<svg/>", quality: null }));
     await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
     await expect(kept).resolves.toMatchObject({ svg: "<svg/>" });
+  });
+
+  it("honours a caller's cancel on a cache hit too", async () => {
+    let resolve!: (r: Response) => void;
+    globalThis.fetch = vi.fn(() => new Promise<Response>((r) => (resolve = r))) as unknown as typeof fetch;
+    const code = `cached # ${Math.random()}`;
+    const first = api.render(code);
+    const controller = new AbortController();
+    const second = api.render(code, controller.signal);
+    controller.abort();
+    await expect(second).rejects.toMatchObject({ name: "AbortError" });
+    resolve(Response.json({ svg: "<svg/>", quality: null }));
+    await expect(first).resolves.toMatchObject({ svg: "<svg/>" });
+  });
+
+  it("waits and retries while the renderer is busy", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ error: "Renderer is busy, try again shortly" }, { status: 503 }))
+        .mockResolvedValueOnce(Response.json({ svg: "<svg/>", quality: null }));
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+      const pending = api.render(`busy # ${Math.random()}`);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toMatchObject({ svg: "<svg/>" });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells D2 errors apart from an unavailable renderer", async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ error: "Sign in with GitHub to use DiagramAgent." }, { status: 401 })) as unknown as typeof fetch;
+    const unavailable = await api.render(`auth # ${Math.random()}`).catch((e) => e);
+    globalThis.fetch = vi.fn(async () => Response.json({ error: "syntax error at line 1" }, { status: 422 })) as unknown as typeof fetch;
+    const syntax = await api.render(`bad # ${Math.random()}`).catch((e) => e);
+    expect(isD2SyntaxError(syntax)).toBe(true);
+    expect(isD2SyntaxError(unavailable)).toBe(false);
+    expect(isD2SyntaxError(new TypeError("Failed to fetch"))).toBe(false);
   });
 });
 

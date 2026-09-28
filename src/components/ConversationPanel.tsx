@@ -155,6 +155,8 @@ const ConversationPanel = forwardRef<ComposerHandle, ConversationPanelProps>(fun
   }, [items.length, lastRunSteps, clarify, busy]);
 
   const running = busy === "running";
+  // Retrying replaces the current diagram, so only offer it on the run that produced it.
+  const latestRunId = items.findLast((i) => i.kind === "run")?.id;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -164,7 +166,13 @@ const ConversationPanel = forwardRef<ComposerHandle, ConversationPanelProps>(fun
         ) : (
           items.map((item) =>
             item.kind === "run" ? (
-              <RunCard key={item.id} run={item.run} models={models} onStop={onStop} onRetry={busy === "idle" ? onRetry : undefined} />
+              <RunCard
+                key={item.id}
+                run={item.run}
+                models={models}
+                onStop={onStop}
+                onRetry={busy === "idle" && item.id === latestRunId ? onRetry : undefined}
+              />
             ) : (
               <Bubble key={item.id} item={item} />
             ),

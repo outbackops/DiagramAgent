@@ -109,6 +109,14 @@ function normalizeEffort(model: CatalogModel, requested?: ReasoningEffort): Reas
   return model.reasoningEfforts.includes("medium") ? "medium" : undefined;
 }
 
+/** Selection for `model`, keeping `preferredEffort` when the model supports it and otherwise its default effort. */
+export function selectionForModel(model: CatalogModel, preferredEffort?: ReasoningEffort): ModelSelection {
+  const reasoningEffort = normalizeEffort(model, preferredEffort);
+  return reasoningEffort
+    ? { provider: model.provider, model: model.id, reasoningEffort }
+    : { provider: model.provider, model: model.id };
+}
+
 /**
  * Check a selection against the catalog the caller is entitled to. Unknown
  * models are rejected (the Copilot runtime would otherwise silently fall back
@@ -122,10 +130,7 @@ export function validateSelection(selection: ModelSelection, catalog: CatalogMod
       `Model "${selection.model}" is not available for this account. Pick another model.`,
     );
   }
-  const reasoningEffort = normalizeEffort(model, selection.reasoningEffort);
-  return reasoningEffort
-    ? { provider: model.provider, model: model.id, reasoningEffort }
-    : { provider: model.provider, model: model.id };
+  return selectionForModel(model, selection.reasoningEffort);
 }
 
 /** Best default for this catalog: the configured default, then the preference list, then anything. */

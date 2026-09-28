@@ -7,7 +7,7 @@ import type { CatalogModel, ModelSelection } from "@/lib/llm/types";
 import type { PipelinePhase } from "@/lib/pipeline/refine-loop";
 import { Badge, Button, cn } from "./ui/primitives";
 
-const PHASE_LABEL: Record<PipelinePhase, string> = {
+export const PHASE_LABEL: Record<PipelinePhase, string> = {
   planning: "Planning architecture",
   generating: "Writing D2",
   rendering: "Rendering",
@@ -15,6 +15,11 @@ const PHASE_LABEL: Record<PipelinePhase, string> = {
   refining: "Refining",
   fixing: "Fixing syntax",
 };
+
+/** Human label for a pipeline step, including the round for refine/fix passes. */
+export function phaseLabel(step: Pick<RunStep, "phase" | "round">): string {
+  return step.phase === "refining" || step.phase === "fixing" ? `${PHASE_LABEL[step.phase]} · round ${step.round}` : PHASE_LABEL[step.phase];
+}
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -40,7 +45,7 @@ export function modelLabel(selection: ModelSelection | undefined, models: Catalo
 
 function StepRow({ step, now }: { step: RunStep; now: number }) {
   const duration = (step.endedAt ?? now) - step.startedAt;
-  const label = step.phase === "refining" || step.phase === "fixing" ? `${PHASE_LABEL[step.phase]} · round ${step.round}` : PHASE_LABEL[step.phase];
+  const label = phaseLabel(step);
   return (
     <li className="flex items-center gap-2 text-xs">
       {step.status === "active" ? (
@@ -143,7 +148,7 @@ export default function RunCard({
         </div>
       )}
 
-      {showSteps && run.steps.length > 0 && (
+      {showSteps && (run.steps.length > 0 || running) && (
         <ol className="mt-3 space-y-1.5 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
           {run.steps.map((step) => (
             <StepRow key={step.key} step={step} now={now} />

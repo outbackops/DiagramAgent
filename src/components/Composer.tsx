@@ -39,7 +39,8 @@ const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({ o
   }, [value]);
 
   useEffect(() => {
-    if (!running && !disabled) textareaRef.current?.focus();
+    // Don't pull focus out of an open modal (e.g. the confirm dialog) when a run finishes.
+    if (!running && !disabled && !document.querySelector('[aria-modal="true"]')) textareaRef.current?.focus();
   }, [running, disabled]);
 
   const submit = useCallback(() => {

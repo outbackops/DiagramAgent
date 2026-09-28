@@ -24,6 +24,11 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Callers pass inline handlers; keep the latest so focus setup runs only when `open` changes.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -37,8 +42,9 @@ export function Dialog({
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       } else if (e.key === "Tab") {
         const items = focusable();
         if (items.length === 0) return;
@@ -58,7 +64,7 @@ export function Dialog({
       document.removeEventListener("keydown", onKey, true);
       previouslyFocused.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

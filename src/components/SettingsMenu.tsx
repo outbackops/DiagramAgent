@@ -3,6 +3,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import type { AgentSettings } from "@/hooks/useDiagramAgent";
 import type { CatalogModel, ModelSelection } from "@/lib/llm/types";
+import { selectionForModel } from "@/lib/llm/selection";
 import { Popover } from "./ui/Popover";
 import { IconButton, Segmented, Switch } from "./ui/primitives";
 
@@ -87,7 +88,7 @@ export default function SettingsMenu({
               if (e.target.value === "same") return onReviewerChange("same");
               const [provider, ...rest] = e.target.value.split(":");
               const model = models.find((m) => m.provider === provider && m.id === rest.join(":"));
-              if (model) onReviewerChange({ provider: model.provider, model: model.id, reasoningEffort: model.reasoningEfforts.includes("medium") ? "medium" : undefined });
+              if (model) onReviewerChange(selectionForModel(model, "medium"));
             }}
             className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] text-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           >

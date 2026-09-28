@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Brain, Check, ChevronDown, Eye, Search, Sparkles } from "lucide-react";
 import type { CatalogModel, ModelSelection, ProviderId, ReasoningEffort } from "@/lib/llm/types";
+import { selectionForModel } from "@/lib/llm/selection";
 import { Popover } from "./ui/Popover";
 import { Badge, Segmented, cn } from "./ui/primitives";
 
@@ -95,15 +96,7 @@ export default function ModelPicker({
     return [...byProvider.entries()];
   }, [defaultSelection, models, query]);
 
-  const pick = (model: CatalogModel) => {
-    const effort =
-      selection.reasoningEffort && model.reasoningEfforts.includes(selection.reasoningEffort)
-        ? selection.reasoningEffort
-        : model.reasoningEfforts.includes("medium")
-          ? "medium"
-          : model.defaultReasoningEffort;
-    onChange(effort ? { provider: model.provider, model: model.id, reasoningEffort: effort } : { provider: model.provider, model: model.id });
-  };
+  const pick = (model: CatalogModel) => onChange(selectionForModel(model, selection.reasoningEffort));
 
   const efforts = effortOptions(current);
 

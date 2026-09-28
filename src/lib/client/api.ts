@@ -85,39 +85,59 @@ export interface RenderResponse {
 const renderCache = new Map<string, Promise<RenderResponse>>();
 const RENDER_CACHE_SIZE = 12;
 
+/** Waits before retrying when the server's single D2 engine has a full queue (503). */
+const RENDER_BUSY_BACKOFF_MS = [800, 2000];
+
 async function renderUncached(code: string, signal?: AbortSignal): Promise<RenderResponse> {
-  const res = await fetch("/api/render", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-    signal,
-  });
-  if (!res.ok) throw await parseError(res);
-  return (await res.json()) as RenderResponse;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+      signal,
+    });
+    if (res.ok) return (await res.json()) as RenderResponse;
+    if (res.status === 503 && attempt < RENDER_BUSY_BACKOFF_MS.length && !signal?.aborted) {
+      await new Promise((resolve) => setTimeout(resolve, RENDER_BUSY_BACKOFF_MS[attempt]));
+      continue;
+    }
+    throw await parseError(res);
+  }
 }
 
-function render(code: string, signal?: AbortSignal): Promise<RenderResponse> {
-  const cached = renderCache.get(code);
-  if (cached) return cached;
-  // Shared promises must not be cancelled by one consumer, so the cached
-  // request runs without the caller's signal.
-  const pending = renderUncached(code).catch((err) => {
-    renderCache.delete(code);
-    throw err;
-  });
-  renderCache.set(code, pending);
-  while (renderCache.size > RENDER_CACHE_SIZE) {
-    const oldest = renderCache.keys().next().value;
-    if (oldest === undefined) break;
-    renderCache.delete(oldest);
-  }
-  if (!signal) return pending;
+/** True when /api/render rejected the D2 itself (422), as opposed to the renderer being unavailable. */
+export function isD2SyntaxError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 422;
+}
+
+/** Let one caller stop waiting on a shared promise without cancelling it for everyone else. */
+function withSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
     if (signal.aborted) return onAbort();
     signal.addEventListener("abort", onAbort, { once: true });
-    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
+}
+
+function render(code: string, signal?: AbortSignal): Promise<RenderResponse> {
+  let pending = renderCache.get(code);
+  if (!pending) {
+    // Shared promises must not be cancelled by one consumer, so the cached
+    // request runs without the caller's signal.
+    pending = renderUncached(code).catch((err) => {
+      renderCache.delete(code);
+      throw err;
+    });
+    renderCache.set(code, pending);
+    while (renderCache.size > RENDER_CACHE_SIZE) {
+      const oldest = renderCache.keys().next().value;
+      if (oldest === undefined) break;
+      renderCache.delete(oldest);
+    }
+  }
+  return withSignal(pending, signal);
 }
 
 export interface GenerateInput {

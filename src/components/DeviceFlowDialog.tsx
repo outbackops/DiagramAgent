@@ -17,30 +17,40 @@ export default function DeviceFlowDialog({ open, onClose, onSignedIn }: { open: 
   const [phase, setPhase] = useState<Phase>({ kind: "starting" });
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const alive = useRef(false);
+  // Each start gets a token; async work from an older attempt (or a closed dialog) stops at the next check.
+  const attempt = useRef(0);
+  // Parent callbacks change identity on every render; keep the latest without restarting the flow.
+  const callbacks = useRef({ onClose, onSignedIn });
+  useEffect(() => {
+    callbacks.current = { onClose, onSignedIn };
+  });
 
-  const stopPolling = () => {
+  const stopPolling = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-  };
+  }, []);
 
   const begin = useCallback(async () => {
     stopPolling();
+    const id = ++attempt.current;
+    const live = () => id === attempt.current;
     setPhase({ kind: "starting" });
     try {
       const start = await api.startDeviceFlow();
-      if (!alive.current) return;
+      if (!live()) return;
       setPhase({ kind: "waiting", start });
       let interval = Math.max(start.interval, 5);
       const poll = async () => {
-        if (!alive.current) return;
+        if (!live()) return;
         try {
           const result = await api.pollDeviceFlow(start.flow);
-          if (!alive.current) return;
+          if (!live()) return;
           if (result.status === "complete") {
             setPhase({ kind: "done", login: result.login });
-            onSignedIn();
-            timer.current = setTimeout(onClose, 1200);
+            callbacks.current.onSignedIn();
+            timer.current = setTimeout(() => {
+              if (live()) callbacks.current.onClose();
+            }, 1200);
             return;
           }
           if (result.status === "expired" || result.status === "denied") {
@@ -49,7 +59,7 @@ export default function DeviceFlowDialog({ open, onClose, onSignedIn }: { open: 
           }
           if (result.status === "slow_down") interval = Math.max(result.interval, interval + 5);
         } catch (err) {
-          if (!alive.current) return;
+          if (!live()) return;
           setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
           return;
         }
@@ -57,21 +67,22 @@ export default function DeviceFlowDialog({ open, onClose, onSignedIn }: { open: 
       };
       timer.current = setTimeout(poll, interval * 1000);
     } catch (err) {
-      if (alive.current) setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      if (live()) setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
-  }, [onClose, onSignedIn]);
+  }, [stopPolling]);
+
+  const cancel = useCallback(() => {
+    attempt.current++;
+    stopPolling();
+  }, [stopPolling]);
 
   useEffect(() => {
     if (!open) return;
-    alive.current = true;
     // Starting the external sign-in flow when the dialog opens.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void begin();
-    return () => {
-      alive.current = false;
-      stopPolling();
-    };
-  }, [open, begin]);
+    return cancel;
+  }, [open, begin, cancel]);
 
   const copy = async (code: string) => {
     try {
@@ -119,8 +130,9 @@ export default function DeviceFlowDialog({ open, onClose, onSignedIn }: { open: 
           </Button>
           <p className="flex items-start gap-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
             <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-500" />
-            If your organization uses Microsoft Entra ID single sign-on, GitHub will route you through your Entra sign-in. The token stays on the
-            server in an encrypted, HTTP-only cookie.
+            If your organization uses Microsoft Entra ID single sign-on, GitHub will route you through your Entra sign-in. The token is kept in an
+            encrypted, HTTP-only cookie that page scripts can&apos;t read; signing out removes it here, and you can revoke access any time in your
+            GitHub settings.
           </p>
           <p className="flex items-center gap-2 text-xs text-zinc-500">
             <Spinner className="size-3.5" /> Waiting for you to approve on GitHub…

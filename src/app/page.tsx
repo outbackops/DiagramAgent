@@ -10,6 +10,7 @@ import ElementEditor, { type SelectedElement } from "@/components/ElementEditor"
 import Inspector, { type InspectorTab } from "@/components/Inspector";
 import ModelPicker from "@/components/ModelPicker";
 import ResizeHandle from "@/components/ResizeHandle";
+import { phaseLabel } from "@/components/RunCard";
 import SettingsMenu from "@/components/SettingsMenu";
 import SignInGate from "@/components/SignInGate";
 import TopBar from "@/components/TopBar";
@@ -31,7 +32,6 @@ import {
   updateConnectionLabel,
   updateElementLabel,
 } from "@/lib/d2-editor";
-import type { PipelinePhase } from "@/lib/pipeline/refine-loop";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
 interface Layout {
@@ -53,15 +53,6 @@ const isLayout = (v: unknown): v is Layout =>
   typeof (v as Layout).inspectorOpen === "boolean";
 
 const isTab = (v: unknown): v is InspectorTab => v === "code" || v === "quality" || v === "review";
-
-const PHASE_STATUS: Record<PipelinePhase, string> = {
-  planning: "Planning architecture",
-  generating: "Writing D2",
-  rendering: "Rendering",
-  reviewing: "Reviewing layout",
-  refining: "Refining",
-  fixing: "Fixing syntax",
-};
 
 function connectionLabel(code: string, from: string, to: string): string {
   for (const line of code.split("\n")) {
@@ -129,9 +120,15 @@ function Workspace() {
       ? "Analyzing request"
       : running
         ? activePhase
-          ? `${PHASE_STATUS[activePhase.phase]}${activePhase.round > 0 && (activePhase.phase === "refining" || activePhase.phase === "fixing") ? ` · round ${activePhase.round}` : ""}`
+          ? phaseLabel(activePhase)
           : "Starting"
         : null;
+
+  // A run rewrites the code, so a selection made before it could point at nodes that no longer exist.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (running) deselect();
+  }, [running, deselect]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -185,6 +182,7 @@ function Workspace() {
 
   const onUpdateLabel = useCallback(
     (path: string, label: string, isConnection: boolean) => {
+      if (running) return;
       let next: string | null = null;
       if (isConnection) {
         const conn = parseConnectionPath(path);
@@ -197,11 +195,12 @@ function Workspace() {
         setSelected((s) => (s ? { ...s, label } : null));
       }
     },
-    [agent],
+    [agent, running],
   );
 
   const onDeleteElement = useCallback(
     (path: string, isConnection: boolean) => {
+      if (running) return;
       if (isConnection) {
         const conn = parseConnectionPath(path);
         if (!conn) return;
@@ -211,18 +210,19 @@ function Workspace() {
       }
       deselect();
     },
-    [agent, deselect],
+    [agent, deselect, running],
   );
 
   const onMoveNode = useCallback(
     (nodePath: string, target: string) => {
+      if (running) return;
       const next = moveNodeToContainer(agent.code, nodePath, target);
       if (next) {
         agent.setCode(next);
         deselect();
       }
     },
-    [agent, deselect],
+    [agent, deselect, running],
   );
 
   const resizeSidebar = useCallback((dx: number) => setLayout((l) => ({ ...l, sidebarWidth: clamp(l.sidebarWidth + dx, 300, 600) })), [setLayout]);

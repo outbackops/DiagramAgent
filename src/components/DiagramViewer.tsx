@@ -26,8 +26,9 @@ const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPath, onElementClick, onMoveNode }: DiagramViewerProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  // Scale and pan offset live together so a zoom around the cursor is one pure update.
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const scale = view.scale;
   const [panning, setPanning] = useState(false);
 
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
@@ -40,8 +41,7 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
   const safeSvg = useMemo(() => sanitizeSvg(svg), [svg]);
 
   const fit = useCallback(() => {
-    setScale(1);
-    setTranslate({ x: 0, y: 0 });
+    setView({ scale: 1, x: 0, y: 0 });
   }, []);
 
   useEffect(() => {
@@ -52,21 +52,18 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
 
   /** Zoom by `factor`, keeping the point under (clientX, clientY) fixed on screen. */
   const zoomAt = useCallback((factor: number, clientX?: number, clientY?: number) => {
-    const viewport = viewportRef.current;
-    setScale((prev) => {
-      const next = clampScale(prev * factor);
-      if (viewport && clientX !== undefined && clientY !== undefined) {
-        const rect = viewport.getBoundingClientRect();
-        const qx = clientX - rect.left - rect.width / 2;
-        const qy = clientY - rect.top - rect.height / 2;
-        setTranslate((t) => ({
-          x: qx - ((qx - t.x) / prev) * next,
-          y: qy - ((qy - t.y) / prev) * next,
-        }));
-      } else {
-        setTranslate((t) => ({ x: (t.x / prev) * next, y: (t.y / prev) * next }));
-      }
-      return next;
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const anchor =
+      rect && clientX !== undefined && clientY !== undefined
+        ? { x: clientX - rect.left - rect.width / 2, y: clientY - rect.top - rect.height / 2 }
+        : { x: 0, y: 0 };
+    setView((v) => {
+      const next = clampScale(v.scale * factor);
+      return {
+        scale: next,
+        x: anchor.x - ((anchor.x - v.x) / v.scale) * next,
+        y: anchor.y - ((anchor.y - v.y) / v.scale) * next,
+      };
     });
   }, []);
 
@@ -142,15 +139,31 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
       const hit = findD2Element(e.target as Element);
       if (hit && !hit.isConnection && hit.path === selectedPath) {
         dragSource.current = { path: hit.path, startX: e.clientX, startY: e.clientY };
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         return;
       }
     }
-    translateStart.current = { ...translate };
+    translateStart.current = { x: view.x, y: view.y };
     setPanning(true);
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   };
 
+  /** Abandon a pan or node drag without committing anything. Safe to call more than once. */
+  const cancelPointer = () => {
+    dragSource.current = null;
+    pointerStart.current = null;
+    setDragging(false);
+    setDragOffset({ x: 0, y: 0 });
+    setDropTarget(null);
+    setPanning(false);
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
+    // The button was released somewhere we never heard about (e.g. outside the window).
+    if ((dragSource.current || panning) && e.pointerType === "mouse" && e.buttons === 0) {
+      cancelPointer();
+      return;
+    }
     if (dragSource.current && pointerStart.current) {
       const dx = e.clientX - dragSource.current.startX;
       const dy = e.clientY - dragSource.current.startY;
@@ -165,10 +178,12 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
       return;
     }
     if (!panning || !pointerStart.current) return;
-    setTranslate({
-      x: translateStart.current.x + (e.clientX - pointerStart.current.x),
-      y: translateStart.current.y + (e.clientY - pointerStart.current.y),
-    });
+    const origin = pointerStart.current;
+    setView((v) => ({
+      ...v,
+      x: translateStart.current.x + (e.clientX - origin.x),
+      y: translateStart.current.y + (e.clientY - origin.y),
+    }));
   };
 
   const endPointer = (e: React.PointerEvent) => {
@@ -215,7 +230,8 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}
-        onPointerCancel={endPointer}
+        onPointerCancel={cancelPointer}
+        onLostPointerCapture={cancelPointer}
         className={cn(
           "h-full w-full touch-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500/50",
           dragging ? "cursor-grabbing" : panning ? "cursor-grabbing" : "cursor-grab",
@@ -225,7 +241,7 @@ export default function DiagramViewer({ svg, fitKey, dimmed = false, selectedPat
           ref={contentRef}
           className={cn("diagram-paper flex h-full w-full items-center justify-center p-8 transition-opacity", dimmed && "opacity-60")}
           style={{
-            transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${scale})`,
             transformOrigin: "center center",
             transition: panning || dragging ? "none" : "transform 120ms ease-out",
           }}
