@@ -282,7 +282,7 @@ describe("CopilotProvider", () => {
     await vi.waitFor(() => expect(state.deleted).toContain(state.sessions[0].sessionId));
   });
 
-  it("lists machine models through uncached runtime RPC, dropping auto and disabled ones", async () => {
+  it("lists machine models through the runtime RPC, dropping auto and disabled ones", async () => {
     state.rpcModels = [
       { id: "auto", name: "Auto", capabilities: { supports: {}, limits: {} } },
       {
@@ -297,7 +297,8 @@ describe("CopilotProvider", () => {
     const provider = new CopilotProvider();
     const first = await provider.listModels({ kind: "machine" });
     await provider.listModels({ kind: "machine" });
-    expect(state.rpcCalls).toEqual([{}, {}]);
+    // Cached for the TTL like signed-in users' catalogs, and never via the SDK's lifetime-memoised listModels().
+    expect(state.rpcCalls).toEqual([{}]);
     expect(state.listCalls).toBe(0);
     expect(first.map((m) => m.id)).toEqual(["claude-opus-5.5"]);
     expect(first[0]).toMatchObject({ vision: true, contextWindow: 1_000_000, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"] });
@@ -319,6 +320,20 @@ describe("CopilotProvider", () => {
     expect(results.map((r) => r.text)).toEqual(["ok", "ok"]);
     expect(state.clientOptions).toHaveLength(2);
     expect(state.forceStops).toBeGreaterThanOrEqual(1);
+  });
+
+  it("refreshes the machine catalog after the TTL", async () => {
+    state.rpcModels = [{ id: "gpt-5.5", name: "GPT-5.5", capabilities: { supports: {}, limits: {} } }];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const provider = new CopilotProvider();
+      await provider.listModels({ kind: "machine" });
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+      await provider.listModels({ kind: "machine" });
+      expect(state.rpcCalls).toEqual([{}, {}]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lists models for a user token through the runtime RPC", async () => {

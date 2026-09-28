@@ -184,18 +184,6 @@ export class CopilotProvider implements LlmProvider {
   }
 
   async listModels(credentials: LlmCredentials): Promise<CatalogModel[]> {
-    if (credentials.kind === "machine") {
-      return withFreshRuntime(async ({ client }) => {
-        const rpcList = client.rpc?.models?.list;
-        const infos: ModelInfo[] = rpcList
-          ? ((await rpcList.call(client.rpc.models, {})) as { models?: ModelInfo[] }).models ?? []
-          : await client.listModels();
-        return infos.map(toCatalogModel).filter((m): m is CatalogModel => m !== null);
-      }).catch((err) => {
-        throw toLlmError(err, "Could not list GitHub Copilot models");
-      });
-    }
-
     const cache = catalogCache();
     const key = credentialKey(credentials);
     const hit = cache.get(key);
@@ -204,8 +192,11 @@ export class CopilotProvider implements LlmProvider {
       if (entry.expires <= Date.now()) cache.delete(entryKey);
     }
 
+    // The RPC, unlike client.listModels(), isn't memoised for the runtime's
+    // lifetime, so this TTL really does pick up entitlement changes.
+    const params = credentials.kind === "github-token" ? { gitHubToken: credentials.token } : {};
     const models = withFreshRuntime(async ({ client }) => {
-      const infos = ((await client.rpc.models.list({ gitHubToken: credentials.token })) as { models?: ModelInfo[] }).models ?? [];
+      const infos = ((await client.rpc.models.list(params)) as { models?: ModelInfo[] }).models ?? [];
       return infos.map(toCatalogModel).filter((m): m is CatalogModel => m !== null);
     }).catch((err) => {
       cache.delete(key);
