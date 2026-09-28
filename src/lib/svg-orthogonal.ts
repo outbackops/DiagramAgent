@@ -23,7 +23,7 @@ export interface Rect {
 }
 
 export interface OrthogonalizeOptions {
-  /** Leaf-node boxes to route around. Falls back to rects found in the SVG. */
+  /** Leaf-node boxes to route around. */
   obstacles?: Rect[];
 }
 
@@ -179,25 +179,11 @@ function connectionId(classAttr: string | undefined): string | null {
   return null;
 }
 
-/** Rects found in the SVG, used when the caller has no layout information. */
-function svgObstacles($: cheerio.CheerioAPI): Rect[] {
-  const obstacles: Rect[] = [];
-  $("g rect").each((_, el) => {
-    const $el = $(el);
-    const w = parseFloat($el.attr("width") || "0");
-    const h = parseFloat($el.attr("height") || "0");
-    // Ignore tiny decorations and huge rects that wrap whole regions.
-    if (w > 20 && h > 20 && w < 2000 && h < 2000) {
-      obstacles.push({ x: parseFloat($el.attr("x") || "0"), y: parseFloat($el.attr("y") || "0"), w, h });
-    }
-  });
-  return obstacles;
-}
-
 type Selection = ReturnType<cheerio.CheerioAPI>;
+type Cutout = { el: Selection; x: number; y: number; w: number; h: number };
 
 /** Move a rerouted edge's label, and the mask cut-out hiding the line under it, onto the new route. */
-function moveLabel($path: Selection, route: Point[], cutouts: Selection[]) {
+function moveLabel($path: Selection, route: Point[], cutouts: Cutout[]) {
   const $text = $path.siblings("text").first();
   if ($text.length === 0) return;
   const oldX = parseFloat($text.attr("x") ?? "NaN");
@@ -207,19 +193,20 @@ function moveLabel($path: Selection, route: Point[], cutouts: Selection[]) {
   const mid = longestSegmentMidpoint(route);
   const newX = mid.x;
   const newY = mid.y + fontSize * 0.375;
+  const dx = newX - oldX;
   $text.attr("x", fmt(newX));
   $text.attr("y", fmt(newY));
-
-  const cutout = cutouts.find((r) => {
-    const x = parseFloat(r.attr("x") ?? "NaN");
-    const y = parseFloat(r.attr("y") ?? "NaN");
-    const w = parseFloat(r.attr("width") ?? "0");
-    const h = parseFloat(r.attr("height") ?? "0");
-    return oldX >= x && oldX <= x + w && oldY - fontSize / 2 >= y && oldY - fontSize / 2 <= y + h;
+  $text.find("tspan[x]").each((i) => {
+    const $tspan = $text.find("tspan[x]").eq(i);
+    const x = parseFloat($tspan.attr("x") ?? "NaN");
+    if (!Number.isNaN(x)) $tspan.attr("x", fmt(x + dx));
   });
+
+  const index = cutouts.findIndex((r) => oldX >= r.x && oldX <= r.x + r.w && oldY - fontSize / 2 >= r.y && oldY - fontSize / 2 <= r.y + r.h);
+  const cutout = index >= 0 ? cutouts.splice(index, 1)[0] : null;
   if (cutout) {
-    cutout.attr("x", fmt(parseFloat(cutout.attr("x")!) + (newX - oldX)));
-    cutout.attr("y", fmt(parseFloat(cutout.attr("y")!) + (newY - oldY)));
+    cutout.el.attr("x", fmt(cutout.x + (newX - oldX)));
+    cutout.el.attr("y", fmt(cutout.y + (newY - oldY)));
   }
 }
 
@@ -268,10 +255,20 @@ function maximizeLayout($: cheerio.CheerioAPI): void {
 
 export function orthogonalizeConnections(svg: string, options: OrthogonalizeOptions = {}): OrthogonalizeResult {
   const $ = cheerio.load(svg, { xmlMode: true });
-  const obstacles = options.obstacles ?? svgObstacles($);
+  const obstacles = options.obstacles ?? [];
   const cutouts = $("mask rect[fill='black']")
     .toArray()
-    .map((el) => $(el));
+    .map((el) => {
+      const $el = $(el);
+      return {
+        el: $el,
+        x: parseFloat($el.attr("x") ?? "NaN"),
+        y: parseFloat($el.attr("y") ?? "NaN"),
+        w: parseFloat($el.attr("width") ?? "0"),
+        h: parseFloat($el.attr("height") ?? "0"),
+      };
+    })
+    .filter((r) => !Number.isNaN(r.x) && !Number.isNaN(r.y));
   const routes = new Map<string, Point[]>();
 
   let connections = $("path.connection");
@@ -304,9 +301,4 @@ export function orthogonalizeConnections(svg: string, options: OrthogonalizeOpti
 
   maximizeLayout($);
   return { svg: $.xml(), routes };
-}
-
-/** Backwards-compatible wrapper returning only the SVG. */
-export function convertConnectionsToOrthogonal(svg: string): string {
-  return orthogonalizeConnections(svg).svg;
 }

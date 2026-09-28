@@ -72,8 +72,8 @@ function describeShapes(shapes: CompiledShape[]): ShapeInfo[] {
 /** Icon values that will not resolve: not a registry key and not a URL/path. */
 export function findUnknownIcons(code: string): string[] {
   const unknown = new Set<string>();
-  for (const match of code.matchAll(/(?:^|[\s{;.])icon:[ \t]*([^\s;{}]+)/gm)) {
-    const value = match[1].replace(/^["']|["']$/g, "");
+  for (const match of code.matchAll(/(?:^|[\s{;.])icon:[ \t]*([^;{}\n#]+)(?:#.*)?/gm)) {
+    const value = match[1].trim().replace(/^["']|["']$/g, "");
     if (/^(https?:)?\/\//.test(value) || value.startsWith("/")) continue;
     if (!iconRegistry[value]) unknown.add(value);
   }
@@ -346,7 +346,7 @@ export function scoreDiagram(code: string, diagram: CompiledDiagram): QualityRep
     detail: `${crossings} crossing pair${crossings === 1 ? "" : "s"} across ${connections.length} connections`,
   });
 
-  const direction = /^direction:\s*(\w+)/m.exec(code)?.[1] ?? "right";
+  const direction = /^direction:\s*(\w+)/m.exec(code)?.[1] ?? "down";
   const byId = new Map(diagram.shapes.map((s) => [s.id, s]));
   const center = (s: CompiledShape) => ({ x: s.pos.x + s.width / 2, y: s.pos.y + s.height / 2 });
   const backward = connections.filter((c) => {
@@ -407,12 +407,4 @@ export function scoreDiagram(code: string, diagram: CompiledDiagram): QualityRep
   };
 }
 
-/** Failed/warned checks phrased as fix instructions for the generator. */
-export function qualityFeedback(report: QualityReport, include: CheckStatus[] = ["fail"]): string[] {
-  return report.checks.filter((c) => include.includes(c.status)).map((c) => `${c.label}: ${c.detail}`);
-}
-
-/** Critical failures mean the diagram is structurally broken, regardless of how it looks. */
-export function hasCriticalFailure(report: QualityReport): boolean {
-  return report.checks.some((c) => c.severity === "critical" && c.status === "fail");
-}
+export { hasCriticalFailure, qualityFeedback } from "./report";

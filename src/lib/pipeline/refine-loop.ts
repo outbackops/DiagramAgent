@@ -1,4 +1,5 @@
 import type { QualityReport } from "@/lib/quality/diagram-quality";
+import { hasCriticalFailure, qualityFeedback } from "@/lib/quality/report";
 import { composeGenerationPrompt } from "./d2-text";
 
 /**
@@ -49,7 +50,8 @@ export type PipelineEvent =
   | { type: "rendered"; round: number; svg: string; quality: QualityReport | null }
   | { type: "render_error"; round: number; message: string }
   | { type: "assessment"; round: number; assessment: ReviewAssessment }
-  | { type: "review_error"; round: number; message: string };
+  | { type: "review_error"; round: number; message: string }
+  | { type: "refine_error"; round: number; message: string };
 
 export interface PipelineOptions {
   prompt: string;
@@ -86,31 +88,47 @@ export interface PipelineResult {
 }
 
 export class PipelineAbortError extends Error {
-  constructor() {
+  /** Code to keep after the cancel: the best candidate so far, else the last one that rendered. */
+  readonly bestCode: string | null;
+  /** Round that `bestCode` came from. */
+  readonly bestRound: number | null;
+
+  constructor(bestCode: string | null = null, bestRound: number | null = null) {
     super("Generation was cancelled");
     this.name = "AbortError";
+    this.bestCode = bestCode;
+    this.bestRound = bestCode === null ? null : bestRound;
   }
 }
 
-function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) throw new PipelineAbortError();
+/**
+ * The renderer couldn't be used (busy, signed out, request too large, offline).
+ * Nothing is wrong with the D2, so no fix round is spent on it.
+ */
+export class RenderUnavailableError extends Error {
+  /** Set by the pipeline when nothing rendered yet: the draft it couldn't render, so callers can keep it. */
+  readonly candidate?: { code: string; round: number };
+
+  constructor(message: string, candidate?: { code: string; round: number }) {
+    super(message);
+    this.name = "RenderUnavailableError";
+    this.candidate = candidate;
+  }
 }
 
+const isRenderUnavailable = (err: unknown) => err instanceof Error && err.name === "RenderUnavailableError";
+
+/** Checked by name, not instanceof: a DOMException from another realm (or jsdom) isn't an Error subclass. */
 function isAbort(err: unknown): boolean {
-  return err instanceof Error && (err.name === "AbortError" || (err as { code?: string }).code === "aborted");
+  if (typeof err !== "object" || err === null) return false;
+  const { name, code } = err as { name?: unknown; code?: unknown };
+  return name === "AbortError" || code === "aborted";
 }
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const numbered = (items: string[]) => items.map((item, i) => `${i + 1}. ${item}`).join("\n");
 
-function failedChecks(quality: QualityReport | null): string[] {
-  if (!quality) return [];
-  return quality.checks.filter((c) => c.status === "fail").map((c) => `${c.label} — ${c.detail}`);
-}
-
-function hasCriticalFailure(quality: QualityReport | null): boolean {
-  return Boolean(quality?.checks.some((c) => c.severity === "critical" && c.status === "fail"));
-}
+const failedChecks = (quality: QualityReport | null): string[] => (quality ? qualityFeedback(quality) : []);
 
 export function renderFixPrompt(message: string): string {
   return `The D2 code has a rendering error: "${message}". Fix the D2 syntax while keeping the architecture intact. Output the COMPLETE corrected D2 code.`;
@@ -158,14 +176,26 @@ interface Candidate {
   svg: string;
   quality: QualityReport | null;
   assessment: ReviewAssessment | null;
-  score: number;
 }
 
-/** Comparable 0–10 score: the reviewer's score when available, else deterministic quality. Quality breaks review ties. */
-function candidateScore(quality: QualityReport | null, assessment: ReviewAssessment | null): number {
-  const penalty = hasCriticalFailure(quality) ? 3 : 0;
-  if (assessment) return assessment.score - penalty + (quality ? quality.score / 1000 : 0);
-  return (quality ? quality.score / 10 : 5) - penalty;
+/**
+ * Whether `a` should replace `b` as the kept candidate. Ranked, in order:
+ * structurally sound before critically broken, reviewed before unreviewed,
+ * review score, then deterministic quality. Ties keep the earlier round.
+ */
+function isBetter(a: Candidate, b: Candidate | null): boolean {
+  if (!b) return true;
+  const aCritical = hasCriticalFailure(a.quality);
+  const bCritical = hasCriticalFailure(b.quality);
+  if (aCritical !== bCritical) return !aCritical;
+  if (Boolean(a.assessment) !== Boolean(b.assessment)) return Boolean(a.assessment);
+  if (a.assessment && b.assessment && a.assessment.score !== b.assessment.score) return a.assessment.score > b.assessment.score;
+  return (a.quality?.score ?? 0) > (b.quality?.score ?? 0);
+}
+
+/** The server substitutes a placeholder review when the model's reply is not JSON; it must not steer refinement. */
+function isUnparsedReview(assessment: ReviewAssessment): boolean {
+  return "parse_error" in assessment && Boolean((assessment as { parse_error?: unknown }).parse_error);
 }
 
 export async function runDiagramPipeline(steps: PipelineSteps, options: PipelineOptions): Promise<PipelineResult> {
@@ -174,6 +204,19 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   const existingCode = options.existingCode ?? "";
   const maxRefinements = Math.max(0, Math.min(5, Math.floor(options.maxRefinements)));
 
+  let best: Candidate | null = null;
+  // Candidates only compete once reviewed; a cancel mid-review still keeps the draft that rendered.
+  let lastRendered: { round: number; code: string } | null = null;
+  const cancelled = () => {
+    const kept = best ?? lastRendered;
+    return new PipelineAbortError(kept?.code ?? null, kept?.round ?? null);
+  };
+  const checkAbort = () => {
+    if (signal?.aborted) throw cancelled();
+  };
+  // Once the caller has cancelled, whatever a step throws is part of the cancel.
+  const wasCancelled = (err: unknown) => isAbort(err) || Boolean(signal?.aborted);
+
   let plan: Record<string, unknown> | null = null;
   if (!existingCode && steps.plan) {
     emit({ type: "phase", phase: "planning", round: 0 });
@@ -181,52 +224,78 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
       plan = await steps.plan(options.prompt, options.analysis ?? null, signal);
       emit({ type: "plan", plan });
     } catch (err) {
-      if (isAbort(err)) throw new PipelineAbortError();
+      if (wasCancelled(err)) throw cancelled();
       emit({ type: "plan", plan: null, error: errText(err) });
     }
-    throwIfAborted(signal);
+    checkAbort();
   }
 
   emit({ type: "phase", phase: "generating", round: 0 });
-  let code = await steps.generate(
-    {
-      prompt: existingCode ? options.prompt : composeGenerationPrompt(options.prompt, plan),
-      existingCode,
-      history: options.history ?? [],
-    },
-    signal,
-  );
-  throwIfAborted(signal);
+  let code: string;
+  try {
+    code = await steps.generate(
+      {
+        prompt: existingCode ? options.prompt : composeGenerationPrompt(options.prompt, plan),
+        existingCode,
+        history: options.history ?? [],
+      },
+      signal,
+    );
+  } catch (err) {
+    if (wasCancelled(err)) throw cancelled();
+    throw err;
+  }
+  checkAbort();
   emit({ type: "candidate", round: 0, code });
 
   const rounds: RoundRecord[] = [];
-  let best: Candidate | null = null;
-  let lastAssessment: ReviewAssessment | null = null;
   let refinements = 0;
   let reviews = 0;
   let reviewing = Boolean(steps.assess);
-  let passed = false;
   let nonImproving = 0;
+
+  /** A follow-up candidate, or null when the model call failed — the best so far is still returned. */
+  const regenerate = async (prompt: string, round: number): Promise<string | null> => {
+    try {
+      const next = await steps.generate({ prompt, existingCode: code, history: [] }, signal);
+      checkAbort();
+      emit({ type: "candidate", round, code: next });
+      return next;
+    } catch (err) {
+      if (wasCancelled(err)) throw cancelled();
+      emit({ type: "refine_error", round, message: errText(err) });
+      return null;
+    }
+  };
 
   for (let round = 0; ; round++) {
     emit({ type: "phase", phase: "rendering", round });
     let rendered: RenderOutcome;
     try {
       rendered = await steps.render(code, signal);
+      lastRendered = { round, code };
     } catch (err) {
-      if (isAbort(err)) throw new PipelineAbortError();
+      if (wasCancelled(err)) throw cancelled();
       const message = errText(err);
+      if (isRenderUnavailable(err)) {
+        // Keep the best candidate if there is one. With nothing rendered yet the run can't go on,
+        // but the draft is handed back so the caller doesn't lose a finished generation.
+        if (!best) throw new RenderUnavailableError(message, { code, round });
+        rounds.push({ round, renderError: message });
+        emit({ type: "render_error", round, message });
+        break;
+      }
       rounds.push({ round, renderError: message });
       emit({ type: "render_error", round, message });
       if (refinements >= maxRefinements) break;
       refinements++;
       emit({ type: "phase", phase: "fixing", round: round + 1 });
-      code = await steps.generate({ prompt: renderFixPrompt(message), existingCode: code, history: [] }, signal);
-      throwIfAborted(signal);
-      emit({ type: "candidate", round: round + 1, code });
+      const fixed = await regenerate(renderFixPrompt(message), round + 1);
+      if (fixed === null) break;
+      code = fixed;
       continue;
     }
-    throwIfAborted(signal);
+    checkAbort();
     emit({ type: "rendered", round, svg: rendered.svg, quality: rendered.quality });
 
     const critical = hasCriticalFailure(rendered.quality);
@@ -234,29 +303,33 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
     if (reviewing && steps.assess && !critical) {
       emit({ type: "phase", phase: "reviewing", round });
       try {
-        assessment = await steps.assess({ svg: rendered.svg, prompt: options.prompt, code }, signal);
-        reviews++;
-        lastAssessment = assessment;
-        emit({ type: "assessment", round, assessment });
+        const review = await steps.assess({ svg: rendered.svg, prompt: options.prompt, code }, signal);
+        if (isUnparsedReview(review)) {
+          reviewing = false;
+          emit({ type: "review_error", round, message: "The reviewer's reply could not be parsed" });
+        } else {
+          assessment = review;
+          reviews++;
+          emit({ type: "assessment", round, assessment });
+        }
       } catch (err) {
-        if (isAbort(err)) throw new PipelineAbortError();
+        if (wasCancelled(err)) throw cancelled();
         reviewing = false;
         emit({ type: "review_error", round, message: errText(err) });
       }
-      throwIfAborted(signal);
+      checkAbort();
     }
 
-    const score = candidateScore(rendered.quality, assessment);
     rounds.push({ round, reviewScore: assessment?.score, qualityScore: rendered.quality?.score });
-    const candidate: Candidate = { round, code, svg: rendered.svg, quality: rendered.quality, assessment, score };
-    if (!best || score > best.score) {
+    const candidate: Candidate = { round, code, svg: rendered.svg, quality: rendered.quality, assessment };
+    if (isBetter(candidate, best)) {
       best = candidate;
       nonImproving = 0;
     } else {
       nonImproving++;
     }
 
-    passed = assessment ? assessment.pass && !critical : !critical;
+    const passed = assessment ? assessment.pass && !critical : !critical;
     if (passed && (assessment || !reviewing)) break;
     if (refinements >= maxRefinements || nonImproving >= 2) break;
     // Without a review, only structural failures give us something to fix.
@@ -265,9 +338,9 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
     refinements++;
     emit({ type: "phase", phase: "refining", round: round + 1 });
     const prompt = assessment ? reviewFixPrompt(assessment, rendered.quality) : structuralFixPrompt(rendered.quality!);
-    code = await steps.generate({ prompt, existingCode: code, history: [] }, signal);
-    throwIfAborted(signal);
-    emit({ type: "candidate", round: round + 1, code });
+    const next = await regenerate(prompt, round + 1);
+    if (next === null) break;
+    code = next;
   }
 
   if (!best) {
@@ -280,7 +353,8 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
     code: best.code,
     svg: best.svg,
     quality: best.quality,
-    assessment: best.assessment ?? (reviews > 0 ? lastAssessment : null),
+    // Only the kept round's own review describes the kept diagram.
+    assessment: best.assessment,
     outcome,
     refinements,
     reviews,

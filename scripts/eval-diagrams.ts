@@ -8,7 +8,7 @@ import type { KeywordExpectation } from "@/lib/quality/keywords";
 import type { LlmCredentials, LlmUsage } from "@/lib/llm/types";
 import type { PipelineEvent, PipelineResult } from "@/lib/pipeline/refine-loop";
 
-process.env.DIAGRAM_AGENT_COPILOT_HOME ??= path.join(os.tmpdir(), "diagram-agent", "copilot-eval");
+process.env.DIAGRAM_AGENT_COPILOT_HOME ??= path.join(os.homedir(), ".diagram-agent", "copilot-eval");
 
 interface EvalCase {
   id: string;
@@ -241,8 +241,8 @@ async function main() {
     { resolveSelection },
     { parseSelectionString, formatSelection },
     { runPlan, runGenerate, runAssess },
-    { runDiagramPipeline },
-    { renderD2 },
+    { runDiagramPipeline, RenderUnavailableError },
+    { renderD2, D2BusyError },
     { scoreDiagram, hasCriticalFailure },
     { svgToPng },
     { calculateKeywordCoverage },
@@ -305,8 +305,14 @@ async function main() {
             return generateResult.code;
           },
           render: async (code) => {
-            const rendered = await renderD2(code);
-            return { svg: rendered.svg, quality: scoreDiagram(code, rendered.diagram) };
+            try {
+              const rendered = await renderD2(code);
+              return { svg: rendered.svg, quality: scoreDiagram(code, rendered.diagram) };
+            } catch (err) {
+              // A full render queue isn't a D2 problem; don't spend a fix round on it.
+              if (err instanceof D2BusyError) throw new RenderUnavailableError(err.message);
+              throw err;
+            }
           },
           assess: reviewerSelection
             ? async (input, signal) => {

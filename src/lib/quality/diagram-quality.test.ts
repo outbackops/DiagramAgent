@@ -63,6 +63,15 @@ describe("scoreDiagram", () => {
     expect(check(report, "direction").status).toBe("warn");
   }, 30_000);
 
+  it("treats D2's missing direction default as down for flow checks", () => {
+    const shape = (id: string, x: number, y: number) => ({ id, type: "rectangle", pos: { x, y }, width: 100, height: 60, label: id, icon: "x", level: 1 });
+    const diagram = {
+      shapes: [shape("a", 0, 0), shape("b", 0, 120)],
+      connections: [{ id: "(a -> b)[0]", src: "a", dst: "b", label: "x", strokeDash: 0, route: [{ x: 50, y: 60 }, { x: 50, y: 120 }] }],
+    };
+    expect(check(scoreDiagram("a -> b: x", diagram), "flow").detail).toContain('"down"');
+  });
+
   it("fails extreme aspect ratios", async () => {
     const chain = Array.from({ length: 16 }, (_, i) => `n${i} -> n${i + 1}: x`).join("\n");
     const report = await score(`direction: right\n${chain}\n`);
@@ -103,6 +112,10 @@ describe("countCrossings", () => {
 
 describe("findUnknownIcons", () => {
   it("accepts registry keys, URLs, and vendored paths", () => {
-    expect(findUnknownIcons("a: {\n  icon: aws-ec2\n}\nb.icon: https://x.dev/i.svg\nc: {\n  icon: /icons/x.svg\n}\n")).toEqual([]);
+    expect(findUnknownIcons("a: {\n  icon: aws-ec2 # compute\n}\nb.icon: \"https://x.dev/i.svg\"\nc: {\n  icon: '/icons/x.svg'\n}\n")).toEqual([]);
+  });
+
+  it("strips quotes and comments consistently for unknown icons", () => {
+    expect(findUnknownIcons("a.icon: 'not-a-real-icon-xyz' # comment")).toEqual(["not-a-real-icon-xyz"]);
   });
 });

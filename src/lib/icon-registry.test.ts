@@ -51,6 +51,8 @@ describe("resolveIconsInD2Code", () => {
     ["dot notation", "a.icon: aws-ec2", `a.icon: ${url}`],
     ["inline block", "a: { icon: aws-ec2; label: A }", `a: { icon: ${url}; label: A }`],
     ["inline block end", "a: { label: A; icon: aws-ec2 }", `a: { label: A; icon: ${url} }`],
+    ["double quoted", 'a: { icon: "aws-ec2" }', `a: { icon: ${url} }`],
+    ["single quoted with comment", "a.icon: 'aws-ec2' # compute", `a.icon: ${url} # compute`],
   ])("resolves %s", (_name, input, expected) => {
     expect(resolveIconsInD2Code(input)).toBe(expected);
   });

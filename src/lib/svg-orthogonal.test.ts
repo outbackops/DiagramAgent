@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  convertConnectionsToOrthogonal,
   countObstacleHits,
   isOrthogonalRoute,
   orthogonalizeConnections,
@@ -12,17 +11,17 @@ const b64 = (s: string) => Buffer.from(s).toString("base64");
 
 describe("svg-orthogonal (legacy wrapper)", () => {
   it("orthogonalises a diagonal connection (vertical-first when dx == dy)", () => {
-    const out = convertConnectionsToOrthogonal(`<svg><g class="connection"><path d="M 10 10 L 100 100" /></g></svg>`);
+    const out = orthogonalizeConnections(`<svg><g class="connection"><path d="M 10 10 L 100 100" /></g></svg>`, { obstacles: [] }).svg;
     expect(out).toContain('d="M 10 10 L 10 55 L 100 55 L 100 100"');
   });
 
   it("ignores non-connection paths", () => {
-    const out = convertConnectionsToOrthogonal(`<svg><g class="node"><path d="M 0 0 L 10 10" /></g></svg>`);
+    const out = orthogonalizeConnections(`<svg><g class="node"><path d="M 0 0 L 10 10" /></g></svg>`, { obstacles: [] }).svg;
     expect(out).toContain('d="M 0 0 L 10 10"');
   });
 
   it("orthogonalises Bezier curves", () => {
-    const out = convertConnectionsToOrthogonal(`<svg><g class="connection"><path d="M 10 10 C 20 20 80 80 100 100" /></g></svg>`);
+    const out = orthogonalizeConnections(`<svg><g class="connection"><path d="M 10 10 C 20 20 80 80 100 100" /></g></svg>`, { obstacles: [] }).svg;
     expect(out).toContain('d="M 10 10 L 10 55 L 100 55 L 100 100"');
   });
 });
@@ -89,6 +88,35 @@ describe("orthogonalizeConnections", () => {
     const cutout = /<rect x="([\d.-]+)" y="([\d.-]+)" width="30" height="21" fill="black"/.exec(out)!;
     expect(Number(cutout[1])).toBeCloseTo(40 + (x - 55), 5);
     expect(Number(cutout[2])).toBeCloseTo(40 + (y - 56), 5);
+  });
+
+  it("shifts descendant tspans by the label dx", () => {
+    const input = [
+      "<svg>",
+      '<mask id="m"><rect x="40" y="40" width="80" height="40" fill="black"></rect></mask>',
+      `<g class="${cls}"><path d="M 0 0 L 300 100" class="connection" fill="none" stroke="#000"/><text x="55" y="56" style="font-size:16px"><tspan x="55">SQL</tspan><tspan x="55" dy="16">read</tspan></text></g>`,
+      "</svg>",
+    ].join("");
+    const out = orthogonalizeConnections(input, { obstacles: [] }).svg;
+    const textX = Number(/<text x="([\d.]+)"/.exec(out)![1]);
+    const tspans = [...out.matchAll(/<tspan x="([\d.]+)"/g)].map((match) => Number(match[1]));
+    expect(tspans).toEqual([textX, textX]);
+  });
+
+  it("does not let two labels claim the same mask cut-out", () => {
+    const other = b64("(c -&gt; d)[0]");
+    const input = [
+      "<svg>",
+      '<mask id="m"><rect x="40" y="40" width="80" height="40" fill="black"></rect></mask>',
+      `<g class="${cls}"><path d="M 0 0 L 300 100" class="connection" fill="none" stroke="#000"/><text x="55" y="56" style="font-size:16px">A</text></g>`,
+      `<g class="${other}"><path d="M 0 10 L 500 110" class="connection" fill="none" stroke="#000"/><text x="55" y="56" style="font-size:16px">B</text></g>`,
+      "</svg>",
+    ].join("");
+    const out = orthogonalizeConnections(input, { obstacles: [] }).svg;
+    const textXs = [...out.matchAll(/<text x="([\d.]+)"/g)].map((match) => Number(match[1]));
+    const cutout = /<rect x="([\d.-]+)" y="([\d.-]+)" width="80" height="40" fill="black"/.exec(out)!;
+    expect(Number(cutout[1])).toBeCloseTo(40 + (textXs[0] - 55), 5);
+    expect(Number(cutout[1])).not.toBeCloseTo(40 + (textXs[1] - 55), 5);
   });
 
   it("does not treat the edge's own endpoint nodes as obstacles", () => {

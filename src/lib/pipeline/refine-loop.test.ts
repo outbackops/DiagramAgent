@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   PipelineAbortError,
+  RenderUnavailableError,
   runDiagramPipeline,
   type PipelineEvent,
   type PipelineSteps,
@@ -31,20 +32,25 @@ const review = (score: number, extra: Partial<ReviewAssessment> = {}): ReviewAss
 
 /** Steps whose generate() returns v1, v2, ... and whose assess() returns scores in order. */
 function makeSteps(opts: {
-  scores?: number[];
+  scores?: Array<number | ReviewAssessment | Error>;
   renderErrors?: Record<string, string>;
   qualities?: Record<string, QualityReport>;
   withAssess?: boolean;
   plan?: PipelineSteps["plan"];
   assessError?: Error;
+  /** Fail the Nth generate call (1-based) with this error. */
+  generateErrors?: Record<number, Error>;
 }) {
   let version = 0;
+  let calls = 0;
   const scores = [...(opts.scores ?? [])];
   const prompts: string[] = [];
   const steps: PipelineSteps = {
     plan: opts.plan ?? (async () => ({ components: [] })),
     generate: vi.fn(async (input) => {
       prompts.push(input.prompt);
+      const failure = opts.generateErrors?.[++calls];
+      if (failure) throw failure;
       return `v${++version}`;
     }),
     render: vi.fn(async (code: string) => {
@@ -56,9 +62,10 @@ function makeSteps(opts: {
   if (opts.withAssess !== false) {
     steps.assess = vi.fn(async () => {
       if (opts.assessError) throw opts.assessError;
-      const score = scores.shift();
-      if (score === undefined) throw new Error("unexpected review");
-      return review(score);
+      const next = scores.shift();
+      if (next === undefined) throw new Error("unexpected review");
+      if (next instanceof Error) throw next;
+      return typeof next === "number" ? review(next) : next;
     });
   }
   return { steps, prompts };
@@ -200,5 +207,128 @@ describe("runDiagramPipeline", () => {
     const { steps } = makeSteps({ scores: [1, 2, 3, 4, 5, 6, 6.5] });
     const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 99 });
     expect(result.refinements).toBe(5);
+  });
+
+  it("keeps the best candidate when a refinement's model call fails", async () => {
+    const { steps } = makeSteps({ scores: [5], generateErrors: { 2: new Error("rate limited") } });
+    const events: PipelineEvent[] = [];
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 2, onEvent: (e) => events.push(e) });
+    expect(result).toMatchObject({ code: "v1", outcome: "best_effort", bestRound: 0 });
+    expect(events).toContainEqual({ type: "refine_error", round: 1, message: "rate limited" });
+  });
+
+  it("prefers a reviewed round over one whose review failed", async () => {
+    const better: QualityReport = { ...goodQuality, score: 99 };
+    const { steps } = makeSteps({ scores: [6, new Error("vision offline")], qualities: { v2: better } });
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1 });
+    expect(result).toMatchObject({ code: "v1", bestRound: 0 });
+    expect(result.assessment?.score).toBe(6);
+  });
+
+  it("never keeps a critically broken candidate over a sound reviewed one", async () => {
+    const { steps } = makeSteps({ scores: [3], qualities: { v2: brokenQuality } });
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1 });
+    expect(result).toMatchObject({ code: "v1", bestRound: 0 });
+    expect(result.assessment?.score).toBe(3);
+  });
+
+  it("returns only the kept round's own review", async () => {
+    const { steps } = makeSteps({ scores: [review(4)], qualities: { v1: brokenQuality } });
+    // v1 is critical (not reviewed) → structural fix → v2 reviewed 4 and kept.
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1 });
+    expect(result).toMatchObject({ code: "v2", bestRound: 1 });
+    expect(result.assessment?.score).toBe(4);
+  });
+
+  it("does not let an unparsable review steer refinement", async () => {
+    const placeholder = { ...review(5), parse_error: "Unexpected token" } as ReviewAssessment;
+    const { steps } = makeSteps({ scores: [placeholder] });
+    const events: PipelineEvent[] = [];
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 2, onEvent: (e) => events.push(e) });
+    expect(result).toMatchObject({ code: "v1", outcome: "unreviewed", reviews: 0, assessment: null });
+    expect(steps.generate).toHaveBeenCalledTimes(1);
+    expect(events.some((e) => e.type === "review_error")).toBe(true);
+  });
+
+  it("carries the best rendered code when cancelled mid-refinement", async () => {
+    const controller = new AbortController();
+    const { steps } = makeSteps({ scores: [5] });
+    const generate = steps.generate;
+    steps.generate = vi.fn(async (input, signal) => {
+      if (input.existingCode) {
+        controller.abort();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return generate(input, signal);
+    });
+    const err = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1, signal: controller.signal }).catch((e) => e);
+    expect(err).toBeInstanceOf(PipelineAbortError);
+    expect((err as PipelineAbortError).bestCode).toBe("v1");
+  });
+
+  it("keeps the rendered draft when cancelled while it is being reviewed", async () => {
+    const controller = new AbortController();
+    const { steps } = makeSteps({ scores: [5] });
+    steps.assess = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    const err = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1, signal: controller.signal }).catch((e) => e);
+    expect(err).toBeInstanceOf(PipelineAbortError);
+    expect(err).toMatchObject({ bestCode: "v1", bestRound: 0 });
+  });
+
+  it("on cancel, prefers the best reviewed round over a newer draft still under review", async () => {
+    const controller = new AbortController();
+    const { steps } = makeSteps({ scores: [6] });
+    const assess = steps.assess!;
+    let calls = 0;
+    steps.assess = vi.fn(async (input, signal) => {
+      if (++calls === 2) {
+        controller.abort();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return assess(input, signal);
+    });
+    const err = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1, signal: controller.signal }).catch((e) => e);
+    expect(err).toMatchObject({ bestCode: "v1", bestRound: 0 });
+  });
+
+  it("carries no code when cancelled before anything rendered", async () => {
+    const controller = new AbortController();
+    const { steps } = makeSteps({});
+    steps.generate = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    const err = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 1, signal: controller.signal }).catch((e) => e);
+    expect(err).toMatchObject({ bestCode: null, bestRound: null });
+  });
+
+  it("doesn't spend a syntax-fix round when the renderer is unavailable", async () => {
+    const { steps } = makeSteps({ scores: [] });
+    steps.render = vi.fn(async () => {
+      throw new RenderUnavailableError("Renderer is busy, try again shortly");
+    });
+    const err = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 2 }).catch((e) => e);
+    expect(err).toBeInstanceOf(RenderUnavailableError);
+    expect(err.message).toBe("Renderer is busy, try again shortly");
+    // The finished draft comes back with the error so it isn't lost.
+    expect(err.candidate).toEqual({ code: "v1", round: 0 });
+    expect(steps.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the best candidate when the renderer becomes unavailable mid-refinement", async () => {
+    const { steps } = makeSteps({ scores: [5] });
+    const render = steps.render;
+    steps.render = vi.fn(async (code: string, signal?: AbortSignal) => {
+      if (code === "v2") throw new RenderUnavailableError("Renderer is busy, try again shortly");
+      return render(code, signal);
+    });
+    const events: PipelineEvent[] = [];
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 2, onEvent: (e) => events.push(e) });
+    expect(result).toMatchObject({ code: "v1", bestRound: 0, outcome: "best_effort", refinements: 1 });
+    expect(steps.generate).toHaveBeenCalledTimes(2);
+    expect(events).toContainEqual({ type: "render_error", round: 1, message: "Renderer is busy, try again shortly" });
   });
 });

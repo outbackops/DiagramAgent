@@ -276,8 +276,9 @@ export function getIconsByCategory(category: IconEntry["category"]): Record<stri
 // pattern cannot contain ":".
 export function resolveIconsInD2Code(d2Code: string): string {
   return d2Code.replace(
-    /(^|[\s{;.])icon:[ \t]*([a-zA-Z0-9_-]+)(?=[ \t]*(?:$|[;}]))/gm,
-    (match, prefix: string, key: string) => {
+    /(^|[\s{;.])icon:[ \t]*(?:"([a-zA-Z0-9_-]+)"|'([a-zA-Z0-9_-]+)'|([a-zA-Z0-9_-]+))(?=[ \t]*(?:#.*)?(?:$|[;}]))/gm,
+    (match, prefix: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, bare: string | undefined) => {
+      const key = doubleQuoted ?? singleQuoted ?? bare ?? "";
       const url = resolveIconUrl(key);
       return url ? `${prefix}icon: ${url}` : match;
     }
