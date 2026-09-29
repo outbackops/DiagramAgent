@@ -1,4 +1,6 @@
 import { indexModel } from "./query";
+import { architectureTextWarnings, exportResult, stepPrefix, type ExportResult } from "./export-result";
+import { diagramKind } from "./kind";
 import type { DiagramModel, DiagramNode } from "./types";
 
 function direction(model: DiagramModel): string {
@@ -68,7 +70,47 @@ function emitGroup(node: DiagramNode, lines: string[], ids: Map<string, string>,
   lines.push(`${indent}end`);
 }
 
-export function modelToMermaid(model: DiagramModel): string {
+function archNodeLabel(node: DiagramNode): string {
+  return [node.label, node.arch?.detail].filter(Boolean).join("\n");
+}
+
+function emitArchGroup(node: DiagramNode, lines: string[], ids: Map<string, string>, children: Map<string | null, DiagramNode[]>, depth: number): void {
+  const indent = "  ".repeat(depth);
+  lines.push(`${indent}subgraph ${ids.get(node.id) ?? safeBase(node.id)}["${label([node.label, node.arch?.facts].filter(Boolean).join("\n"))}"]`);
+  for (const child of children.get(node.id) ?? []) {
+    if (child.generated) continue;
+    if (child.role === "boundary" || child.container) emitArchGroup(child, lines, ids, children, depth + 1);
+    else lines.push(`${indent}  ${nodeSyntax(ids.get(child.id) ?? safeBase(child.id), { ...child, label: archNodeLabel(child) })}`);
+  }
+  lines.push(`${indent}end`);
+}
+
+function modelToArchitectureMermaid(model: DiagramModel): string {
+  const ids = mermaidIds(model);
+  const index = indexModel(model);
+  const lines = [`flowchart ${direction(model)}`];
+  for (const node of index.children.get(null) ?? []) {
+    if (node.generated) continue;
+    if (node.role === "boundary" || node.container) emitArchGroup(node, lines, ids, index.children, 1);
+    else lines.push(`  ${nodeSyntax(ids.get(node.id) ?? safeBase(node.id), { ...node, label: archNodeLabel(node) })}`);
+  }
+  for (const edge of model.edges) {
+    const from = ids.get(edge.from) ?? safeBase(edge.from);
+    const to = ids.get(edge.to) ?? safeBase(edge.to);
+    const arrow = edge.hidden || edge.style.strokeDash ? "-.->" : "-->";
+    const parts = [stepPrefix(edge), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
+    const edgeLabel = parts.length ? `|"${label(parts.join(" "))}"|` : "";
+    lines.push(`  ${from} ${arrow}${edgeLabel} ${to}`);
+  }
+  return lines.join("\n");
+}
+
+export function modelToMermaidResult(model: DiagramModel): ExportResult<string> {
+  if (diagramKind(model) === "architecture") return exportResult(modelToArchitectureMermaid(model), architectureTextWarnings("Mermaid"));
+  return exportResult(modelToMermaidGraph(model));
+}
+
+function modelToMermaidGraph(model: DiagramModel): string {
   const ids = mermaidIds(model);
   const index = indexModel(model);
   const lines = [`flowchart ${direction(model)}`];
@@ -84,4 +126,8 @@ export function modelToMermaid(model: DiagramModel): string {
     lines.push(`  ${from} ${arrow}${edgeLabel} ${to}`);
   }
   return lines.join("\n");
+}
+
+export function modelToMermaid(model: DiagramModel): string {
+  return modelToMermaidResult(model).content;
 }

@@ -1,4 +1,6 @@
 import { keyOf } from "./query";
+import { architectureTextWarnings, exportResult, stepPrefix, type ExportResult } from "./export-result";
+import { diagramKind } from "./kind";
 import type { Arrowhead, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle } from "./types";
 
 type StyleValue = string | number | boolean;
@@ -188,7 +190,50 @@ function chooseOperator(srcArrow: Arrowhead, dstArrow: Arrowhead): string {
   return "--";
 }
 
-export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "paths" } = {}): string {
+function archLabel(node: DiagramNode): string {
+  return [node.label, node.arch?.facts ?? node.arch?.detail].filter(Boolean).join("\\n");
+}
+
+function modelToArchitectureD2(model: DiagramModel): string {
+  const lines: string[] = [];
+  lines.push(...layoutLines(model.layout));
+  if (lines.length > 0) lines.push("");
+  const children = new Map<string | null, DiagramNode[]>();
+  for (const node of model.nodes) {
+    if (node.generated) continue;
+    children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+  }
+  const emitNode = (node: DiagramNode, depth: number) => {
+    const indent = INDENT.repeat(depth);
+    const key = d2Key(keyOf(node.id));
+    lines.push(`${indent}${key}: ${quoteString(archLabel(node))}${node.container || node.role === "boundary" ? " {" : ""}`);
+    if (node.container || node.role === "boundary") {
+      for (const child of children.get(node.id) ?? []) emitNode(child, depth + 1);
+      lines.push(`${indent}}`, "");
+    }
+  };
+  for (const node of children.get(null) ?? []) emitNode(node, 0);
+  for (const edge of model.edges) {
+    const operator = edge.hidden ? "--" : chooseOperator(edge.srcArrow, edge.dstArrow);
+    const parts = [stepPrefix(edge), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
+    const label = parts.length ? `: ${quoteString(parts.join(" "))}` : "";
+    if (edge.hidden) {
+      lines.push(`${edge.from} ${operator} ${edge.to}${label} {`);
+      lines.push(`${INDENT}style.stroke-dash: 4`);
+      lines.push("}");
+    } else {
+      lines.push(`${edge.from} ${operator} ${edge.to}${label}`);
+    }
+  }
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
+}
+
+export function modelToD2Result(model: DiagramModel, options: { icons?: "keys" | "paths" } = {}): ExportResult<string> {
+  if (diagramKind(model) === "architecture") return exportResult(modelToArchitectureD2(model), architectureTextWarnings("D2"));
+  return exportResult(modelToD2Graph(model, options));
+}
+
+function modelToD2Graph(model: DiagramModel, options: { icons?: "keys" | "paths" } = {}): string {
   const iconMode = options.icons ?? "keys";
   const lines: string[] = [];
   const groups = classGroups(model.nodes);
@@ -258,4 +303,8 @@ export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "path
   }
 
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
+}
+
+export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "paths" } = {}): string {
+  return modelToD2Result(model, options).content;
 }

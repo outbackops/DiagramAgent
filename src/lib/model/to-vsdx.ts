@@ -3,7 +3,12 @@ import path from "node:path";
 
 import JSZip from "jszip";
 
+import { overlayGeometries } from "@/lib/arch/overlays";
+import { overlayTag } from "@/lib/arch/page";
+import { badgeStyle, boundaryStyle, connectorStyle, stylePack } from "@/lib/arch/styles";
+import { architectureExportView, architecturePageLines, exportResult, type ExportResult } from "./export-result";
 import { unionBoxes } from "./geometry";
+import { diagramKind } from "./kind";
 import { iconBox } from "./render-svg";
 import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 
@@ -81,6 +86,31 @@ function composedNodeLabel(node: DiagramNode): string {
   return lines.join("\n");
 }
 
+function archNodeLabel(model: DiagramModel | null, node: DiagramNode): string {
+  if (node.generated && model) return architecturePageLines(model, node).join("\n");
+  if (node.generated) return [node.label, node.content?.subtitle, ...(node.content?.lines ?? []), ...(node.content?.notes ?? [])].filter(Boolean).join("\n");
+  if (node.role === "boundary") return [node.label, node.arch?.facts].filter(Boolean).join("\n");
+  if (node.role === "service") return [node.label, node.arch?.detail].filter(Boolean).join("\n");
+  return node.label;
+}
+
+function archStyledNode(model: DiagramModel, node: DiagramNode): DiagramNode {
+  const view = architectureExportView(model);
+  if (node.role === "boundary" || (node.container && !node.generated)) {
+    const style = boundaryStyle(view.boundaryPlatforms.get(node.id) ?? view.platform, node.arch?.kind ?? "group");
+    return {
+      ...node,
+      style: { fill: style.fill, stroke: style.stroke, strokeWidth: style.strokeWidth, strokeDash: style.dash ? 6 : undefined, borderRadius: style.radius, fontColor: style.headerColor, fontSize: 12, bold: style.bold },
+    };
+  }
+  if (node.generated) {
+    const [label, ...lines] = architecturePageLines(model, node);
+    return { ...node, label, content: { ...node.content, lines }, style: { fill: "none", stroke: "none", fontColor: stylePack(view.platform).text, fontSize: node.role === "title" ? 20 : 12, bold: node.role === "title" } };
+  }
+  const pack = stylePack(view.platform);
+  return { ...node, style: { fill: pack.node.cardFill ?? "#FFFFFF", stroke: pack.node.cardStroke ?? "#D0D7DE", strokeWidth: 1, fontColor: pack.text, fontSize: 11 } };
+}
+
 function shapeXml(node: DiagramNode, id: number, page: PageSpace, composed: boolean): string {
   const w = inch(node.box.w);
   const h = inch(node.box.h);
@@ -98,7 +128,7 @@ function shapeXml(node: DiagramNode, id: number, page: PageSpace, composed: bool
   const fontSize = ((node.style.fontSize ?? (node.container ? 12 : 11)) / 72).toFixed(4);
   const fontStyle = (node.style.bold ? 1 : 0) + (node.style.italic ? 2 : 0) + (node.style.underline ? 4 : 0);
 
-  const label = composed && node.role ? composedNodeLabel(node) : node.label;
+  const label = node.role === "service" || node.role === "boundary" || node.generated ? archNodeLabel(null, node) : composed && node.role ? composedNodeLabel(node) : node.label;
   return `<Shape ID="${id}" NameU="${esc(node.id)}" Type="Shape">\n  <Cell N="PinX" V="${fmt(pinX)}"/>\n  <Cell N="PinY" V="${fmt(pinY)}"/>\n  <Cell N="Width" V="${fmt(w)}"/>\n  <Cell N="Height" V="${fmt(h)}"/>\n  <Cell N="LocPinX" V="${fmt(w / 2)}"/>\n  <Cell N="LocPinY" V="${fmt(h / 2)}"/>\n  <Cell N="Angle" V="0"/>\n  <Cell N="FillForegnd" V="${esc(fill)}"/>\n  <Cell N="FillPattern" V="${fill === "none" ? "0" : "1"}"/>\n  <Cell N="LineColor" V="${esc(stroke)}"/>\n  <Cell N="LineWeight" V="${fmt(lineWeight)}"/>\n  <Cell N="LinePattern" V="${linePattern}"/>\n  <Cell N="Rounding" V="${fmt(rounding)}"/>\n  <Cell N="VerticalAlign" V="${verticalAlign}"/>\n  <Section N="Character"><Row IX="0"><Cell N="Font" V="0"/><Cell N="Color" V="${esc(font)}"/><Cell N="Size" V="${fontSize}"/><Cell N="Style" V="${fontStyle}"/></Row></Section>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="${fill === "none" ? "1" : "0"}"/><Cell N="NoLine" V="0"/>\n    <Row T="RelMoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="2"><Cell N="X" V="1"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="3"><Cell N="X" V="1"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n  </Section>\n  <Text>${esc(label)}</Text>\n</Shape>`;
 }
 
@@ -133,6 +163,22 @@ function connectorXml(edge: DiagramEdge, id: number, page: PageSpace, source: Di
   return `<Shape ID="${id}" NameU="${esc(edge.id)}" Type="Shape">\n  <Cell N="BeginX" V="${fmt(begin.x)}"/>\n  <Cell N="BeginY" V="${fmt(begin.y)}"/>\n  <Cell N="EndX" V="${fmt(end.x)}"/>\n  <Cell N="EndY" V="${fmt(end.y)}"/>\n  <Cell N="ObjType" V="2"/>\n  <Cell N="LineColor" V="${esc(edge.style.stroke ?? "#666666")}"/>\n  <Cell N="LineWeight" V="${fmt(inch(edge.style.strokeWidth ?? 1))}"/>\n  <Cell N="LinePattern" V="${edge.style.strokeDash ? "2" : "1"}"/>\n  <Cell N="BeginArrow" V="${visioArrow(edge.srcArrow)}"/>\n  <Cell N="EndArrow" V="${visioArrow(edge.dstArrow)}"/>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="1"/><Cell N="NoLine" V="0"/>\n${connectorGeometry(route, page)}\n  </Section>\n  <Text>${esc(edge.label ?? "")}</Text>\n</Shape>`;
 }
 
+function archStyledEdge(model: DiagramModel, edge: DiagramEdge): DiagramEdge {
+  const page = architectureExportView(model).platform;
+  const style = connectorStyle(page, edge.meaning ?? "request");
+  return {
+    ...edge,
+    srcArrow: style.arrowStart === "none" ? "none" : style.arrowStart === "open" ? "line" : edge.srcArrow,
+    dstArrow: style.arrowEnd === "none" ? "none" : style.arrowEnd === "open" ? "line" : edge.dstArrow,
+    style: { stroke: style.stroke, strokeWidth: style.width, strokeDash: style.dash ? 6 : undefined, fontColor: stylePack(page).text },
+  };
+}
+
+function boxShapeXml(id: number, name: string, box: { x: number; y: number; w: number; h: number }, page: PageSpace, text: string, fill: string, stroke: string, dashed = false): string {
+  const node: DiagramNode = { id: name, parent: null, label: text, shape: "rectangle", box, style: { fill, stroke, strokeDash: dashed ? 6 : undefined, borderRadius: 4, fontColor: stroke, bold: true, fontSize: 10 }, container: false };
+  return shapeXml(node, id, page, false);
+}
+
 function contentTypes(): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n<Default Extension="xml" ContentType="application/xml"/>\n<Override PartName="/visio/document.xml" ContentType="application/vnd.ms-visio.drawing.main+xml"/>\n<Override PartName="/visio/pages/pages.xml" ContentType="application/vnd.ms-visio.pages+xml"/>\n<Override PartName="/visio/pages/page1.xml" ContentType="application/vnd.ms-visio.page+xml"/>\n<Override PartName="/visio/windows.xml" ContentType="application/vnd.ms-visio.windows+xml"/>\n</Types>`;
 }
@@ -147,7 +193,7 @@ function pagesXml(pageW: number, pageH: number): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Pages xmlns="http://schemas.microsoft.com/office/visio/2012/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><Page ID="0" Name="Page-1" NameU="Page-1"><PageSheet><Cell N="PageWidth" V="${fmt(pageW)}"/><Cell N="PageHeight" V="${fmt(pageH)}"/><Cell N="DrawingScale" V="1"/><Cell N="PageScale" V="1"/></PageSheet><Rel r:id="rId1"/></Page></Pages>`;
 }
 
-export async function modelToVsdx(model: DiagramModel): Promise<Buffer> {
+async function modelToVsdxBuffer(model: DiagramModel): Promise<Buffer> {
   const iconMap = await buildIconMap(model);
   const bounds = unionBoxes(model.nodes.map((node) => node.box)) ?? { x: 0, y: 0, w: 0, h: 0 };
   const pageW = Math.max(inch(bounds.w) + PAGE_MARGIN_IN * 2, 1);
@@ -155,7 +201,7 @@ export async function modelToVsdx(model: DiagramModel): Promise<Buffer> {
   const page = { minX: bounds.x, minY: bounds.y, pageH };
   const byId = new Map(model.nodes.map((node) => [node.id, node]));
   const nodeId = new Map(model.nodes.map((node, index) => [node.id, shapeId(index)]));
-  const shapes = model.nodes.map((node, index) => shapeXml(node, shapeId(index), page, model.composed === true));
+  const shapes = model.nodes.map((node, index) => shapeXml(node, shapeId(index), page, diagramKind(model) === "poster"));
   let nextShapeId = model.nodes.length + 1;
   const iconShapes = model.nodes.flatMap((node) => {
     const dataUri = node.icon ? iconMap.get(node.icon) : undefined;
@@ -192,4 +238,82 @@ export async function modelToVsdx(model: DiagramModel): Promise<Buffer> {
   zip.file("visio/pages/page1.xml", pageXml);
   zip.file("visio/windows.xml", WIN);
   return await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
+}
+
+async function modelToArchitectureVsdxBuffer(model: DiagramModel): Promise<Buffer> {
+  const iconMap = await buildIconMap(model);
+  const bounds = unionBoxes(model.nodes.map((node) => node.box)) ?? { x: 0, y: 0, w: 0, h: 0 };
+  const pageW = Math.max(inch(bounds.w) + PAGE_MARGIN_IN * 2, 1);
+  const pageH = Math.max(inch(bounds.h) + PAGE_MARGIN_IN * 2, 1);
+  const page = { minX: bounds.x, minY: bounds.y, pageH };
+  const byId = new Map(model.nodes.map((node) => [node.id, archStyledNode(model, node)]));
+  const nodeId = new Map(model.nodes.map((node, index) => [node.id, shapeId(index)]));
+  const shapes = model.nodes.map((node, index) => shapeXml(archStyledNode(model, node), shapeId(index), page, false));
+  let nextShapeId = model.nodes.length + 1;
+  const iconShapes = model.nodes.flatMap((node) => {
+    const styled = byId.get(node.id) ?? node;
+    const dataUri = styled.icon ? iconMap.get(styled.icon) : undefined;
+    if (!dataUri || styled.role !== "service") return [];
+    return [iconShapeXml(styled, nextShapeId++, page, dataUri)];
+  });
+  const overlayShapes = overlayGeometries(model).flatMap((overlay) => {
+    if (overlay.clean) return [boxShapeXml(nextShapeId++, `overlay.${overlay.overlay.name}`, overlay.box, page, overlay.overlay.name, "none", "#ED7100", true)];
+    const tag = overlayTag(overlay.overlay);
+    return overlay.memberIds.flatMap((memberId) => {
+      const member = byId.get(memberId);
+      if (!member) return [];
+      const w = Math.ceil(tag.length * 7) + 12;
+      return [boxShapeXml(nextShapeId++, `overlay.${member.id}.${tag}`, { x: member.box.x + member.box.w - w - 4, y: member.box.y + 4, w, h: 16 }, page, tag, "#FFFFFF", "#ED7100")];
+    });
+  });
+  const visibleEdges = model.edges.filter((edge) => !edge.hidden);
+  const connectors = visibleEdges.flatMap((edge, index) => {
+    const source = byId.get(edge.from);
+    const target = byId.get(edge.to);
+    if (!source || !target) return [];
+    return [connectorXml(archStyledEdge(model, edge), nextShapeId + index, page, source, target)];
+  });
+  nextShapeId += visibleEdges.length;
+  const badgeShapes = visibleEdges.flatMap((edge) =>
+    (edge.badges ?? []).map((badge) => {
+      const at = badge.at ?? edge.route[0] ?? { x: 0, y: 0 };
+      const pagePlatform = architectureExportView(model).platform;
+      const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
+      const style = badgeStyle(pagePlatform, sequenceIndex);
+      return boxShapeXml(nextShapeId++, `badge.${edge.id}.${badge.number}`, { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, page, String(badge.number), style.fill, style.fill);
+    })
+  );
+  const connectRows = visibleEdges.flatMap((edge, index) => {
+    const id = model.nodes.length + 1 + iconShapes.length + overlayShapes.length + index;
+    const source = nodeId.get(edge.from);
+    const target = nodeId.get(edge.to);
+    if (!source || !target) return [];
+    return [
+      `<Connect FromSheet="${id}" FromCell="BeginX" ToSheet="${source}" ToCell="PinX"/>`,
+      `<Connect FromSheet="${id}" FromCell="BeginY" ToSheet="${source}" ToCell="PinY"/>`,
+      `<Connect FromSheet="${id}" FromCell="EndX" ToSheet="${target}" ToCell="PinX"/>`,
+      `<Connect FromSheet="${id}" FromCell="EndY" ToSheet="${target}" ToCell="PinY"/>`,
+    ];
+  });
+  const pageXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<PageContents xmlns="http://schemas.microsoft.com/office/visio/2012/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n<Shapes>\n${[...shapes, ...iconShapes, ...overlayShapes, ...connectors, ...badgeShapes].join("\n")}\n</Shapes>\n${connectRows.length ? `<Connects>\n${connectRows.join("\n")}\n</Connects>` : ""}\n</PageContents>`;
+
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", contentTypes());
+  zip.file("_rels/.rels", TOP_RELS);
+  zip.file("visio/document.xml", DOC);
+  zip.file("visio/_rels/document.xml.rels", DOC_RELS);
+  zip.file("visio/pages/pages.xml", pagesXml(pageW, pageH));
+  zip.file("visio/pages/_rels/pages.xml.rels", PAGES_RELS);
+  zip.file("visio/pages/page1.xml", pageXml);
+  zip.file("visio/windows.xml", WIN);
+  return await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
+}
+
+export async function modelToVsdxResult(model: DiagramModel): Promise<ExportResult<Buffer>> {
+  if (diagramKind(model) === "architecture") return exportResult(await modelToArchitectureVsdxBuffer(model));
+  return exportResult(await modelToVsdxBuffer(model));
+}
+
+export async function modelToVsdx(model: DiagramModel): Promise<Buffer> {
+  return (await modelToVsdxResult(model)).content;
 }

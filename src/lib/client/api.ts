@@ -51,14 +51,29 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   return (await res.json()) as T;
 }
 
-async function postForBlob(url: string, body: unknown): Promise<Blob> {
+export interface ExportBlobResult {
+  blob: Blob;
+  warnings: string[];
+}
+
+function parseWarningsHeader(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    return Array.isArray(parsed) ? parsed.filter((warning): warning is string => typeof warning === "string" && warning.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function postForBlob(url: string, body: unknown): Promise<ExportBlobResult> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw await parseError(res);
-  return res.blob();
+  return { blob: await res.blob(), warnings: parseWarningsHeader(res.headers.get("X-Export-Warnings")) };
 }
 
 export interface ClarifyQuestionDto {
@@ -149,7 +164,7 @@ export interface GenerateInput {
   prompt: string;
   existingCode: string;
   history: ChatTurn[];
-  format?: "d2" | "composition";
+  format?: "d2" | "composition" | "architecture";
 }
 
 /** Stream diagram source from /api/generate, calling onDelta with each chunk. Resolves with the full raw text. */
@@ -218,7 +233,7 @@ export const api = {
     postJson<ClarifyResponseDto>("/api/clarify", { prompt, model }, signal),
   plan: (prompt: string, analysis: unknown, model: ModelSelection, signal?: AbortSignal) =>
     postJson<{ plan: Record<string, unknown> }>("/api/plan", { prompt, analysis: analysis ?? undefined, model }, signal),
-  assess: (input: { svg: string; prompt: string; d2Code: string; format?: "d2" | "composition" }, model: ModelSelection, signal?: AbortSignal) =>
+  assess: (input: { svg: string; prompt: string; d2Code: string; format?: "d2" | "composition" | "architecture" }, model: ModelSelection, signal?: AbortSignal) =>
     postJson<{ assessment: ReviewAssessment }>("/api/assess", { ...input, model }, signal),
   render,
   /** Scores (and renders) an edited model exactly as it is on the canvas. */

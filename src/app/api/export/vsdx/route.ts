@@ -4,7 +4,8 @@ import { modelFromBody, sanitizeFilename } from "@/lib/api/model-input";
 import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
 import { LlmError, isLlmError } from "@/lib/llm/errors";
-import { modelToDrawio } from "@/lib/model/to-drawio";
+import { warningsHeaderValue } from "@/lib/model/export-result";
+import { modelToDrawioResult } from "@/lib/model/to-drawio";
 
 /**
  * Export a diagram as a draw.io/diagrams.net file (.drawio) with native,
@@ -21,12 +22,14 @@ export async function POST(request: NextRequest) {
     const input = await modelFromBody(body, request.signal);
     if ("response" in input) return input.response;
     const title = typeof body?.title === "string" && body.title ? body.title : "Architecture Diagram";
-    const buffer = Buffer.from(await modelToDrawio(input.model, { title }), "utf-8");
+    const result = await modelToDrawioResult(input.model, { title });
+    const buffer = Buffer.from(result.content, "utf-8");
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/xml",
         "Content-Disposition": `attachment; filename="${sanitizeFilename(title)}.drawio"`,
         "Content-Length": String(buffer.length),
+        "X-Export-Warnings": warningsHeaderValue(result.warnings),
       },
     });
   } catch (error) {

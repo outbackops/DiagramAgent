@@ -7,12 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import { PAGE } from "@/lib/compose/theme";
 import { composeText } from "@/lib/compose";
+import { composeArchitectureText } from "@/lib/arch";
 import { modelToExcalidraw } from "./to-excalidraw";
 import type { DiagramModel } from "./types";
 
 interface ExcalidrawElement {
   id: string;
-  type: "rectangle" | "arrow" | "text";
+  type: "rectangle" | "arrow" | "text" | "image";
   x: number;
   y: number;
   width: number;
@@ -22,6 +23,7 @@ interface ExcalidrawElement {
   boundElements: Array<{ type: "text" | "arrow"; id: string }> | null;
   startBinding?: { elementId: string };
   endBinding?: { elementId: string };
+  fileId?: string;
 }
 
 interface ExcalidrawFile {
@@ -30,12 +32,17 @@ interface ExcalidrawFile {
   source: string;
   elements: ExcalidrawElement[];
   appState: { viewBackgroundColor: string; gridSize: null };
-  files: Record<string, never>;
+  files: Record<string, { mimeType: string; dataURL: string }>;
 }
 
 async function composedModel(): Promise<DiagramModel> {
   const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "compositions", "knowledge-assistant.json"), "utf8");
   return composeText(fixture).model;
+}
+
+async function architectureModel(): Promise<DiagramModel> {
+  const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "architecture", "azure-zone-redundant-web.json"), "utf8");
+  return (await composeArchitectureText(fixture)).model;
 }
 
 function parseExcalidraw(model: DiagramModel): ExcalidrawFile {
@@ -105,4 +112,24 @@ describe("modelToExcalidraw", () => {
     };
     expect(parseExcalidraw(model).appState.viewBackgroundColor).toBe("#ffffff");
   });
+
+  it("exports architecture icons as image elements with matching files and omits hidden edges", async () => {
+    const model = await architectureModel();
+    const file = parseExcalidraw(model);
+    const images = file.elements.filter((element) => element.type === "image");
+    const iconNodes = model.nodes.filter((node) => node.role === "service" && node.icon?.startsWith("/icons/"));
+    expect(images.length).toBe(iconNodes.length);
+    for (const image of images) {
+      expect(image.fileId).toBeTruthy();
+      expect(file.files[image.fileId!]?.mimeType).toBe("image/svg+xml");
+      expect(file.files[image.fileId!]?.dataURL).toMatch(/^data:image\/svg\+xml,/);
+    }
+    const hidden = model.edges.find((edge) => edge.hidden);
+    if (hidden) {
+      const source = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.from)!);
+      const target = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.to)!);
+      const arrows = file.elements.filter((element) => element.type === "arrow");
+      expect(arrows.some((arrow) => arrow.startBinding?.elementId === source?.id && arrow.endBinding?.elementId === target?.id)).toBe(false);
+    }
+  }, 120000);
 });

@@ -3,6 +3,8 @@ import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
 import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
 import { LlmError } from "@/lib/llm/errors";
+import { warningsHeaderValue } from "@/lib/model/export-result";
+import { diagramKind } from "@/lib/model/kind";
 import { renderModelSvg } from "@/lib/model/render-svg";
 import { routeModelEdges } from "@/lib/model/route";
 import { validateModel } from "@/lib/model/validate";
@@ -31,8 +33,8 @@ export async function POST(request: NextRequest) {
   }
   const result = validateModel(body.model);
   if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
-  // Composed diagrams are a finished page: export it edge to edge.
-  const svg = renderModelSvg(routeModelEdges(result.model, { fallbackOnly: true }), result.model.composed ? { padding: 0 } : {});
+  // Engine-laid-out diagrams are finished pages: export them edge to edge.
+  const svg = renderModelSvg(routeModelEdges(result.model, { fallbackOnly: true }), diagramKind(result.model) !== "graph" ? { padding: 0 } : {});
   if (svg.length > MAX_SVG_LENGTH) {
     return NextResponse.json({ error: "SVG is too large" }, { status: 413 });
   }
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "image/png",
         "Content-Disposition": 'attachment; filename="diagram.png"',
+        "X-Export-Warnings": warningsHeaderValue([]),
       },
     });
   } catch (error) {
