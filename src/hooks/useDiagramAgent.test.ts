@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/client/api", () => ({ api, isD2SyntaxError: () => false }));
 
 import { formatForStyle, migrateSettings, useDiagramAgent, type AgentDocument } from "./useDiagramAgent";
+import { PROPOSED_PREFIX } from "@/lib/arch/spec";
 
 const models = {
   selection: { provider: "copilot" as const, model: "claude-opus-5.5", reasoningEffort: "medium" as const },
@@ -130,6 +131,7 @@ describe("styles and routing", () => {
     expect(api.render).not.toHaveBeenCalled();
     expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "", format: "architecture" });
     expect(onKeep).toHaveBeenCalledWith(expect.stringContaining('"Hub and spoke"'), { layout: "full", status: "done", format: "architecture" });
+    expect(onKeep.mock.calls[0][0]).toContain(PROPOSED_PREFIX);
     expect(result.current.latestRun).toMatchObject({ format: "architecture", routed: "heuristic", status: "done" });
     expect(result.current.latestRun?.qualityScore).toEqual(expect.any(Number));
   });

@@ -2,7 +2,7 @@ import { PAGE } from "@/lib/compose/theme";
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
 import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
-import { architectureExportView, architecturePageLines } from "./export-result";
+import { architectureExportView, architecturePageLines, badgeCenter, type ArchitectureExportView } from "./export-result";
 import { diagramKind } from "./kind";
 import type { DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 
@@ -55,7 +55,7 @@ interface TextElement extends BaseElement {
 interface ArrowElement extends BaseElement {
   type: "arrow";
   points: Array<[number, number]>;
-  startArrowhead: null;
+  startArrowhead: "arrow" | null;
   endArrowhead: "arrow" | null;
   startBinding: { elementId: string; focus: 0; gap: 4 } | null;
   endBinding: { elementId: string; focus: 0; gap: 4 } | null;
@@ -157,8 +157,7 @@ function rectForNode(node: DiagramNode, id: string, container: boolean): Rectang
   };
 }
 
-function archStyledNode(model: DiagramModel, node: DiagramNode): DiagramNode {
-  const view = architectureExportView(model);
+function archStyledNode(view: ArchitectureExportView, model: DiagramModel, node: DiagramNode): DiagramNode {
   if (node.role === "boundary" || (node.container && !node.generated)) {
     const style = boundaryStyle(view.boundaryPlatforms.get(node.id) ?? view.platform, node.arch?.kind ?? "group");
     return { ...node, style: { fill: style.fill === "none" ? "transparent" : style.fill, stroke: style.stroke, strokeWidth: style.strokeWidth, strokeDash: style.dash ? 6 : undefined, borderRadius: style.radius, fontColor: style.headerColor, bold: style.bold }, container: true };
@@ -334,12 +333,11 @@ function arrowForEdge(edge: DiagramEdge, id: string, nodeIds: Map<string, string
   };
 }
 
-function archArrowForEdge(model: DiagramModel, edge: DiagramEdge, id: string, nodeIds: Map<string, string>): ArrowElement | null {
+function archArrowForEdge(view: ArchitectureExportView, edge: DiagramEdge, id: string, nodeIds: Map<string, string>): ArrowElement | null {
   const arrow = arrowForEdge(edge, id, nodeIds);
   if (!arrow) return null;
-  const page = architectureExportView(model).platform;
-  const style = connectorStyle(page, edge.meaning ?? "request");
-  return { ...arrow, strokeColor: style.stroke, strokeWidth: style.width, strokeStyle: style.dash ? "dashed" : "solid", startArrowhead: null, endArrowhead: style.arrowEnd === "none" ? null : "arrow" };
+  const style = connectorStyle(view.platform, edge.meaning ?? "request");
+  return { ...arrow, strokeColor: style.stroke, strokeWidth: style.width, strokeStyle: style.dash ? "dashed" : "solid", startArrowhead: style.arrowStart === "none" ? null : "arrow", endArrowhead: style.arrowEnd === "none" ? null : "arrow" };
 }
 
 function imageDataUrl(icon: string): string {
@@ -370,7 +368,9 @@ export function modelToExcalidraw(model: DiagramModel): string {
   const children = new Map<string, DiagramNode[]>();
   for (const node of model.nodes) {
     if (!node.parent) continue;
-    children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+    const siblings = children.get(node.parent);
+    if (siblings) siblings.push(node);
+    else children.set(node.parent, [node]);
   }
 
   const nodeIds = new Map<string, string>();
@@ -436,11 +436,14 @@ function modelToArchitectureExcalidraw(model: DiagramModel): string {
   const children = new Map<string, DiagramNode[]>();
   for (const node of model.nodes) {
     if (!node.parent) continue;
-    children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+    const siblings = children.get(node.parent);
+    if (siblings) siblings.push(node);
+    else children.set(node.parent, [node]);
   }
 
   const nodeIds = new Map<string, string>();
-  const styledNodes = model.nodes.map((node) => archStyledNode(model, node));
+  const view = architectureExportView(model);
+  const styledNodes = model.nodes.map((node) => archStyledNode(view, model, node));
   const rectangles = styledNodes.map((node) => {
     const id = elementId(`node:${node.id}`, used);
     nodeIds.set(node.id, id);
@@ -482,7 +485,7 @@ function modelToArchitectureExcalidraw(model: DiagramModel): string {
 
   for (const edge of model.edges.filter((candidate) => !candidate.hidden)) {
     const arrowId = elementId(`edge:${edge.id}`, used);
-    const arrow = archArrowForEdge(model, edge, arrowId, nodeIds);
+    const arrow = archArrowForEdge(view, edge, arrowId, nodeIds);
     if (!arrow) continue;
     arrows.push(arrow);
     if (edge.label) {
@@ -490,8 +493,8 @@ function modelToArchitectureExcalidraw(model: DiagramModel): string {
       texts.push(textElement({ id: elementId(`edge-label:${edge.id}`, used), text: edge.label, x: point.x - 70, y: point.y - 10, width: 140, fontSize: 12, color: DARK_TEXT, align: "center" }));
     }
     for (const badge of edge.badges ?? []) {
-      const at = badge.at ?? edge.route[0] ?? { x: 0, y: 0 };
-      const page = architectureExportView(model).platform;
+      const at = badge.at ?? badgeCenter(edge);
+      const page = view.platform;
       const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
       const style = badgeStyle(page, sequenceIndex);
       const badgeId = elementId(`badge:${edge.id}:${badge.number}`, used);
@@ -518,7 +521,7 @@ function modelToArchitectureExcalidraw(model: DiagramModel): string {
       version: 2,
       source: SOURCE,
       elements,
-      appState: { viewBackgroundColor: stylePack(architectureExportView(model).platform).background, gridSize: null },
+      appState: { viewBackgroundColor: stylePack(view.platform).background, gridSize: null },
       files,
     },
     null,

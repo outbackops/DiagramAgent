@@ -1,4 +1,5 @@
 import { D2_THEME_0 } from "./d2-theme";
+import { safeIconHref } from "./icon-href";
 import { longestSegmentMidpoint, unionBoxes } from "./geometry";
 import { diagramKind } from "./kind";
 import { indexModel, isGroup } from "./query";
@@ -354,13 +355,6 @@ function renderMarker(id: string, arrow: Arrowhead, color: string): string {
 function labelSize(label: string, fontSize: number, measured?: Size): Size {
   if (measured) return measured;
   return { w: Math.max(1, label.length * fontSize * 0.6), h: Math.ceil(fontSize * 1.3) };
-}
-
-function safeIconHref(href: string | undefined): string | null {
-  if (!href) return null;
-  if (/^\/icons\/[A-Za-z0-9._-]+\.svg$/.test(href)) return href;
-  if (/^data:image\/(?:svg\+xml|png|jpeg|gif|webp)[;,]/i.test(href)) return href;
-  return null;
 }
 
 function parsePosition(pos: string): ["INSIDE" | "OUTSIDE", "TOP" | "MIDDLE" | "BOTTOM", "LEFT" | "CENTER" | "RIGHT"] {

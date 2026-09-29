@@ -45,7 +45,7 @@ Complete example:
     { "from": "app", "to": "monitor", "meaning": "monitoring" }
   ],
   "sequences": [{ "id": "in", "name": "Inbound request", "steps": ["Users browse the site", "Gateway routes to the app"] }],
-  "assumptions": ["App tier and CIDR are defaults for a new design, not discovered facts"]
+  "assumptions": ["Proposed defaults for a new design: address space 10.20.0.0/16, Application Gateway WAF_v2, App Service Premium v3"]
 }
 ```
 
@@ -68,7 +68,7 @@ Components are objects with `id`, `name`, optional `icon` and one `detail` line.
 | `onprem` / `external` | corporate or external site | corporate or external site | corporate or external site | external system | external system |
 | `group` | generic dashed group | generic group | generic group | generic group | generic group |
 
-**Parallel zones and regions.** Sibling boundaries of one kind that hold the same kinds of boundary in the same order are drawn as a grid, the way reference architectures draw them. Examples: availability zones that each hold a public, an app and a data subnet; a primary and a DR region that each hold a VNet and a shared group. Matching tiers line up across the zones, and every cell of a tier is the same size. To get the grid, give each zone the same subnets in the same order. A load balancer that spans zones is one component beside them (an AWS ALB in the VPC), not a copy per zone. An Auto Scaling group across zones is an overlay, not a component.
+**Parallel zones and regions.** Sibling boundaries of one kind that hold the same kinds of boundary in the same order are drawn as a grid, the way reference architectures draw them. Examples: availability zones that each hold a public, an app and a data subnet; a primary and a DR region that each hold a VNet and a shared group. Matching tiers line up across the zones, and every cell of a tier is the same size. To get the grid, use 2 to 6 zones and 2 to 6 tiers, give each zone only tier boundaries, and put every component inside a subnet or tier rather than directly in the zone. The tier kinds must match in the same order in every zone. A load balancer that spans zones is one component beside them (an AWS ALB in the VPC), not a copy per zone. An Auto Scaling group across zones is an overlay, not a component.
 
 ## Connections
 
@@ -99,7 +99,7 @@ Use `overlays` when a boundary spans members that live in different containment 
 
 ## Trust policy and assumptions
 
-Never present invented facts as known. If the prompt does not provide CIDRs, regions, tiers, counts, protocols or redundancy, either omit them or propose defaults only for a new design. Every proposed default belongs in `assumptions`, including ports (8080), tiers or types ("Standard", "Premium"), counts, versions and model names, not only address ranges. Do not mix observed facts and guesses in a `detail` or `facts` string. The eval harness checks this: a concrete fact in a detail, facts line or label must come from the request or an assumption. An address inside a range an assumption declares counts as grounded, as does a port an assumption states.
+Never present invented facts as known. If the prompt does not provide CIDRs, regions, tiers, counts, protocols or redundancy, either omit them or propose defaults only for a new design. Every proposed default belongs in `assumptions`, including ports (8080), tiers or types ("Standard", "Premium"), counts, versions and model names, not only address ranges. Assumptions must state the exact value, including digits, not words. Do not mix observed facts and guesses in a `detail` or `facts` string. The eval harness checks this: a concrete fact in a detail, facts line or label must come from the request or an assumption. An address inside a range an assumption declares counts as grounded, as does a port an assumption states.
 
 The app backs the policy up. Some facts in a generated spec aren't stated in the request, in an earlier request or in the spec being edited, and aren't listed in any assumption. The app adds them to `assumptions` in a line starting "Proposed, not in the request:". Up to two such lines sit on top of your own six, and they're recomputed on every edit.
 
@@ -149,14 +149,14 @@ Run from this repository:
 ```powershell
 npm run compose '--' src/test/fixtures/architecture/azure-hub-spoke.json -o hub.svg
 npm run compose '--' src/test/fixtures/architecture/azure-hub-spoke.json -o hub.png
-npm run compose '--' src/test/fixtures/architecture/azure-hub-spoke.json --json
+npm run -s compose '--' src/test/fixtures/architecture/azure-hub-spoke.json --json
 Get-Content .\spec.json -Raw | npm run compose '--' --stdin --kind architecture -o diagram.svg
 npm run compose '--' spec.json --strict --kind arch
 npx tsx scripts/compose.ts spec.json --kind architecture -o diagram.svg
 ```
 
 - Detection chooses Architecture for specs with `items`/`connections` and Poster for composition specs with `columns`. Use `--kind architecture|arch|poster|composition` to override.
-- `--json` prints `{ output, kind, page, warnings, layout, quality? }`.
+- `--json` prints `{ output, kind, page, warnings, layout, quality? }`; use `npm run -s compose -- ... --json` for machine-readable stdout without npm's banner.
 - `--strict` exits 2 when normalisation or layout warnings occur, or when a quality scorer reports failed checks.
 - Exit codes: 0 success; 1 unusable spec, bad arguments or a critical quality failure; 2 repairs or failed checks under `--strict`.
 - In PowerShell, quote the npm separator so options are passed through: `npm run compose '--' spec.json -o diagram.svg`. Or run the script directly with `npx tsx scripts/compose.ts`.

@@ -430,8 +430,8 @@ function extractFactsFromText(text: string | undefined, where: string, out: Arra
     /(?:^|\s):\d{2,5}\b/g,
     /\bport\s+\d{2,5}\b/gi,
     /\b\d+\s+(?:instances?|replicas?|nodes?)\b/gi,
-    /(?:×|x)\s*\d+\b/gi,
-    /\b(?:v\d+(?:\.\d+){1,2}|Java\s+\d+(?:\.\d+)?|\.NET\s+\d+(?:\.\d+)?|MySQL\s+\d+(?:\.\d+)?)\b/gi,
+    /(?<![A-Za-z])(?:×|x)\s*\d+\b/gi,
+    /(?:\.NET\s+\d+(?:\.\d+)?|\b(?:v\d+(?:\.\d+){1,2}|Java\s+\d+(?:\.\d+)?|MySQL\s+\d+(?:\.\d+)?)\b)/gi,
     /\b(?=[A-Za-z0-9_.-]*\d)(?=[A-Za-z0-9_.-]*[A-Za-z])[A-Za-z][A-Za-z0-9_.-]*\d[A-Za-z0-9_.-]*\b/g,
     /\b(?:Premium|Business Critical|Standard|Basic|Free tier|Free)\b/gi,
   ];
@@ -507,7 +507,8 @@ function portFact(fact: string): { protocol?: string; port: string } | null {
  * Beyond a literal mention: an address or subnet inside a range the prompt or an assumption declares
  * is grounded ("VPC 10.0.0.0/16 with /24 subnets" covers 10.0.1.0/24), a port is grounded when the
  * number is stated there ("MySQL on port 3306" covers "SQL 3306"), and a protocol's own default port
- * restates the protocol rather than adding a fact.
+ * restates the protocol rather than adding a fact ("HTTPS 443", or "port 443" when the request asks
+ * for HTTPS).
  */
 function factGrounded(fact: string, prompt: string, allowedFacts: readonly string[] | undefined, assumptions: readonly string[]): boolean {
   const factNorm = normalize(fact);
@@ -522,10 +523,8 @@ function factGrounded(fact: string, prompt: string, allowedFacts: readonly strin
   if (port) {
     if (port.protocol && IMPLIED_PORTS[port.protocol]?.includes(port.port)) return true;
     if (sources.some((source) => normalizeLoose(source).includes(` ${port.port} `))) return true;
-  }
-  const promptLoose = normalizeLoose(prompt);
-  for (const [protocol, ports] of Object.entries(IMPLIED_PORTS)) {
-    if (promptLoose.includes(` ${protocol} `) && ports.some((p) => factNorm.includes(p))) return true;
+    const promptLoose = normalizeLoose(prompt);
+    if (!port.protocol && Object.entries(IMPLIED_PORTS).some(([protocol, ports]) => promptLoose.includes(` ${protocol} `) && ports.includes(port.port))) return true;
   }
   return false;
 }

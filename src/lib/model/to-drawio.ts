@@ -5,7 +5,7 @@ import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
 import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
 import { bottom, right, unionBoxes } from "./geometry";
-import { architectureExportView, architecturePageLines, exportResult, type ExportResult } from "./export-result";
+import { architectureExportView, architecturePageLines, badgeCenter, exportResult, type ArchitectureExportView, type ExportResult } from "./export-result";
 import { diagramKind } from "./kind";
 import { iconBox } from "./render-svg";
 import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point } from "./types";
@@ -239,8 +239,7 @@ function archNodeLabel(model: DiagramModel, node: DiagramNode): string {
   return htmlLines([node.label]);
 }
 
-function buildArchNodeStyle(model: DiagramModel, node: DiagramNode): string {
-  const view = architectureExportView(model);
+function buildArchNodeStyle(view: ArchitectureExportView, node: DiagramNode): string {
   const pack = stylePack(view.platform);
   if (node.role === "boundary" || (node.container && !node.generated)) {
     const style = boundaryStyle(view.boundaryPlatforms.get(node.id) ?? view.platform, node.arch?.kind ?? "group");
@@ -271,20 +270,18 @@ function buildArchNodeStyle(model: DiagramModel, node: DiagramNode): string {
   return styleText(["rounded=1", "whiteSpace=wrap", "html=1", `fillColor=${pack.node.cardFill ?? "#ffffff"}`, `strokeColor=${pack.node.cardStroke ?? "#D0D7DE"}`, "strokeWidth=1", "fontColor=#1b1f24", "fontSize=11", "verticalAlign=bottom", "align=center", "spacingBottom=8"]);
 }
 
-function archEdgeStyle(model: DiagramModel, edge: DiagramEdge): string {
-  const page = architectureExportView(model).platform;
+function archEdgeStyle(page: ArchitectureExportView["platform"], edge: DiagramEdge): string {
   const style = connectorStyle(page, edge.meaning ?? "request");
   const end = style.arrowEnd === "none" ? "endArrow=none" : style.arrowEnd === "open" ? "endArrow=open" : "endArrow=block";
   const start = style.arrowStart === "none" ? "startArrow=none" : style.arrowStart === "open" ? "startArrow=open" : "startArrow=block";
   return styleText(["edgeStyle=orthogonalEdgeStyle", "orthogonalLoop=1", "jettySize=auto", "html=1", "rounded=0", `strokeColor=${style.stroke}`, `strokeWidth=${style.width}`, style.dash ? "dashed=1" : null, style.dash ? `dashPattern=${style.dash}` : null, `fontColor=${stylePack(page).text}`, "fontSize=10", start, end]);
 }
 
-function badgeCellXml(id: string, model: DiagramModel, edge: DiagramEdge, badge: NonNullable<DiagramEdge["badges"]>[number], index: number): string {
-  const page = architectureExportView(model).platform;
+function badgeCellXml(id: string, page: ArchitectureExportView["platform"], model: DiagramModel, edge: DiagramEdge, badge: NonNullable<DiagramEdge["badges"]>[number], index: number): string {
   const sequences = model.arch?.sequences ?? [];
   const sequenceIndex = Math.max(0, sequences.findIndex((sequence) => sequence.id === badge.sequence));
   const style = badgeStyle(page, sequenceIndex);
-  const at = badge.at ?? edge.route[0] ?? { x: 0, y: 0 };
+  const at = badge.at ?? badgeCenter(edge);
   const size = 18;
   const shape = style.shape === "circle" ? "shape=ellipse" : "rounded=1;arcSize=2";
   const mxStyle = styleText([shape, "html=1", `fillColor=${style.fill}`, "strokeColor=none", `fontColor=${style.text}`, "fontStyle=1", "fontSize=10", "align=center", "verticalAlign=middle"]);
@@ -342,6 +339,7 @@ async function modelToDrawioContent(model: DiagramModel, options: DrawioOptions 
 
 async function modelToArchitectureDrawioContent(model: DiagramModel, options: DrawioOptions = {}): Promise<string> {
   const iconMap = await buildIconMap(model, options.embedIcons ?? true);
+  const view = architectureExportView(model);
   const nodeIds = new Map<string, string>();
   const byId = new Map(model.nodes.map((node) => [node.id, node]));
   const bounds = unionBoxes(model.nodes.map((node) => node.box)) ?? { x: 0, y: 0, w: DEFAULT_PAGE_W, h: DEFAULT_PAGE_H };
@@ -351,7 +349,7 @@ async function modelToArchitectureDrawioContent(model: DiagramModel, options: Dr
     const parent = node.parent ? nodeIds.get(node.parent) ?? ROOT_CELL_ID : ROOT_CELL_ID;
     const geometry = geometryFor(node, byId);
     const cells = [
-      `        <mxCell id="${id}" value="${escapeXml(archNodeLabel(model, node))}" style="${escapeXml(buildArchNodeStyle(model, node))}" vertex="1" parent="${parent}">\n          <mxGeometry x="${geometry.x}" y="${geometry.y}" width="${geometry.w}" height="${geometry.h}" as="geometry"/>\n        </mxCell>`,
+      `        <mxCell id="${id}" value="${escapeXml(archNodeLabel(model, node))}" style="${escapeXml(buildArchNodeStyle(view, node))}" vertex="1" parent="${parent}">\n          <mxGeometry x="${geometry.x}" y="${geometry.y}" width="${geometry.w}" height="${geometry.h}" as="geometry"/>\n        </mxCell>`,
     ];
     const icon = node.icon ? iconMap.get(node.icon) : undefined;
     if (icon && node.role === "service") cells.push(imageCellXml(`${id}-icon`, id, icon, node));
@@ -362,9 +360,9 @@ async function modelToArchitectureDrawioContent(model: DiagramModel, options: Dr
     const source = nodeIds.get(edge.from);
     const target = nodeIds.get(edge.to);
     const routePoints = edge.route.length > 2 ? edge.route.slice(1, -1) : [];
-    return `        <mxCell id="${id}" value="${escapeXml(htmlLines([edge.label]))}" style="${escapeXml(archEdgeStyle(model, edge))}" edge="1" source="${source ?? ""}" target="${target ?? ""}" parent="${ROOT_CELL_ID}">\n          <mxGeometry relative="1" as="geometry">${pointsXml(routePoints)}\n          </mxGeometry>\n        </mxCell>`;
+    return `        <mxCell id="${id}" value="${escapeXml(htmlLines([edge.label]))}" style="${escapeXml(archEdgeStyle(view.platform, edge))}" edge="1" source="${source ?? ""}" target="${target ?? ""}" parent="${ROOT_CELL_ID}">\n          <mxGeometry relative="1" as="geometry">${pointsXml(routePoints)}\n          </mxGeometry>\n        </mxCell>`;
   });
-  const badgeCells = model.edges.filter((edge) => !edge.hidden).flatMap((edge, edgeIndex) => (edge.badges ?? []).map((badge, badgeIndex) => badgeCellXml(cellId("edge", edgeIndex + model.nodes.length), model, edge, badge, badgeIndex)));
+  const badgeCells = model.edges.filter((edge) => !edge.hidden).flatMap((edge, edgeIndex) => (edge.badges ?? []).map((badge, badgeIndex) => badgeCellXml(cellId("edge", edgeIndex + model.nodes.length), view.platform, model, edge, badge, badgeIndex)));
   const overlays = overlayGeometries(model);
   const overlayCells = overlays.flatMap((overlay, index) => {
     if (overlay.clean) return [overlayCellXml(`overlay-${index}`, overlay.box, overlay.overlay.name)];

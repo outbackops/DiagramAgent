@@ -91,7 +91,8 @@ function connectionOf(edge: DiagramEdge, from: string, to: string): ArchConnecti
   if (edge.meaning && edge.meaning !== "request") connection.meaning = edge.meaning;
   if (edge.label) connection.label = edge.label;
   const badge = edge.badges?.[0];
-  if (badge) connection.step = `${badge.sequence}.${badge.number}`;
+  // The string form ("in.2") needs a sequence id that starts with a letter; "2fa-login" needs the object form.
+  if (badge) connection.step = /^[A-Za-z]/.test(badge.sequence) ? `${badge.sequence}.${badge.number}` : { sequence: badge.sequence, number: badge.number };
   return connection;
 }
 

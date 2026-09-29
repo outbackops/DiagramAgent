@@ -27,6 +27,10 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+function hasOwn<T extends object>(object: T, key: PropertyKey): key is keyof T {
+  return Object.hasOwn(object, key);
+}
+
 /**
  * Lenient normaliser for Architecture specs (origin R17/R18). Aliases, missing optional values
  * and unresolved references are repaired with a warning; nothing is dropped silently. Input
@@ -45,7 +49,7 @@ export function normalizeArchSpec(raw: unknown): ArchNormalizeResult {
   const rawItems = arrayOf(raw, ["items", "components", "nodes", "resources", "elements"]);
   if (rawItems.length === 0) throw new SpecError("The spec has no components", ["Add components under items"]);
   const items = rawItems.map((item) => normalizeItem(item, ctx, 1)).filter((item): item is NItem => Boolean(item));
-  const nested = applyParentAliases(items, rawItems, ctx);
+  const nested = applyParentAliases(items, ctx);
   const components = allItems(nested).filter((i) => !isBoundary(i));
   if (components.length === 0) throw new SpecError("The spec has no components", ["Add at least one component (an item without child items)"]);
   if (components.length > ARCH_LIMITS.hardCapComponents) throw new SpecError(`The spec has ${components.length} components; the limit is ${ARCH_LIMITS.hardCapComponents}`, ["Split the system into several diagrams"]);
@@ -85,13 +89,21 @@ export function normalizeArchSpecText(textValue: string): ArchNormalizeResult {
   return normalizeArchSpec(parseSpecText(textValue));
 }
 
+/** Root fields only Architecture specs have (Poster specs have none of them). */
+const ARCH_ONLY_FIELDS = ["sequences", "workflow", "overlays", "spans", "assumptions", "assumed", "platform", "provider", "cloud", "view", "diagramType"];
+
 /** True when a parsed value looks like an Architecture spec rather than a Poster (composition) spec. */
 export function isArchSpecShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (Array.isArray(value.columns) || Array.isArray(value.sections)) return false;
   // Poster specs call their links `connectors`; Architecture specs call them `connections`.
   if (Array.isArray(value.connectors) && !Array.isArray(value.connections)) return false;
-  return ["items", "components", "nodes", "resources"].some((key) => Array.isArray(value[key])) && (Array.isArray(value.connections) || Array.isArray(value.edges) || Array.isArray(value.links) || "platform" in value || "view" in value || containsGroup(value));
+  const items = ["items", "components", "nodes", "resources"].map((key) => value[key]).find(Array.isArray);
+  if (!items) return false;
+  if (Array.isArray(value.connections) || Array.isArray(value.edges) || Array.isArray(value.links) || ARCH_ONLY_FIELDS.some((key) => key in value) || containsGroup(value)) return true;
+  if (typeof value.$schema === "string" && value.$schema.includes("architecture")) return true;
+  // Components are named; Poster cards are titled.
+  return items.length > 0 && items.every((item) => isRecord(item) && typeof item.name === "string" && !("title" in item));
 }
 
 // ---------------------------------------------------------------- items
@@ -202,7 +214,7 @@ function claimId(explicit: unknown, name: string | undefined, fallback: string, 
  * The flat form: an item may name its boundary with `parent` (or `group`, `in`, `boundary`)
  * instead of being nested. Nesting wins when both are given; cycles can't be repaired.
  */
-function applyParentAliases(items: NItem[], _raw: unknown[], ctx: Ctx): NItem[] {
+function applyParentAliases(items: NItem[], ctx: Ctx): NItem[] {
   const byId = new Map(allItems(items).map((item) => [item.id, item]));
   const parentOf = new Map<string, string | null>();
   const walk = (list: NItem[], parent: string | null) => {
@@ -301,7 +313,7 @@ function normalizeSequences(raw: JsonRecord, warnings: string[]): NSequence[] {
     }
     checkFields(value, FIELDS.sequence, "sequence", warnings);
     const name = text(valueOf(value, ["name", "title"]), ARCH_LIMITS.nameChars, warnings, "sequence name") ?? (out.length === 0 ? "Workflow" : "Second flow");
-    let id = slugify(String(valueOf(value, ["id"]) ?? name)) || `flow-${out.length + 1}`;
+    let id = slugify(String(valueOf(value, ["id"]) ?? name)).slice(0, ARCH_LIMITS.idChars) || `flow-${out.length + 1}`;
     while (used.has(id)) id = `${id}-2`;
     used.add(id);
     const rawSteps = arrayOf(value, ["steps", "items"]);
@@ -355,6 +367,9 @@ function normalizeConnections(raw: JsonRecord, refs: RefIndex, sequences: NSeque
   return out;
 }
 
+/** Step numbers the diagram model accepts on a badge (validate.ts). */
+const MAX_STEP = 99;
+
 function normalizeStepRef(value: unknown, sequences: NSequence[], warnings: string[]): NStepRef | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   let sequence: string | undefined;
@@ -363,17 +378,21 @@ function normalizeStepRef(value: unknown, sequences: NSequence[], warnings: stri
   else if (typeof value === "string") {
     const match = value.trim().match(/^(?:([A-Za-z][\w-]*)[.:#])?(\d{1,2})$/);
     if (match) {
-      sequence = match[1] ? slugify(match[1]) : undefined;
+      sequence = match[1] ? slugify(match[1]).slice(0, ARCH_LIMITS.idChars) : undefined;
       number = Number(match[2]);
     }
   } else if (isRecord(value)) {
     const n = Number(valueOf(value, ["number", "step", "n"]));
     if (Number.isFinite(n)) number = n;
     const s = valueOf(value, ["sequence", "flow"]);
-    if (typeof s === "string") sequence = slugify(s);
+    if (typeof s === "string") sequence = slugify(s).slice(0, ARCH_LIMITS.idChars);
   }
   if (!number || number < 1 || !Number.isInteger(number)) {
     warnings.push(`Dropped unreadable step reference ${JSON.stringify(value)}`);
+    return undefined;
+  }
+  if (number > MAX_STEP) {
+    warnings.push(`Dropped step ${number}; steps are numbered 1 to ${MAX_STEP}`);
     return undefined;
   }
   if (sequences.length === 0) sequences.push({ id: "main", name: "Workflow", badge: "circle", steps: [] });
@@ -409,7 +428,7 @@ function normalizeOverlays(raw: JsonRecord, refs: RefIndex, ctx: Ctx): NOverlay[
     }
     const kindRaw = valueOf(value, ["kind", "type"]);
     const kind = kindRaw === undefined ? "scaling-group" : normalizeKind(kindRaw, ctx.warnings);
-    let id = slugify(String(valueOf(value, ["id"]) ?? name)) || "overlay";
+    let id = slugify(String(valueOf(value, ["id"]) ?? name)).slice(0, ARCH_LIMITS.idChars) || "overlay";
     while (ctx.used.has(id)) id = `${id}-2`;
     ctx.used.add(id);
     out.push({ id, kind, name, members });
@@ -475,7 +494,7 @@ const KIND_ALIASES: Record<string, BoundaryKind> = {
 function kindOf(value: string): BoundaryKind | undefined {
   const slug = slugify(value);
   if ((BOUNDARY_KINDS as readonly string[]).includes(slug)) return slug as BoundaryKind;
-  return KIND_ALIASES[slug];
+  return hasOwn(KIND_ALIASES, slug) ? KIND_ALIASES[slug] : undefined;
 }
 
 function normalizeKind(value: unknown, warnings: string[]): BoundaryKind {
@@ -541,7 +560,8 @@ function normalizeMeaning(value: unknown, warnings: string[]): Meaning {
   if (value === undefined || value === null || value === "") return "request";
   const slug = slugify(String(value));
   if ((MEANINGS as readonly string[]).includes(slug)) return slug as Meaning;
-  const alias = MEANING_ALIASES[slug] ?? MEANING_ALIASES[slug.replace(/-/g, "_")];
+  const underscored = slug.replace(/-/g, "_");
+  const alias = hasOwn(MEANING_ALIASES, slug) ? MEANING_ALIASES[slug] : hasOwn(MEANING_ALIASES, underscored) ? MEANING_ALIASES[underscored] : undefined;
   if (alias) return alias;
   warnings.push(`Unknown connection meaning "${String(value)}"; drew it as a request`);
   return "request";
@@ -566,7 +586,7 @@ function normalizePlatform(value: unknown, warnings: string[]): Platform | undef
   if (value === undefined || value === null || value === "") return undefined;
   const slug = slugify(String(value));
   if ((PLATFORMS as readonly string[]).includes(slug)) return slug as Platform;
-  const alias = PLATFORM_ALIASES[slug];
+  const alias = hasOwn(PLATFORM_ALIASES, slug) ? PLATFORM_ALIASES[slug] : undefined;
   if (alias) return alias;
   warnings.push(`Unknown platform "${String(value)}"; inferred it from the icons`);
   return undefined;
@@ -592,7 +612,7 @@ function normalizeView(value: unknown, warnings: string[]): ArchView | undefined
   if (value === undefined || value === null || value === "") return undefined;
   const slug = slugify(String(value));
   if ((VIEWS as readonly string[]).includes(slug)) return slug as ArchView;
-  const alias = VIEW_ALIASES[slug];
+  const alias = hasOwn(VIEW_ALIASES, slug) ? VIEW_ALIASES[slug] : undefined;
   if (alias) return alias;
   if (slug !== "group" && slug !== "architecture") warnings.push(`Unknown view "${String(value)}"; ignored it`);
   return undefined;
@@ -656,8 +676,8 @@ function resolveIcon(value: unknown, componentName: string | undefined, ctx: Ctx
   const raw = String(value).trim();
   const slug = slugify(raw.replace(/^\/?icons\//, "").replace(/\.svg$/i, ""));
   const prefixes = platformPrefixes(ctx.platform);
-  const candidates = [slug, ICON_ALIASES[slug], ...prefixes.map((p) => `${p}-${slug}`), ...prefixes.map((p) => ICON_ALIASES[`${p}-${slug}`])].filter((c): c is string => Boolean(c));
-  const key = candidates.find((candidate) => iconRegistry[candidate]) ?? iconByLabel(raw, prefixes);
+  const candidates = [slug, aliasOfIcon(slug), ...prefixes.map((p) => `${p}-${slug}`), ...prefixes.map((p) => aliasOfIcon(`${p}-${slug}`))].filter((c): c is string => Boolean(c));
+  const key = candidates.find((candidate) => hasOwn(iconRegistry, candidate)) ?? iconByLabel(raw, prefixes);
   // A provider's logo on a specific service: its own icon, when its name identifies one.
   if (key && PROVIDER_LOGOS.has(key) && componentName) {
     const specific = iconForName(componentName, prefixes);
@@ -673,14 +693,18 @@ function resolveIcon(value: unknown, componentName: string | undefined, ctx: Ctx
 
 const PROVIDER_LOGOS = new Set(["azure", "aws", "gcp", "k8s"]);
 
+function aliasOfIcon(slug: string): string | undefined {
+  return hasOwn(ICON_ALIASES, slug) ? ICON_ALIASES[slug] : undefined;
+}
+
 /** A service's own icon from its display name ("BigQuery", "Cloud Pub/Sub", "Dataflow pipeline"). */
 function iconForName(name: string, prefixes: string[]): string | undefined {
   const slug = slugify(name);
   const bare = slug.replace(/^(?:azure|aws|amazon|google|gcp|cloud)-/, "");
   const first = bare.split("-")[0];
   for (const base of [...new Set([slug, bare, first])]) {
-    const candidates = [base, ICON_ALIASES[base], ...prefixes.map((p) => `${p}-${base}`), ...prefixes.map((p) => ICON_ALIASES[`${p}-${base}`])];
-    const found = candidates.find((candidate): candidate is string => Boolean(candidate && iconRegistry[candidate] && !PROVIDER_LOGOS.has(candidate)));
+    const candidates = [base, aliasOfIcon(base), ...prefixes.map((p) => `${p}-${base}`), ...prefixes.map((p) => aliasOfIcon(`${p}-${base}`))];
+    const found = candidates.find((candidate): candidate is string => Boolean(candidate && hasOwn(iconRegistry, candidate) && !PROVIDER_LOGOS.has(candidate)));
     if (found) return found;
   }
   const byLabel = iconByLabel(name, prefixes);

@@ -84,12 +84,13 @@ export async function layoutArchitecture(spec: NormalizedArchSpec, options: Arch
   if (elk) {
     const layoutElk = elk;
     // Grids depend only on the direction (tiers follow the flow), so each direction's are laid out once.
-    // If ELK throws on a cell, that direction's candidates draw the lanes without a grid.
+    // If ELK throws on a cell, that direction's candidates draw the lanes without a grid. The quick
+    // streaming preview skips grids: each cell is its own ELK run, and the final layout draws them.
     const gridCache = new Map<Direction, Promise<GridGeos>>();
     const gridsFor = (direction: Direction): Promise<GridGeos> => {
       let hit = gridCache.get(direction);
       if (!hit) {
-        hit = plan.grids.size === 0 ? Promise.resolve(new Map()) : gridGeos(plan, layoutElk, direction).catch(() => new Map());
+        hit = plan.grids.size === 0 || options.quick ? Promise.resolve(new Map()) : gridGeos(plan, layoutElk, direction).catch(() => new Map());
         gridCache.set(direction, hit);
       }
       return hit;
@@ -1046,14 +1047,16 @@ function placeLabels(plan: Plan, geo: Geo): void {
   }
 }
 
-/** One badge per step, on the first connector carrying it, near where its arrow starts. */
+/**
+ * A badge on every connector carrying a step (a step may fan out to several), near where its arrow
+ * starts and clear of components, titles, labels, borders and the other badges.
+ */
 function placeBadges(plan: Plan, geo: Geo): void {
   const leaves = leafObstacles(plan, geo).map((l) => l.box);
   const titles = titleObstacles(plan, geo).map((t) => t.box);
   const borders = [...plan.info.values()].filter((i) => isBoundary(i.item)).map((i) => geo.boxes.get(i.item.id)).filter((b): b is Box => Boolean(b));
   const labels = geo.edges.map((e) => e.label).filter((l): l is Box => Boolean(l));
   const placed: Box[] = [];
-  const seen = new Set<string>();
   const r = S.badge / 2;
   const free = (c: Point) => {
     const box = { x: c.x - r, y: c.y - r, w: S.badge, h: S.badge };
@@ -1068,9 +1071,6 @@ function placeBadges(plan: Plan, geo: Geo): void {
   for (const e of geo.edges) {
     const step = e.conn.step;
     if (!step || e.points.length < 2) continue;
-    const key = `${step.sequence}.${step.number}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     // Near where the arrow starts first; then anywhere along the route.
     const near: Point[] = [];
     const farther: Point[] = [];

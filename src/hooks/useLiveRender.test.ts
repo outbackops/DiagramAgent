@@ -36,11 +36,6 @@ afterEach(() => {
   arch.maxInFlight = 0;
 });
 
-/** Lets resolved promises (a finished layout and the next one it starts) run. */
-const settle = async () => {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-};
-
 const spec = (cards: number) => JSON.stringify({ title: "Stream", columns: [{ title: "Apps", items: Array.from({ length: cards }, (_, i) => ({ title: `Card ${i}` })) }] });
 const cardCount = (model: { nodes: { role?: string }[] } | null) => model?.nodes.filter((n) => n.role === "card").length ?? 0;
 
@@ -97,8 +92,8 @@ describe("useLiveRender for Architecture specs", () => {
 
     await act(async () => {
       arch.calls[0].release();
-      await settle();
     });
+    await vi.waitFor(() => expect(arch.calls).toHaveLength(2));
     // The streamed progress landed, and the final spec runs next with the full layout.
     expect(serviceCount(result.current.model)).toBe(1);
     expect(arch.calls).toHaveLength(2);
@@ -107,9 +102,8 @@ describe("useLiveRender for Architecture specs", () => {
 
     await act(async () => {
       arch.calls[1].release();
-      await settle();
     });
-    expect(serviceCount(result.current.model)).toBe(6);
+    await vi.waitFor(() => expect(serviceCount(result.current.model)).toBe(6));
     expect(arch.maxInFlight).toBe(1);
     expect(api.render).not.toHaveBeenCalled();
   });
@@ -122,23 +116,21 @@ describe("useLiveRender for Architecture specs", () => {
     act(() => void vi.advanceTimersByTime(200));
     await act(async () => {
       arch.calls[0].release();
-      await settle();
     });
     // The first result is stale: the canvas still waits for the newer spec.
+    await vi.waitFor(() => expect(arch.calls).toHaveLength(2));
     expect(result.current.model).toBeNull();
     await act(async () => {
       arch.calls[1].release();
-      await settle();
     });
-    expect(serviceCount(result.current.model)).toBe(3);
+    await vi.waitFor(() => expect(serviceCount(result.current.model)).toBe(3));
 
     rerender({ code: archSpec(4) });
     act(() => void vi.advanceTimersByTime(200));
     rerender({ code: "" });
     await act(async () => {
       arch.calls[2].release();
-      await settle();
     });
-    expect(result.current.model).toBeNull();
+    await vi.waitFor(() => expect(result.current.model).toBeNull());
   });
 });

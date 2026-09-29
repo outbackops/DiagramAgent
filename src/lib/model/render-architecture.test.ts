@@ -34,7 +34,9 @@ describe("renderArchitectureSvg", () => {
     expect(svg).toContain('data-page="assumptions"');
     // Every component and boundary is a canvas target; hidden links aren't drawn.
     for (const node of model.nodes.filter((n) => !n.generated)) expect(svg).toContain(`data-id="${node.id}"`);
-    for (const edge of model.edges.filter((e) => e.hidden)) expect(svg).not.toContain(`data-edge="${edge.id}"`);
+    const hidden = model.edges.filter((e) => e.hidden);
+    expect(hidden.length).toBeGreaterThan(0);
+    expect((svg.match(/data-edge="/g) ?? []).length).toBe(model.edges.filter((e) => !e.hidden).length);
     // The title can be selected and renamed; the other page blocks follow the diagram.
     expect(svg).toContain('data-page="title" data-id="__title"');
     expect(svg).not.toMatch(/data-page="(legend|workflow|assumptions)" data-id=/);
@@ -55,6 +57,26 @@ describe("renderArchitectureSvg", () => {
     const svg = renderModelSvg(model);
     expect(svg).toContain(">PE<");
     expect(svg).not.toContain('href="undefined"');
+  });
+
+  it("treats an external icon URL on an imported model like no icon", async () => {
+    const { model } = await composeArchitecture({ title: "External", items: [{ id: "api", name: "API Gateway" }] });
+    const node = model.nodes.find((n) => n.arch?.id === "api")!;
+    node.icon = "https://example.com/x.png";
+    const svg = renderModelSvg(model);
+    expect(svg).not.toContain("example.com");
+    expect(svg).toContain(">AG<");
+  });
+
+  it("draws a step badge where the layout placed it, and along its route when a hand move cleared it", async () => {
+    const { model } = await composeArchitecture({ title: "Steps", items: [{ id: "a", name: "A" }, { id: "b", name: "B" }], connections: [{ from: "a", to: "b", label: "HTTPS", step: 1 }] });
+    const edge = model.edges[0];
+    edge.badges![0].at = { x: 123, y: 456 };
+    expect(renderModelSvg(model)).toContain('<circle cx="123" cy="456"');
+    delete edge.badges![0].at;
+    const start = edge.route[0];
+    expect(renderModelSvg(model)).not.toContain(`<circle cx="${start.x}" cy="${start.y}"`);
+    expect(renderModelSvg(model)).toContain('data-badge="1"');
   });
 
   it("draws services whose only icon is the provider's logo as distinct tiles", async () => {

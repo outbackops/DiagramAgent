@@ -14,6 +14,7 @@ import {
   type TextRun,
 } from "@/lib/compose/content";
 import { EDGE, FONT_MONO, FONT_SANS, PAGE, SPACE, TYPE, toneColors } from "@/lib/compose/theme";
+import { safeIconHref } from "./icon-href";
 import { bottom, longestSegmentMidpoint, right } from "./geometry";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 import type { RenderModelSvgOptions } from "./render-svg";
@@ -306,13 +307,6 @@ function labelPoint(edge: DiagramEdge): Point {
     return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
   }
   return longestSegmentMidpoint(edge.route);
-}
-
-function safeIconHref(href: string | undefined): string | null {
-  if (!href) return null;
-  if (/^\/icons\/[A-Za-z0-9._-]+\.svg$/.test(href)) return href;
-  if (/^data:image\/(?:svg\+xml|png|jpeg|gif|webp)[;,]/i.test(href)) return href;
-  return null;
 }
 
 function expandBox(box: Box, by: number): Box {

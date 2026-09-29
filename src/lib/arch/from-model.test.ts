@@ -34,6 +34,18 @@ describe("modelToArchSpec", () => {
     expect(JSON.stringify(spec)).not.toContain("__title");
   });
 
+  it("keeps steps of a sequence whose id starts with a digit", async () => {
+    const { model } = await composeArchitecture({
+      title: "Sign-in",
+      items: [{ id: "user", name: "User" }, { id: "idp", name: "Identity provider" }],
+      sequences: [{ name: "2FA login", steps: ["User signs in"] }],
+      connections: [{ from: "user", to: "idp", label: "OIDC", step: { sequence: "2fa-login", number: 1 } }],
+    });
+    expect(model.edges[0].badges?.[0]).toMatchObject({ sequence: "2fa-login", number: 1 });
+    const again = await recomposeArchitecture(model);
+    expect(again.model.edges[0].badges?.[0]).toMatchObject({ sequence: "2fa-login", number: 1 });
+  });
+
   it("follows hand edits: a component dragged out of its boundary and one dropped into another", async () => {
     const { model } = await composeArchitectureText(fixture("azure-hub-spoke"));
     const vm = byArch(model, "web-vmss");

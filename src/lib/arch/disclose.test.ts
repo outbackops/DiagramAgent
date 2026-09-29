@@ -83,6 +83,14 @@ describe("discloseProposedFacts", () => {
     expect(assumptionsOf(stated)).toEqual(["Greenfield design"]);
   });
 
+  it("does not remove hand-edited facts that merely contain a listed proposal", () => {
+    const first = discloseProposedFacts(spec(), [request]);
+    const edited = first.replace("3 instances", "3 instances · hand-edited 13 instances");
+    const out = discloseProposedFacts(edited, [request, edited]);
+    expect(out).toContain("13 instances");
+    expect(assumptionsOf(out).join(" ")).not.toContain("13 instances");
+  });
+
   it("returns text it can't read unchanged", () => {
     expect(discloseProposedFacts("not json", [request])).toBe("not json");
     expect(discloseProposedFacts('{"title": "No items"}', [request])).toBe('{"title": "No items"}');

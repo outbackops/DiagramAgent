@@ -6,7 +6,7 @@ import JSZip from "jszip";
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
 import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
-import { architectureExportView, architecturePageLines, exportResult, type ExportResult } from "./export-result";
+import { architectureExportView, architecturePageLines, badgeCenter, exportResult, type ArchitectureExportView, type ExportResult } from "./export-result";
 import { unionBoxes } from "./geometry";
 import { diagramKind } from "./kind";
 import { iconBox } from "./render-svg";
@@ -94,8 +94,7 @@ function archNodeLabel(model: DiagramModel | null, node: DiagramNode): string {
   return node.label;
 }
 
-function archStyledNode(model: DiagramModel, node: DiagramNode): DiagramNode {
-  const view = architectureExportView(model);
+function archStyledNode(view: ArchitectureExportView, model: DiagramModel, node: DiagramNode): DiagramNode {
   if (node.role === "boundary" || (node.container && !node.generated)) {
     const style = boundaryStyle(view.boundaryPlatforms.get(node.id) ?? view.platform, node.arch?.kind ?? "group");
     return {
@@ -163,8 +162,8 @@ function connectorXml(edge: DiagramEdge, id: number, page: PageSpace, source: Di
   return `<Shape ID="${id}" NameU="${esc(edge.id)}" Type="Shape">\n  <Cell N="BeginX" V="${fmt(begin.x)}"/>\n  <Cell N="BeginY" V="${fmt(begin.y)}"/>\n  <Cell N="EndX" V="${fmt(end.x)}"/>\n  <Cell N="EndY" V="${fmt(end.y)}"/>\n  <Cell N="ObjType" V="2"/>\n  <Cell N="LineColor" V="${esc(edge.style.stroke ?? "#666666")}"/>\n  <Cell N="LineWeight" V="${fmt(inch(edge.style.strokeWidth ?? 1))}"/>\n  <Cell N="LinePattern" V="${edge.style.strokeDash ? "2" : "1"}"/>\n  <Cell N="BeginArrow" V="${visioArrow(edge.srcArrow)}"/>\n  <Cell N="EndArrow" V="${visioArrow(edge.dstArrow)}"/>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="1"/><Cell N="NoLine" V="0"/>\n${connectorGeometry(route, page)}\n  </Section>\n  <Text>${esc(edge.label ?? "")}</Text>\n</Shape>`;
 }
 
-function archStyledEdge(model: DiagramModel, edge: DiagramEdge): DiagramEdge {
-  const page = architectureExportView(model).platform;
+function archStyledEdge(view: ArchitectureExportView, edge: DiagramEdge): DiagramEdge {
+  const page = view.platform;
   const style = connectorStyle(page, edge.meaning ?? "request");
   return {
     ...edge,
@@ -174,8 +173,8 @@ function archStyledEdge(model: DiagramModel, edge: DiagramEdge): DiagramEdge {
   };
 }
 
-function boxShapeXml(id: number, name: string, box: { x: number; y: number; w: number; h: number }, page: PageSpace, text: string, fill: string, stroke: string, dashed = false): string {
-  const node: DiagramNode = { id: name, parent: null, label: text, shape: "rectangle", box, style: { fill, stroke, strokeDash: dashed ? 6 : undefined, borderRadius: 4, fontColor: stroke, bold: true, fontSize: 10 }, container: false };
+function boxShapeXml(id: number, name: string, box: { x: number; y: number; w: number; h: number }, page: PageSpace, text: string, fill: string, stroke: string, dashed = false, fontColor = stroke): string {
+  const node: DiagramNode = { id: name, parent: null, label: text, shape: "rectangle", box, style: { fill, stroke, strokeDash: dashed ? 6 : undefined, borderRadius: 4, fontColor, bold: true, fontSize: 10 }, container: false };
   return shapeXml(node, id, page, false);
 }
 
@@ -246,9 +245,10 @@ async function modelToArchitectureVsdxBuffer(model: DiagramModel): Promise<Buffe
   const pageW = Math.max(inch(bounds.w) + PAGE_MARGIN_IN * 2, 1);
   const pageH = Math.max(inch(bounds.h) + PAGE_MARGIN_IN * 2, 1);
   const page = { minX: bounds.x, minY: bounds.y, pageH };
-  const byId = new Map(model.nodes.map((node) => [node.id, archStyledNode(model, node)]));
+  const view = architectureExportView(model);
+  const byId = new Map(model.nodes.map((node) => [node.id, archStyledNode(view, model, node)]));
   const nodeId = new Map(model.nodes.map((node, index) => [node.id, shapeId(index)]));
-  const shapes = model.nodes.map((node, index) => shapeXml(archStyledNode(model, node), shapeId(index), page, false));
+  const shapes = model.nodes.map((node, index) => shapeXml(byId.get(node.id) ?? archStyledNode(view, model, node), shapeId(index), page, false));
   let nextShapeId = model.nodes.length + 1;
   const iconShapes = model.nodes.flatMap((node) => {
     const styled = byId.get(node.id) ?? node;
@@ -271,16 +271,16 @@ async function modelToArchitectureVsdxBuffer(model: DiagramModel): Promise<Buffe
     const source = byId.get(edge.from);
     const target = byId.get(edge.to);
     if (!source || !target) return [];
-    return [connectorXml(archStyledEdge(model, edge), nextShapeId + index, page, source, target)];
+    return [connectorXml(archStyledEdge(view, edge), nextShapeId + index, page, source, target)];
   });
   nextShapeId += visibleEdges.length;
   const badgeShapes = visibleEdges.flatMap((edge) =>
     (edge.badges ?? []).map((badge) => {
-      const at = badge.at ?? edge.route[0] ?? { x: 0, y: 0 };
-      const pagePlatform = architectureExportView(model).platform;
+      const at = badge.at ?? badgeCenter(edge);
+      const pagePlatform = view.platform;
       const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
       const style = badgeStyle(pagePlatform, sequenceIndex);
-      return boxShapeXml(nextShapeId++, `badge.${edge.id}.${badge.number}`, { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, page, stepLabel(sequenceIndex, badge.number), style.fill, style.fill);
+      return boxShapeXml(nextShapeId++, `badge.${edge.id}.${badge.number}`, { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, page, stepLabel(sequenceIndex, badge.number), style.fill, style.fill, false, style.text);
     })
   );
   const connectRows = visibleEdges.flatMap((edge, index) => {

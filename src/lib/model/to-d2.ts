@@ -191,7 +191,7 @@ function chooseOperator(srcArrow: Arrowhead, dstArrow: Arrowhead): string {
 }
 
 function archLabel(node: DiagramNode): string {
-  return [node.label, node.arch?.facts ?? node.arch?.detail].filter(Boolean).join("\\n");
+  return [node.label, node.arch?.facts ?? node.arch?.detail].filter(Boolean).join("\n");
 }
 
 function modelToArchitectureD2(model: DiagramModel): string {

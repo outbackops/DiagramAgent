@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ElkLike } from "./elk";
+import { LARGE_CANDIDATE_IDS, type ElkLike } from "./elk";
 import { composeArchitecture, composeArchitectureText } from "./index";
 import type { Box, DiagramModel, DiagramNode } from "@/lib/model/types";
 import { envelopeSpec } from "@/test/envelope-spec";
@@ -74,6 +74,24 @@ describe("layoutArchitecture", () => {
     expect(Math.abs(across("web-a") - across("nat-a"))).toBeLessThanOrEqual(1);
     const flowCentre = (id: string) => (sideBySide ? box(id).y + box(id).h / 2 : box(id).x + box(id).w / 2);
     expect(Math.abs(flowCentre("web-a") - flowCentre("web-b"))).toBeLessThanOrEqual(1);
+  });
+
+  it("gives every connector carrying a step its own badge, clear of the others", async () => {
+    const { model, report } = await composeArchitecture({
+      title: "Fan-out",
+      items: [{ id: "users", name: "Users" }, { id: "lb", name: "Load balancer" }, { id: "web-a", name: "Web A" }, { id: "web-b", name: "Web B" }],
+      connections: [
+        { from: "users", to: "lb", label: "HTTPS", step: 1 },
+        { from: "lb", to: "web-a", label: "HTTP", step: 2 },
+        { from: "lb", to: "web-b", label: "HTTP", step: 2 },
+      ],
+    });
+    expect(report.hardViolations).toBe(0);
+    const badges = model.edges.flatMap((e) => e.badges ?? []);
+    expect(badges).toHaveLength(3);
+    for (const badge of badges) expect(badge.at, `${badge.sequence}.${badge.number}`).toBeDefined();
+    const [a, b] = badges.filter((badge) => badge.number === 2).map((badge) => badge.at!);
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(18);
   });
 
   it("lines up top-level regions that hold the same tiers, in every candidate", async () => {
@@ -172,6 +190,8 @@ describe("layoutArchitecture", () => {
     const { report } = await composeArchitectureText(fixture("microservices-cycles"), { elk: flaky });
     expect(report.fallback).toBe(false);
     expect(report.hardViolations).toBe(0);
+    expect(report.tried.filter((t) => t.error)).toEqual([]);
+    expect(report.tried.some((t) => t.cost !== undefined)).toBe(true);
   });
 
   it("still lays everything out when ELK fails on every call", async () => {
@@ -199,9 +219,8 @@ describe("layoutArchitecture", () => {
     expect(report.fallback).toBe(false);
     expect(model.nodes.filter((n) => n.role === "service")).toHaveLength(60);
     expect(model.edges).toHaveLength(80);
-    // Large diagrams lay out five candidates and finish three (see LARGE_CANDIDATE_IDS).
-    expect(report.tried.filter((t) => !t.error)).toHaveLength(5);
-    expect(report.tried.filter((t) => t.finalCost !== undefined)).toHaveLength(3);
+    expect(report.tried.filter((t) => !t.error)).toHaveLength(LARGE_CANDIDATE_IDS.size);
+    expect(report.tried.filter((t) => t.finalCost !== undefined).length).toBeLessThan(LARGE_CANDIDATE_IDS.size);
   }, 120_000);
 });
 

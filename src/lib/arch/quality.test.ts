@@ -131,10 +131,38 @@ describe("faithfulness", () => {
       connections: [],
       overlays: [],
     });
+
     const report = faithfulness(spec, "Draw a web app in a virtual network.", {});
     expect(report.pass).toBe(false);
     expect(report.ungroundedFacts).toEqual(expect.arrayContaining(["P1v3", "10.9.0.0/16"]));
     expect(extractFacts(spec).map((fact) => fact.text)).toEqual(expect.arrayContaining(["P1v3", "10.9.0.0/16"]));
+  });
+
+  it("does not ground non-default protocol ports by substring", () => {
+    const spec8443 = baseSpec({ connections: [{ from: "api", to: "db", meaning: "request", label: "HTTPS 8443" }] });
+    const report8443 = faithfulness(spec8443, "Use HTTPS between API and database.", {});
+    expect(report8443.ungroundedFacts).toContain("HTTPS 8443");
+
+    const spec443 = baseSpec({ connections: [{ from: "api", to: "db", meaning: "request", label: "HTTPS 443" }] });
+    const report443 = faithfulness(spec443, "Use HTTPS between API and database.", {});
+    expect(report443.ungroundedFacts).not.toContain("HTTPS 443");
+
+    // A bare port is grounded only when it is the default port of a protocol the request names.
+    const bare = (port: string) => baseSpec({ connections: [{ from: "api", to: "db", meaning: "request", label: `port ${port}` }] });
+    expect(faithfulness(bare("443"), "Use HTTPS between API and database.", {}).ungroundedFacts).not.toContain("port 443");
+    expect(faithfulness(bare("8443"), "Use HTTPS between API and database.", {}).ungroundedFacts).toContain("port 8443");
+  });
+
+  it("extracts counts without matching words ending in x", () => {
+    const facts = extractFacts(baseSpec({ items: [{ type: "component", id: "web", name: "Web", detail: "nginx 1.25\nAutoscale max 5\nVM × 3" }], connections: [], overlays: [] })).map((fact) => fact.text);
+    expect(facts).not.toContain("x 1");
+    expect(facts).not.toContain("x 5");
+    expect(facts).toContain("× 3");
+  });
+
+  it("extracts .NET versions at the start of text or after a space", () => {
+    const facts = extractFacts(baseSpec({ items: [{ type: "component", id: "api", name: "API", detail: ".NET 8\nRuns .NET 8.0" }], connections: [], overlays: [] })).map((fact) => fact.text);
+    expect(facts).toEqual(expect.arrayContaining([".NET 8", ".NET 8.0"]));
   });
 
   it("accepts aliases such as Azure AD for Microsoft Entra ID", () => {

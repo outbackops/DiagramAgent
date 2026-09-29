@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { PAGE } from "@/lib/compose/theme";
 import { composeText } from "@/lib/compose";
-import { composeArchitectureText } from "@/lib/arch";
+import { composeArchitecture, composeArchitectureText } from "@/lib/arch";
 import { modelToExcalidraw } from "./to-excalidraw";
 import type { DiagramModel } from "./types";
 
@@ -21,6 +21,8 @@ interface ExcalidrawElement {
   backgroundColor: string;
   strokeColor: string;
   boundElements: Array<{ type: "text" | "arrow"; id: string }> | null;
+  startArrowhead?: "arrow" | null;
+  endArrowhead?: "arrow" | null;
   startBinding?: { elementId: string };
   endBinding?: { elementId: string };
   fileId?: string;
@@ -125,6 +127,7 @@ describe("modelToExcalidraw", () => {
       expect(file.files[image.fileId!]?.dataURL).toMatch(/^data:image\/svg\+xml,/);
     }
     const hidden = model.edges.find((edge) => edge.hidden);
+    expect(hidden).toBeDefined();
     if (hidden) {
       const source = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.from)!);
       const target = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.to)!);
@@ -132,4 +135,17 @@ describe("modelToExcalidraw", () => {
       expect(arrows.some((arrow) => arrow.startBinding?.elementId === source?.id && arrow.endBinding?.elementId === target?.id)).toBe(false);
     }
   }, 120000);
+
+  it("keeps start arrowheads for architecture peering links", async () => {
+    const { model } = await composeArchitecture({
+      title: "Peering",
+      items: [{ id: "a", name: "VNet A" }, { id: "b", name: "VNet B" }],
+      connections: [{ from: "a", to: "b", meaning: "peering", label: "VNet peering" }],
+    });
+    const file = parseExcalidraw(model);
+    const arrow = file.elements.find((element) => element.type === "arrow");
+    expect(arrow).toBeDefined();
+    expect(arrow!.startArrowhead).toBe("arrow");
+    expect(arrow!.endArrowhead).toBe("arrow");
+  });
 });

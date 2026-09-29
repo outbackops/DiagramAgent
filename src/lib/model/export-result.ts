@@ -1,6 +1,6 @@
 import { allItems, isBoundary, type BoundaryKind, type NBoundary, type NComponent, type NItem, type NormalizedArchSpec, type Platform } from "@/lib/arch/spec";
 import { boundaryPlatform, inferPlatform, stepLabel } from "@/lib/arch/styles";
-import type { DiagramEdge, DiagramModel, DiagramNode, EdgeBadge } from "./types";
+import type { DiagramEdge, DiagramModel, DiagramNode, EdgeBadge, Point } from "./types";
 
 export interface ExportResult<T = string> {
   content: T;
@@ -24,7 +24,9 @@ export function architectureExportView(model: DiagramModel): ArchitectureExportV
   const children = new Map<string | null, DiagramNode[]>();
   for (const node of model.nodes) {
     if (node.generated) continue;
-    children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+    const siblings = children.get(node.parent);
+    if (siblings) siblings.push(node);
+    else children.set(node.parent, [node]);
   }
   const iconKeyOf = (url: string | undefined) => url?.match(/^\/icons\/([a-z0-9-]+)\.svg$/)?.[1];
   const toItem = (node: DiagramNode): NItem =>
@@ -49,6 +51,19 @@ export function badgeMarkText(model: DiagramModel, badge: EdgeBadge): string {
 export function stepPrefix(edge: DiagramEdge, model: DiagramModel): string {
   if (!edge.badges?.length) return "";
   return edge.badges.map((badge) => `(${badgeMarkText(model, badge)})`).join(" ");
+}
+
+export function badgeCenter(edge: DiagramEdge): Point {
+  if (edge.route.length === 0) return { x: 0, y: 0 };
+  let left = 24;
+  for (let i = 0; i + 1 < edge.route.length; i++) {
+    const from = edge.route[i];
+    const to = edge.route[i + 1];
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    if (left <= length && length > 0) return { x: from.x + ((to.x - from.x) / length) * left, y: from.y + ((to.y - from.y) / length) * left };
+    left -= length;
+  }
+  return edge.route[edge.route.length - 1];
 }
 
 export function architectureTextWarnings(format: "D2" | "Mermaid"): string[] {

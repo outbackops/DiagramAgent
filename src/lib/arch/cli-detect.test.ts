@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseSpecText } from "@/lib/compose/normalize";
 import { detectSpecKind, parseKindFlag } from "./cli-detect";
 import { normalizeArchSpecText } from "./normalize";
+import { undisclosedFacts } from "./quality";
 
 const fixtureRoot = path.join(process.cwd(), "src", "test", "fixtures");
 
@@ -42,6 +43,10 @@ describe("CLI spec kind detection", () => {
     const guide = readFileSync(path.join(process.cwd(), "docs", "architecture-guide.md"), "utf8");
     const examples = [...guide.matchAll(/```json\r?\n([\s\S]*?)```/g)].map((match) => match[1]);
     expect(examples.length).toBeGreaterThan(0);
-    for (const example of examples) expect(normalizeArchSpecText(example).warnings).toEqual([]);
+    for (const example of examples) {
+      const { spec, warnings } = normalizeArchSpecText(example);
+      expect(warnings).toEqual([]);
+      expect(undisclosedFacts(spec, [])).toEqual([]);
+    }
   });
 });

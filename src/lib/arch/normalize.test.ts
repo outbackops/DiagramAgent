@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SpecError } from "@/lib/compose/spec";
 import { isArchSpecShape, normalizeArchSpec, normalizeArchSpecText } from "./normalize";
-import { allItems, isBoundary, PROPOSED_PREFIX, type NBoundary, type NComponent } from "./spec";
+import { allItems, ARCH_LIMITS, isBoundary, PROPOSED_PREFIX, type NBoundary, type NComponent } from "./spec";
 
 const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "architecture");
 const fixture = (name: string) => readFileSync(path.join(fixtureDir, `${name}.json`), "utf8");
@@ -91,6 +91,25 @@ describe("normalizeArchSpec", () => {
     expect(spec.connections.map((c) => c.meaning)).toEqual(["request", "async", "request"]);
     expect(warnings).toContain('Unknown boundary kind "blob of things"; drew it as a generic group');
     expect(warnings).toContain('Unknown connection meaning "telepathy"; drew it as a request');
+  });
+
+  it("ignores prototype property names in alias and icon lookups", () => {
+    for (const value of ["constructor", "__proto__", "toString"]) {
+      const { spec, warnings } = normalizeArchSpec({
+        title: `Poison ${value}`,
+        platform: value,
+        view: value,
+        items: [{ type: "group", id: "g", kind: value, name: "Group", items: [{ id: "c", name: "Component", icon: value }, { id: "c2", name: "Other" }] }],
+        connections: [{ from: "c", to: "c2", meaning: value }],
+      });
+      const items = allItems(spec.items);
+      expect(spec.platform).toBeUndefined();
+      expect(spec.view).toBeUndefined();
+      expect((byId(items, "g") as NBoundary).kind).toBe("group");
+      expect(typeof (byId(items, "c") as NComponent).icon).not.toBe("function");
+      expect(spec.connections.every((connection) => connection.meaning === "request")).toBe(true);
+      expect(warnings.length).toBeGreaterThan(0);
+    }
   });
 
   it("gives duplicate names unique ids and warns about ambiguous name references", () => {
@@ -209,6 +228,28 @@ describe("normalizeArchSpec", () => {
     expect(isArchSpecShape({ title: "Poster", columns: [{ title: "A", items: [] }] })).toBe(false);
     expect(isArchSpecShape({ title: "Poster", items: [{ type: "grid", items: [] }], connectors: [] })).toBe(false);
     expect(isArchSpecShape({ title: "Arch", items: [{ id: "a", name: "A" }], connections: [] })).toBe(true);
+    // A minimal spec that follows the schema: named components, or a field only Architecture specs have.
+    expect(isArchSpecShape({ title: "Minimal", items: [{ id: "a", name: "A" }, { id: "b", name: "B" }] })).toBe(true);
+    expect(isArchSpecShape({ title: "Assumed", items: [{ id: "a", title: "A" }], assumptions: ["x"] })).toBe(true);
+    expect(isArchSpecShape({ title: "Cards", items: [{ title: "A" }, { title: "B" }] })).toBe(false);
+  });
+
+  it("drops step numbers the diagram model can't hold and trims long sequence and overlay ids", () => {
+    const long = "a".repeat(120);
+    const { spec, warnings } = normalizeArchSpec({
+      title: "Limits",
+      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }],
+      sequences: [{ id: long, name: "Flow", steps: ["one"] }],
+      overlays: [{ id: long, name: "Group", members: ["a", "b"] }],
+      connections: [{ from: "a", to: "b", step: 150 }, { from: "b", to: "c", step: { sequence: long, number: 1 } }],
+    });
+    expect(warnings).toContain("Dropped step 150; steps are numbered 1 to 99");
+    expect(spec.connections[0].step).toBeUndefined();
+    expect(spec.sequences[0].id.length).toBeLessThanOrEqual(ARCH_LIMITS.idChars);
+    expect(spec.overlays[0].id.length).toBeLessThanOrEqual(ARCH_LIMITS.idChars);
+    // A step naming the long id still finds its (trimmed) sequence.
+    expect(spec.connections[1].step).toEqual({ sequence: spec.sequences[0].id, number: 1 });
+    expect(warnings.some((w) => w.startsWith("Unknown step sequence"))).toBe(false);
   });
 });
 

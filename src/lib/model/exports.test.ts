@@ -456,8 +456,10 @@ describe("model exports", () => {
   it("exports architecture draw.io with icons, styled boundaries, step badges, overlays, and no hidden edges", async () => {
     const model = await architectureFixtureModel();
     const hidden = model.edges.find((edge) => edge.hidden);
+    expect(hidden).toBeDefined();
     const xml = await modelToDrawio(model);
     const cells = parseCells(xml);
+    const visibleEdges = model.edges.filter((edge) => !edge.hidden);
 
     expect(xml).toContain("shape=image");
     expect(xml).toContain("image=data:image/svg+xml,");
@@ -466,11 +468,21 @@ describe("model exports", () => {
     expect(xml).toContain("dashed=1");
     expect(xml).toContain("Gateway subnet");
     expect(cells.some((cell) => cell.value === "1" && cell.w === 18 && cell.h === 18)).toBe(true);
-    if (hidden) expect(xml).not.toContain(hidden.id);
+    expect(cells.filter((cell) => cell.source !== undefined && cell.target !== undefined)).toHaveLength(visibleEdges.length);
+    expect(xml).not.toContain(hidden!.id);
 
     const aws = await architectureFixtureModel("aws-multi-az-three-tier.json");
     const overlayXml = await modelToDrawio(aws);
     expect(overlayXml).toMatch(/Auto Scaling|ASG|overlay/);
+    const overlayCells = parseCells(overlayXml).filter((cell) => cell.id.startsWith("overlay-"));
+    expect(overlayCells.length).toBeGreaterThan(0);
+    expect(overlayCells.some((cell) => cell.style.includes("strokeColor=#ED7100"))).toBe(true);
+
+    const vsdx = await JSZip.loadAsync(await modelToVsdx(model));
+    const page = await vsdx.file("visio/pages/page1.xml")!.async("string");
+    const badgeShape = page.match(/<Shape ID="\d+" NameU="badge\.[^"]+"[\s\S]*?<\/Shape>/)?.[0] ?? "";
+    expect(badgeShape).toContain('<Cell N="FillForegnd" V="#107C10"/>');
+    expect(badgeShape).toContain('<Cell N="Color" V="#FFFFFF"/>');
   }, 120000);
 
   it("exports architecture Mermaid and D2 topology with grouped boundaries, step labels, hidden logical links, and one warning", async () => {
@@ -484,6 +496,7 @@ describe("model exports", () => {
     expect(mermaid.warnings).toHaveLength(1);
     expect(mermaid.warnings[0]).toMatch(/drops embedded icons/);
     expect(d2.content).toContain("Spoke virtual network");
+    expect(d2.content).toContain(JSON.stringify("Spoke virtual network\n10.20.0.0/16"));
     expect(d2.content).toMatch(/\(1\).*HTTPS 443/);
     expect(d2.warnings).toHaveLength(1);
     if (hidden) {

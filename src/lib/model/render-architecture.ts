@@ -4,6 +4,8 @@ import { overlayGeometries } from "@/lib/arch/overlays";
 import { assumptionsBlock, legendBlock, overlayTag, titleBlock, workflowBlock, type PageBlock } from "@/lib/arch/page";
 import { allItems, isBoundary, type BoundaryKind, type Meaning, type NBoundary, type NComponent, type NItem, type NormalizedArchSpec, type Platform } from "@/lib/arch/spec";
 import { badgeStyle, boundaryPlatform, boundaryStyle, connectorStyle, inferPlatform, stepLabel, stylePack, type BoundaryStyle, type ConnectorStyle, type StylePack } from "@/lib/arch/styles";
+import { badgeCenter } from "./export-result";
+import { safeIconHref } from "./icon-href";
 import { ARCH_SPACE as S, ARCH_TYPE as T } from "@/lib/arch/theme";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 import type { RenderModelSvgOptions } from "./render-svg";
@@ -179,7 +181,8 @@ function renderComponent(node: DiagramNode, pack: StylePack): string {
   const iconY = box.y + S.nodePadTop;
   // A service whose icon is only its provider's logo gets a labelled tile, so services stay distinguishable.
   const iconKey = node.arch?.iconKey ?? node.icon?.match(/^\/icons\/([a-z0-9-]+)\.svg$/)?.[1];
-  if (node.icon && !isPlaceholderIcon(iconKey)) parts.push(`<image href="${attr(node.icon)}" x="${num(cx - S.icon / 2)}" y="${num(iconY)}" width="${S.icon}" height="${S.icon}" preserveAspectRatio="xMidYMid meet"/>`);
+  const href = safeIconHref(node.icon);
+  if (href && !isPlaceholderIcon(iconKey)) parts.push(`<image href="${attr(href)}" x="${num(cx - S.icon / 2)}" y="${num(iconY)}" width="${S.icon}" height="${S.icon}" preserveAspectRatio="xMidYMid meet"/>`);
   else parts.push(genericIcon(node.label, cx, iconY, pack));
   let y = iconY + S.icon + S.iconGap;
   for (const line of geom.lines) {
@@ -239,7 +242,7 @@ function renderBadges(edge: DiagramEdge, model: DiagramModel, page: Platform): s
   const sequences = model.arch?.sequences ?? [];
   return edge.badges
     .map((badge) => {
-      const at = badge.at ?? along(edge.route, 24);
+      const at = badge.at ?? badgeCenter(edge);
       const index = Math.max(0, sequences.findIndex((s) => s.id === badge.sequence));
       return badgeMark(at, stepLabel(index, badge.number), badgeStyle(page, index));
     })
@@ -319,16 +322,6 @@ function midpoint(points: Point[]): Point | undefined {
   return mid;
 }
 
-function along(points: Point[], distance: number): Point {
-  let left = distance;
-  for (let i = 0; i + 1 < points.length; i++) {
-    const len = dist(points[i], points[i + 1]);
-    if (left <= len && len > 0) return towards(points[i], points[i + 1], left);
-    left -= len;
-  }
-  return points[points.length - 1];
-}
-
 function towards(from: Point, to: Point, d: number): Point {
   const len = dist(from, to) || 1;
   return { x: from.x + ((to.x - from.x) / len) * d, y: from.y + ((to.y - from.y) / len) * d };
@@ -359,4 +352,3 @@ function esc(text: string): string {
 function attr(text: string): string {
   return esc(text).replace(/"/g, "&quot;");
 }
-

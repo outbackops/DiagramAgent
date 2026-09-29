@@ -57,13 +57,18 @@ function packLines(facts: readonly string[]): string[] {
 
 /**
  * A source as grounding. The spec being edited carries the last run's disclosure lines: the facts
- * they list were proposals, so they ground nothing there (the user's own requests still can).
+ * they list were proposals, so they ground nothing there (the user's own requests still can). Each
+ * listed fact is removed only as a whole token, so a hand edit such as "13 instances" survives "3 instances".
  */
 function withoutProposals(source: string): string {
   if (!source.includes(PROPOSED_PREFIX)) return source;
-  const line = new RegExp(`${PROPOSED_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^"\\n]*)`, "g");
+  const line = new RegExp(`${escapeRegExp(PROPOSED_PREFIX)}([^"\\n]*)`, "g");
   const listed = [...source.matchAll(line)].flatMap((m) => m[1].split(",").map((fact) => fact.trim()).filter(Boolean));
   let out = source.replace(line, "");
-  for (const fact of listed) out = out.split(fact).join(" ");
+  for (const fact of listed) out = out.replace(new RegExp(`(?<![A-Za-z0-9.])${escapeRegExp(fact)}(?![A-Za-z0-9])`, "g"), " ");
   return out;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

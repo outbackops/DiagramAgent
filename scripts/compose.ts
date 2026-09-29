@@ -14,7 +14,7 @@ import { inlineVendoredIcons, svgToPng } from "@/lib/svg-raster";
 
 /**
  * Render a composition spec to SVG or PNG, for people and for other agents:
- *   npm run compose -- spec.json -o out.png [--kind architecture|poster] [--width 1600] [--json] [--strict]
+ *   npm run compose -- spec.json -o out.png [--kind architecture|poster] [--width 1600 (poster only)] [--json] [--strict]
  * Exit codes: 0 ok · 1 unusable spec or a critical quality failure ·
  * 2 (--strict only) the spec needed repairs or a quality check failed.
  */
@@ -35,7 +35,7 @@ Options:
   --stdin          Read the spec from stdin (also: - as the input path)
   -o, --out FILE   Output path; the extension picks .svg or .png. Default: the input path with .svg
   --kind KIND      Override spec detection. Accepts architecture, arch, poster, or composition
-  --width N        Lay the page out at exactly N px wide (raised to the minimum the content needs)
+  --width N        Poster only: lay the page out at exactly N px wide (raised to the minimum the content needs)
   --json           Print a machine-readable report (page, warnings, layout, quality) on stdout
   --strict         Exit 2 when the spec needed repairs or any quality check failed
   --quiet          Print nothing on success
