@@ -257,7 +257,14 @@ flowchart TB
 
 ### Phase 0: Gate
 
-- [ ] **U0: Falsification spike and D2 comparison baseline**
+- [x] **U0: Falsification spike and D2 comparison baseline**
+
+**Outcome (see `docs/spikes/2026-09-29-architecture-layout-spike.md`):** go, with required changes.
+- Hard constraints held in 7/7, plus 2/2 reserved perturbations.
+- Aspect ratio was within 1.2–2.2 for 6/7; D2 managed 1/7.
+- The per-topology crossing and loop ceiling failed on the long-chain and dense cyclic topologies. The cause was systematic (connectors routed after layout), not overfitting.
+- U3 carries five required changes: crossing-aware routing after layout, a flow-consistency score, performance work, a fallback that doesn't use ELK, and labels that avoid boundary borders.
+- The crossing target is revised on the record.
 
 **Goal:** Prove or falsify the compound-layout approach on materially different topologies before building the grammar. Produce the evidence for the D2 comparison.
 
@@ -408,6 +415,24 @@ flowchart TB
 - **Terminal fallback that doesn't use ELK:** recursive boundary packing plus `routeEdge` routes, used when every ELK attempt fails or the library can't load.
 
 **Execution note:** Start from the U0 topologies as failing fixture tests, then make them pass.
+
+**Spike-driven requirements (from U0):**
+- **Candidates.**
+  - ELK direction × placement.
+  - ELK wrapping (MULTI_EDGE only; SINGLE_EDGE crashed).
+  - Hybrid block arrangement: each top-level block is laid out with its internal connectors, then ELK places the blocks, then the connectors between blocks are routed.
+  - Variants with ELK's default cycle breaking.
+  - Candidates are pruned by graph shape.
+- **Polish passes, from the spike:**
+  - P1: pack edge-free subtrees in author order
+  - P2: a bottom band for top-level shared services, with monitoring and management links implied
+  - P3: route back-edges and edges into an ancestor after layout
+  - P4: route after layout from facing sides with a capped search
+  - P5: parallel lanes for sibling groups of one kind fed by a common source
+  - P6: place labels on free spots along their own route, avoiding boundary borders too
+- **Scoring:** hard constraints, then a steep aspect penalty outside 1.3–2.0, crossings, loops, bends, length, overlay cleanliness, and a flow-consistency penalty for edges pointing against the reading direction.
+- **Crossing-aware routing after layout.** Existing routes are soft obstacles, and the channels between blocks are preferred. Candidates are scored on ELK geometry first; routing and label placement run once, for the winner.
+- **Revised crossing target** for fixtures: at most 3 for infrastructure topologies, otherwise no more than the D2 baseline; no long loops.
 
 **Technical design:** *(directional)* the candidate search mirrors the width search in `src/lib/compose/layout.ts`, scoring a small set of complete layouts rather than tuning one.
 
