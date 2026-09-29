@@ -157,6 +157,27 @@ describe("faithfulness", () => {
     expect(faithfulness(spec, "Connect A to B over HTTPS.", {}).ungroundedFacts).toEqual([]);
   });
 
+  it("grounds subnets inside a declared address range, ports stated in an assumption, and a protocol's own default port", () => {
+    const subnet = (facts: string): NormalizedArchSpec["items"] => [
+      { type: "boundary", id: "vnet", kind: "vnet", name: "VNet", facts: "10.30.0.0/16", items: [{ type: "boundary", id: "web", kind: "subnet", name: "Web", facts, items: [{ type: "component", id: "app", name: "App" }] }] },
+      { type: "component", id: "db", name: "Database" },
+    ];
+    const spec = baseSpec({
+      items: subnet("10.30.1.0/24"),
+      connections: [{ from: "app", to: "db", meaning: "request", label: "SQL 3306" }, { from: "db", to: "app", meaning: "request", label: "HTTPS 443" }],
+      overlays: [],
+      assumptions: ["VNet address space 10.30.0.0/16 with /24 subnets", "MySQL on port 3306"],
+    });
+    expect(faithfulness(spec, "Draw an app and its database.", {}).ungroundedFacts).toEqual([]);
+    // A subnet outside every declared range is still an invented fact.
+    expect(faithfulness({ ...spec, items: subnet("10.40.1.0/24") }, "Draw an app and its database.", {}).ungroundedFacts).toEqual(["10.40.1.0/24"]);
+  });
+
+  it("counts a CIDR once, not its address again", () => {
+    expect(extractFacts(baseSpec()).map((fact) => fact.text)).toContain("10.0.0.0/24");
+    expect(extractFacts(baseSpec()).map((fact) => fact.text)).not.toContain("10.0.0.0");
+  });
+
   it("matches required overlays", () => {
     const report = faithfulness(baseSpec({ assumptions: ["Java 21, MySQL 8.0 and 10.0.0.0/24 are supplied by the platform baseline."] }), "Use Entra ID with API, database and HTTPS.", { overlays: [["auto scaling group", "scale set"]] });
     expect(report.missingOverlays).toEqual([]);

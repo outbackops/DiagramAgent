@@ -419,7 +419,8 @@ function extractFactsFromText(text: string | undefined, where: string, out: Arra
   if (!text) return;
   const patterns: RegExp[] = [
     /\b(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}\b/g,
-    /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+    // A bare address, not the address part of a CIDR already matched above.
+    /\b(?:\d{1,3}\.){3}\d{1,3}\b(?!\/\d)/g,
     /\b(?:TCP|UDP|HTTPS?|TDS|SQL|PostgreSQL|MySQL|Redis|AMQP|SSH|RDP)\s*:?[\s-]*\d{2,5}\b/gi,
     /(?:^|\s):\d{2,5}\b/g,
     /\bport\s+\d{2,5}\b/gi,
@@ -458,15 +459,59 @@ const IMPLIED_PORTS: Record<string, string[]> = {
   rdp: ["3389"],
 };
 
+function ipToInt(ip: string): number | null {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+  return parts.reduce((value, part) => value * 256 + part, 0);
+}
+
+/** An address or CIDR as an inclusive [first, last] range; null when it isn't one. */
+function addressRange(text: string): [number, number] | null {
+  const match = /^((?:\d{1,3}\.){3}\d{1,3})(?:\/(\d{1,2}))?$/.exec(text.trim());
+  const ip = match ? ipToInt(match[1]) : null;
+  const bits = match?.[2] === undefined ? 32 : Number(match[2]);
+  if (ip === null || bits > 32) return null;
+  const size = 2 ** (32 - bits);
+  const first = Math.floor(ip / size) * size;
+  return [first, first + size - 1];
+}
+
+function declaredRanges(texts: readonly string[]): Array<[number, number]> {
+  return texts.flatMap((text) => [...text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}\b/g)].map((m) => addressRange(m[0])).filter((r): r is [number, number] => r !== null));
+}
+
+/** A protocol-and-port or bare port fact ("SQL 3306", "port 8080", ":8080"). */
+function portFact(fact: string): { protocol?: string; port: string } | null {
+  const match = /^(?:([A-Za-z]+)\s*:?[\s-]*|port\s+|:)(\d{2,5})$/i.exec(fact.trim());
+  if (!match) return null;
+  const protocol = match[1]?.toLowerCase();
+  return { protocol: protocol === "port" ? undefined : protocol, port: match[2] };
+}
+
+/**
+ * Whether a concrete fact is backed by the request, a stated assumption or the case's allowed facts.
+ * Beyond a literal mention: an address or subnet inside a range the prompt or an assumption declares
+ * is grounded ("VPC 10.0.0.0/16 with /24 subnets" covers 10.0.1.0/24), a port is grounded when the
+ * number is stated there ("MySQL on port 3306" covers "SQL 3306"), and a protocol's own default port
+ * restates the protocol rather than adding a fact.
+ */
 function factGrounded(fact: string, prompt: string, allowedFacts: readonly string[] | undefined, assumptions: readonly string[]): boolean {
   const factNorm = normalize(fact);
-  const promptNorm = normalize(prompt);
-  const promptLoose = normalizeLoose(prompt);
-  if (promptNorm.includes(factNorm)) return true;
+  const sources = [prompt, ...assumptions];
+  if (sources.some((source) => normalize(source).includes(factNorm))) return true;
   if ((allowedFacts ?? []).some((allowed) => normalize(allowed).includes(factNorm) || factNorm.includes(normalize(allowed)))) return true;
-  if (assumptions.some((assumption) => normalize(assumption).includes(factNorm))) return true;
+
+  const range = addressRange(fact);
+  if (range && declaredRanges([...sources, ...(allowedFacts ?? [])]).some(([first, last]) => first <= range[0] && range[1] <= last)) return true;
+
+  const port = portFact(fact);
+  if (port) {
+    if (port.protocol && IMPLIED_PORTS[port.protocol]?.includes(port.port)) return true;
+    if (sources.some((source) => normalizeLoose(source).includes(` ${port.port} `))) return true;
+  }
+  const promptLoose = normalizeLoose(prompt);
   for (const [protocol, ports] of Object.entries(IMPLIED_PORTS)) {
-    if (promptLoose.includes(` ${protocol} `) && ports.some((port) => factNorm.includes(port))) return true;
+    if (promptLoose.includes(` ${protocol} `) && ports.some((p) => factNorm.includes(p))) return true;
   }
   return false;
 }

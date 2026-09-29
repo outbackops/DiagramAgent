@@ -124,7 +124,14 @@ npm run eval:diagrams     # live end-to-end eval against real Copilot models (se
   - renders byte-identically twice and passes model validation
   - round-trips through the spec derived from its model to the identical layout
 - **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` lays each out with the real D2 engine (no network), imports it into the model, and asserts quality score, no critical failures, that scoring the model matches scoring the compiled layout, keyword coverage (also in the D2 exported from the model), and that draw.io/Visio export works. `src/lib/model/d2-convert.test.ts` round-trips every fixture through D2 export and re-import with the same ids, groups, labels, styles and connections.
-- **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--format composition|d2` (default `composition`), `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures` (with `--format d2`; refreshes the D2 golden fixtures).
+- **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, judgments, faithfulness reports and a summary to `eval-output/` (git-ignored). Options:
+  - `--format architecture|composition|d2` (default `architecture`) and `--samples N` (the summary reports each case's mean and minimum; pass rates count samples)
+  - `--judge copilot:<model>@<effort>`: an independent judge that sees only the request and the image. Use another model family than the generator. A sample the judge can't score is marked *unreviewed* and left out of the averages.
+  - `--cases a,b`, and `--cases-file evals/held-out.json` for the held-out set (run it once, after tuning)
+  - `--model …`, `--reviewer …` (the generator's own reviewer, which drives refinement and is reported as a diagnostic only), `--refinements N`, `--concurrency N`, `--no-review`
+  - `--update-fixtures` (with `--format d2`; refreshes the D2 golden fixtures)
+
+  Architecture samples also get a structural faithfulness check: required components, boundaries and flows are present, nothing prohibited appears, and every concrete fact (address range, port, SKU, count, version) comes from the request or is listed as an assumption. A faithfulness failure fails the sample whatever the judge says. `npx tsx scripts/eval-paired-d2.ts --judge …` runs the paired Graph-versus-Architecture comparison and applies the pre-registered rule in [`src/lib/eval/paired.ts`](src/lib/eval/paired.ts).
 
 ### Latest eval: composed diagrams (2026-09-29)
 

@@ -723,7 +723,7 @@ flowchart TB
 
 ### Phase 3: Measurement and acceptance
 
-- [ ] **U11: Eval harness: independent judge, samples, faithfulness, held-out set, paired comparison**
+- [x] **U11: Eval harness: independent judge, samples, faithfulness, held-out set, paired comparison**
 
 **Goal:** Measurement that can falsify the approach (R23–R25).
 
