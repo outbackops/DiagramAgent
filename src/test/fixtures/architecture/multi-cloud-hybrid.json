@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "title": "Hybrid analytics across three clouds",
+  "subtitle": "On-premises ERP data lands in AWS, is processed in Google Cloud and served from Azure",
+  "view": "dataflow",
+  "items": [
+    { "type": "group", "kind": "onprem", "id": "dc", "name": "Head-office datacenter", "items": [
+      { "id": "erp", "name": "ERP database", "icon": "database", "detail": "Oracle 19c" },
+      { "id": "ad", "name": "Active Directory", "icon": "server" },
+      { "id": "vpn-dc", "name": "VPN appliance", "icon": "firewall" }
+    ] },
+    { "type": "group", "kind": "aws-cloud", "id": "aws", "name": "AWS", "items": [
+      { "type": "group", "kind": "vpc", "id": "aws-vpc", "name": "Ingest VPC", "facts": "10.40.0.0/16", "items": [
+        { "id": "dms", "name": "Replication task", "icon": "server", "detail": "Change data capture" },
+        { "id": "lambda", "name": "Normaliser", "icon": "aws-lambda" }
+      ] },
+      { "id": "s3", "name": "Landing bucket", "icon": "aws-s3", "detail": "Parquet" }
+    ] },
+    { "type": "group", "kind": "gcp-project", "id": "gcp", "name": "Analytics project", "items": [
+      { "id": "dataflow", "name": "Dataflow", "icon": "gcp-dataflow", "detail": "Streaming job" },
+      { "id": "bigquery", "name": "BigQuery", "icon": "gcp-bigquery", "detail": "Curated datasets" }
+    ] },
+    { "type": "group", "kind": "subscription", "id": "azure", "name": "Azure subscription", "items": [
+      { "id": "vpn-az", "name": "VPN gateway", "icon": "azure-vpn-gateway" },
+      { "id": "synapse", "name": "Synapse Analytics", "icon": "azure-synapse-analytics" },
+      { "id": "api", "name": "Reporting API", "icon": "azure-app-service" }
+    ] },
+    { "id": "analysts", "name": "Analysts", "icon": "users" }
+  ],
+  "connections": [
+    { "from": "erp", "to": "dms", "meaning": "replication", "label": "CDC over VPN" },
+    { "from": "vpn-dc", "to": "aws-vpc", "meaning": "vpn", "label": "Site-to-site VPN" },
+    { "from": "dms", "to": "lambda", "meaning": "async", "label": "Change events" },
+    { "from": "lambda", "to": "s3", "meaning": "request", "label": "Parquet" },
+    { "from": "s3", "to": "dataflow", "meaning": "request", "label": "Storage transfer" },
+    { "from": "dataflow", "to": "bigquery", "meaning": "request", "label": "Streaming inserts" },
+    { "from": "bigquery", "to": "synapse", "meaning": "replication", "label": "Nightly export" },
+    { "from": "synapse", "to": "api", "meaning": "request", "label": "SQL" },
+    { "from": "analysts", "to": "api", "meaning": "request", "label": "HTTPS" },
+    { "from": "vpn-dc", "to": "vpn-az", "meaning": "vpn", "label": "Site-to-site VPN" },
+    { "from": "api", "to": "ad", "meaning": "request", "label": "LDAP over VPN" }
+  ]
+}

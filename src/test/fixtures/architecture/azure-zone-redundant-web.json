@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "title": "Zone-redundant web app",
+  "subtitle": "Public web app on App Service behind Application Gateway; data services reached only through private endpoints",
+  "platform": "azure",
+  "view": "deployment",
+  "items": [
+    { "id": "users", "name": "Users", "icon": "users" },
+    { "type": "group", "kind": "region", "id": "region", "name": "Azure region", "facts": "West Europe", "items": [
+      { "type": "group", "kind": "vnet", "id": "vnet", "name": "Spoke virtual network", "facts": "10.20.0.0/16", "items": [
+        { "type": "group", "kind": "subnet", "id": "gw-subnet", "name": "Gateway subnet", "facts": "10.20.1.0/24", "items": [
+          { "id": "agw", "name": "Application Gateway", "icon": "azure-application-gateway", "detail": "WAF_v2 · zone redundant" }
+        ] },
+        { "type": "group", "kind": "subnet", "id": "int-subnet", "name": "Integration subnet", "facts": "10.20.2.0/24", "items": [
+          { "id": "vnet-int", "name": "VNet integration", "icon": "azure-virtual-networks" }
+        ] },
+        { "type": "group", "kind": "subnet", "id": "pe-subnet", "name": "Private endpoint subnet", "facts": "10.20.3.0/24", "items": [
+          { "id": "pe-app", "name": "App private endpoint", "icon": "azure-private-link" },
+          { "id": "pe-sql", "name": "SQL private endpoint", "icon": "azure-private-link" },
+          { "id": "pe-kv", "name": "Key Vault private endpoint", "icon": "azure-private-link" },
+          { "id": "pe-st", "name": "Storage private endpoint", "icon": "azure-private-link" }
+        ] }
+      ] },
+      { "type": "group", "kind": "group", "id": "plan", "name": "App Service plan", "facts": "P1v3 · 3 instances", "items": [
+        { "type": "group", "kind": "zone", "id": "zone-1", "name": "Zone 1", "items": [ { "id": "web-1", "name": "Web app", "icon": "azure-app-service" } ] },
+        { "type": "group", "kind": "zone", "id": "zone-2", "name": "Zone 2", "items": [ { "id": "web-2", "name": "Web app", "icon": "azure-app-service" } ] },
+        { "type": "group", "kind": "zone", "id": "zone-3", "name": "Zone 3", "items": [ { "id": "web-3", "name": "Web app", "icon": "azure-app-service" } ] }
+      ] },
+      { "id": "sql", "name": "Azure SQL Database", "icon": "azure-sql-database", "detail": "Business Critical · zone redundant" },
+      { "id": "kv", "name": "Key Vault", "icon": "azure-key-vault" },
+      { "id": "st", "name": "Storage account", "icon": "azure-storage", "detail": "ZRS" }
+    ] },
+    { "type": "group", "kind": "shared", "id": "ops", "name": "Identity and monitoring", "items": [
+      { "id": "entra", "name": "Microsoft Entra ID", "icon": "azure-active-directory" },
+      { "id": "insights", "name": "Application Insights", "icon": "azure-app-insights" },
+      { "id": "logs", "name": "Log Analytics", "icon": "azure-log-analytics" }
+    ] }
+  ],
+  "connections": [
+    { "from": "users", "to": "agw", "meaning": "request", "label": "HTTPS 443", "step": "in.1" },
+    { "from": "agw", "to": "pe-app", "meaning": "request", "step": "in.2" },
+    { "from": "pe-app", "to": "plan", "meaning": "private-link", "step": "in.3" },
+    { "from": "plan", "to": "vnet-int", "meaning": "request", "step": "out.1" },
+    { "from": "vnet-int", "to": "pe-sql", "meaning": "request", "label": "TDS 1433", "step": "out.2" },
+    { "from": "vnet-int", "to": "pe-kv", "meaning": "request", "label": "HTTPS" },
+    { "from": "vnet-int", "to": "pe-st", "meaning": "request", "label": "HTTPS" },
+    { "from": "pe-sql", "to": "sql", "meaning": "private-link" },
+    { "from": "pe-kv", "to": "kv", "meaning": "private-link" },
+    { "from": "pe-st", "to": "st", "meaning": "private-link" },
+    { "from": "plan", "to": "insights", "meaning": "monitoring" },
+    { "from": "agw", "to": "logs", "meaning": "monitoring" },
+    { "from": "sql", "to": "logs", "meaning": "monitoring" }
+  ],
+  "sequences": [
+    { "id": "in", "name": "Inbound", "steps": [
+      "Users reach the app over HTTPS; the gateway terminates TLS and applies WAF rules.",
+      "The gateway forwards to the app's private endpoint.",
+      "App Service handles the request in a healthy zone."
+    ] },
+    { "id": "out", "name": "Outbound", "steps": [
+      "The app leaves through VNet integration.",
+      "It reaches SQL, Key Vault and Storage only through their private endpoints."
+    ] }
+  ],
+  "assumptions": ["P1v3 and Business Critical are recommended tiers", "Address ranges are illustrative"]
+}
