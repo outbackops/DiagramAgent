@@ -84,6 +84,12 @@ export interface HybridCandidate {
   outer: LayoutOptions;
 }
 
+/**
+ * Large diagrams (see LARGE_DIAGRAM) try only the candidates that win on the acceptance fixtures;
+ * every ELK run costs a few hundred milliseconds at that size, and layout must stay near two seconds.
+ */
+export const LARGE_CANDIDATE_IDS: ReadonlySet<string> = new Set(["right-bk", "right-ns", "right-greedy", "blocks-right", "blocks-inner-down"]);
+
 /** Top-level blocks laid out separately, then placed as boxes; for diagrams with 3+ blocks. */
 export const HYBRID_CANDIDATES: HybridCandidate[] = [
   { id: "blocks-right", inner: "RIGHT", outer: { "elk.direction": "RIGHT" } },

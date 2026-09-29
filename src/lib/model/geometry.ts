@@ -51,8 +51,14 @@ export function segmentHitsBox(p1: Point, p2: Point, b: Box): boolean {
   const dy = p2.y - p1.y;
   let t0 = 0;
   let t1 = 1;
-  const clip = (p: number, q: number): boolean => {
-    if (p === 0) return q > 0;
+  // The four clip planes: left (p = -dx), right (p = dx), top (p = -dy), bottom (p = dy). No allocation: this runs in hot loops.
+  for (let i = 0; i < 4; i++) {
+    const p = i === 0 ? -dx : i === 1 ? dx : i === 2 ? -dy : dy;
+    const q = i === 0 ? p1.x - b.x : i === 1 ? right(b) - p1.x : i === 2 ? p1.y - b.y : bottom(b) - p1.y;
+    if (p === 0) {
+      if (!(q > 0)) return false;
+      continue;
+    }
     const t = q / p;
     if (p < 0) {
       if (t > t1) return false;
@@ -61,12 +67,7 @@ export function segmentHitsBox(p1: Point, p2: Point, b: Box): boolean {
       if (t < t0) return false;
       if (t < t1) t1 = t;
     }
-    return true;
-  };
-  if (!clip(-dx, p1.x - b.x)) return false;
-  if (!clip(dx, right(b) - p1.x)) return false;
-  if (!clip(-dy, p1.y - b.y)) return false;
-  if (!clip(dy, bottom(b) - p1.y)) return false;
+  }
   return t1 - t0 > 1e-9;
 }
 

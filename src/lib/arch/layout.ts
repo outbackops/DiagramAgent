@@ -3,7 +3,7 @@ import { measureText } from "@/lib/compose/text";
 import { edgeId } from "@/lib/model/query";
 import { routeEdgeAvoiding } from "@/lib/model/route";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeBadge, Point } from "@/lib/model/types";
-import { BASE_OPTIONS, FLAT_CANDIDATES, HYBRID_CANDIDATES, ORDERED_OPTIONS, loadElk, runElk, type ElkLike, type FlatCandidate, type HybridCandidate } from "./elk";
+import { BASE_OPTIONS, FLAT_CANDIDATES, HYBRID_CANDIDATES, LARGE_CANDIDATE_IDS, ORDERED_OPTIONS, loadElk, runElk, type ElkLike, type FlatCandidate, type HybridCandidate } from "./elk";
 import { boundaryMinWidth, componentGeom, headerHeight, pack, titleBox, type Packed } from "./measure";
 import { overlayBox } from "./overlays";
 import { pageSections, titleBlock, type PageSections } from "./page";
@@ -13,8 +13,9 @@ import { ARCH_SPACE as S, ARCH_TYPE as T } from "./theme";
 /**
  * The Architecture layout engine: a normalised spec in, an editable DiagramModel out.
  * ELK's layered compound layout (plus a hybrid that arranges top-level blocks) proposes
- * candidates; generic polish passes and a score pick the one a designer would draw. The
- * approach, its passes (P1–P6) and their evidence: docs/spikes/2026-09-29-architecture-layout-spike.md.
+ * candidates; generic polish passes and a score pick the one a designer would draw. Large
+ * diagrams try fewer candidates to stay near the two-second budget. The approach, its passes
+ * (P1–P8), their evidence and the performance gate: docs/spikes/2026-09-29-architecture-layout-spike.md.
  */
 
 export interface ArchLayoutOptions {
@@ -34,6 +35,9 @@ export interface ArchCandidateReport {
   aspect?: number;
   crossings?: number;
   error?: string;
+  /** ELK time, and the finishing passes' time for finalists. */
+  elkMs?: number;
+  finishMs?: number;
 }
 
 export interface ArchLayoutReport {
@@ -57,9 +61,14 @@ export interface ArchLayoutResult {
   report: ArchLayoutReport;
 }
 
+/** Above 60% of the v1 envelope (ARCH_LIMITS), fewer candidates are laid out and finished. */
+const LARGE_DIAGRAM = { components: 36, connections: 48 };
+
 export async function layoutArchitecture(spec: NormalizedArchSpec, options: ArchLayoutOptions = {}): Promise<ArchLayoutResult> {
   const started = performance.now();
   const plan = planSpec(spec);
+  const large = allItems(spec.items).filter((item) => !isBoundary(item)).length > LARGE_DIAGRAM.components || spec.connections.length > LARGE_DIAGRAM.connections;
+  const tryCandidate = (id: string) => !large || LARGE_CANDIDATE_IDS.has(id);
   const warnings: string[] = [];
   const tried: ArchCandidateReport[] = [];
   let elk: ElkLike | null = options.elk ?? null;
@@ -71,20 +80,22 @@ export async function layoutArchitecture(spec: NormalizedArchSpec, options: Arch
     }
   }
 
-  const candidates: Candidate[] = [];
+  const candidates: Array<Candidate & { elkMs: number }> = [];
   if (elk) {
-    const flat = options.quick ? FLAT_CANDIDATES.slice(0, 1) : FLAT_CANDIDATES;
+    const flat = options.quick ? FLAT_CANDIDATES.slice(0, 1) : FLAT_CANDIDATES.filter((c) => tryCandidate(c.id));
     for (const candidate of flat) {
+      const t = performance.now();
       try {
-        candidates.push({ id: candidate.id, geo: await flatLayout(plan, elk, candidate) });
+        candidates.push({ id: candidate.id, geo: await flatLayout(plan, elk, candidate), elkMs: Math.round(performance.now() - t) });
       } catch (err) {
         tried.push({ id: candidate.id, error: message(err) });
       }
     }
     if (!options.quick && plan.blocks.length >= 3) {
-      for (const candidate of HYBRID_CANDIDATES) {
+      for (const candidate of HYBRID_CANDIDATES.filter((c) => tryCandidate(c.id))) {
+        const t = performance.now();
         try {
-          candidates.push({ id: candidate.id, geo: await hybridLayout(plan, elk, candidate) });
+          candidates.push({ id: candidate.id, geo: await hybridLayout(plan, elk, candidate), elkMs: Math.round(performance.now() - t) });
         } catch (err) {
           tried.push({ id: candidate.id, error: message(err) });
         }
@@ -96,14 +107,16 @@ export async function layoutArchitecture(spec: NormalizedArchSpec, options: Arch
   if (candidates.length > 0) {
     // Score on ELK geometry, then finish (route, labels, badges) only the most promising few.
     const ranked = candidates.map((c) => ({ ...c, score: scoreGeo(plan, c.geo, false) })).sort((a, b) => a.score.cost - b.score.cost || a.id.localeCompare(b.id));
-    for (const c of ranked) tried.push({ id: c.id, cost: round(c.score.cost), hard: c.score.hard, aspect: round2(c.score.aspect), crossings: c.score.crossings });
-    for (const c of ranked.slice(0, options.quick ? 1 : 4)) {
+    for (const c of ranked) tried.push({ id: c.id, cost: round(c.score.cost), hard: c.score.hard, aspect: round2(c.score.aspect), crossings: c.score.crossings, elkMs: c.elkMs });
+    for (const c of ranked.slice(0, options.quick ? 1 : large ? 3 : 4)) {
+      const t = performance.now();
       finish(plan, c.geo, c.geo.afterEdges);
       const final = scoreGeo(plan, c.geo, true);
       const entry = tried.find((t) => t.id === c.id && t.cost !== undefined);
       if (entry) {
         entry.finalCost = round(final.cost);
         entry.finalCrossings = final.crossings;
+        entry.finishMs = Math.round(performance.now() - t);
       }
       if (!chosen || final.cost < chosen.score.cost || (final.cost === chosen.score.cost && c.id.localeCompare(chosen.id) < 0)) chosen = { id: c.id, geo: c.geo, score: final };
     }
@@ -658,8 +671,10 @@ function routeAfter(plan: Plan, geo: Geo, conns: NConnection[]): void {
     const dx = to.x + to.w / 2 - (from.x + from.w / 2);
     const dy = to.y + to.h / 2 - (from.y + from.h / 2);
     const [fromSide, toSide] = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? (["right", "left"] as const) : (["left", "right"] as const)) : dy >= 0 ? (["bottom", "top"] as const) : (["top", "bottom"] as const);
-    let points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, fromSide, toSide, maxExpansions: 4000, crossLines: lines });
-    if (points.length < 2) points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, maxExpansions: 2500, crossLines: lines });
+    // Expansions are O(1) (the router rasterises obstacles once per search), so the budget can cover
+    // the large grids of envelope-size diagrams; running out falls back to a route that ignores obstacles.
+    let points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, fromSide, toSide, maxExpansions: 40_000, crossLines: lines });
+    if (points.length < 2) points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, maxExpansions: 25_000, crossLines: lines });
     points = dedupe(points);
     geo.edges.push({ conn, points });
     for (let i = 0; i + 1 < points.length; i++) lines.push([points[i], points[i + 1]]);

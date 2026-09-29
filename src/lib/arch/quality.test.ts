@@ -23,19 +23,6 @@ function service(id: string, label: string, x: number, y: number, w = 120, h = 9
   };
 }
 
-function boundary(id: string, label: string, x: number, y: number, w: number, h: number, parent: string | null = null): DiagramNode {
-  return {
-    id,
-    parent,
-    label,
-    shape: "rectangle",
-    box: { x, y, w, h },
-    style: {},
-    container: true,
-    role: "boundary",
-    arch: { id, kind: "group" },
-  };
-}
 
 function edge(id: string, from: string, to: string, route: Array<{ x: number; y: number }>, label?: string): DiagramEdge {
   return { id, from, to, label, srcArrow: "none", dstArrow: "arrow", style: {}, route, kind: "call", meaning: "request" };

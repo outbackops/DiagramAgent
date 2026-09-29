@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ElkLike } from "./elk";
 import { composeArchitecture, composeArchitectureText } from "./index";
 import type { Box, DiagramModel, DiagramNode } from "@/lib/model/types";
+import { envelopeSpec } from "@/test/envelope-spec";
 
 const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "architecture");
 const fixture = (name: string) => readFileSync(path.join(fixtureDir, `${name}.json`), "utf8");
@@ -12,7 +13,6 @@ const node = (model: DiagramModel, specId: string): DiagramNode => {
   if (!found) throw new Error(`missing ${specId}`);
   return found;
 };
-const centreX = (b: Box) => b.x + b.w / 2;
 const centreY = (b: Box) => b.y + b.h / 2;
 const inside = (c: Box, p: Box) => c.x >= p.x - 1 && c.y >= p.y - 1 && c.x + c.w <= p.x + p.w + 1 && c.y + c.h <= p.y + p.h + 1;
 
@@ -116,6 +116,17 @@ describe("layoutArchitecture", () => {
     expect(model.edges).toHaveLength(69);
     expect(warnings.some((w) => w.includes("envelope"))).toBe(true);
   }, 60_000);
+
+  it("lays an envelope-size diagram out cleanly with the reduced candidate set", async () => {
+    const { model, report } = await composeArchitecture(envelopeSpec());
+    expect(report.hardViolations).toBe(0);
+    expect(report.fallback).toBe(false);
+    expect(model.nodes.filter((n) => n.role === "service")).toHaveLength(60);
+    expect(model.edges).toHaveLength(80);
+    // Large diagrams lay out five candidates and finish three (see LARGE_CANDIDATE_IDS).
+    expect(report.tried.filter((t) => !t.error)).toHaveLength(5);
+    expect(report.tried.filter((t) => t.finalCost !== undefined)).toHaveLength(3);
+  }, 120_000);
 });
 
 describe("architecture fixtures", () => {

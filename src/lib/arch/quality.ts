@@ -3,7 +3,6 @@ import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point } from "@/lib/m
 import type { QualityCheck, QualityGrade, QualityReport } from "@/lib/quality/diagram-quality";
 import { componentGeom, titleBox } from "./measure";
 import { allItems, isBoundary, type NBoundary, type NComponent, type NItem, type NormalizedArchSpec } from "./spec";
-import { ARCH_SPACE as S, ARCH_TYPE as T } from "./theme";
 
 export interface FaithfulnessExpect {
   components?: string[][];
@@ -367,9 +366,6 @@ function containsAlias(text: string, aliases: readonly string[]): boolean {
   return aliases.some((alias) => hay.includes(normalizeLoose(alias)));
 }
 
-function itemText(item: NItem): string {
-  return isBoundary(item) ? [item.name, item.facts, item.kind, ...item.items.map(itemText)].filter(Boolean).join(" ") : [item.name, item.detail, item.icon].filter(Boolean).join(" ");
-}
 
 function directItemText(item: NItem): string {
   return isBoundary(item) ? [item.name, item.facts, item.kind].filter(Boolean).join(" ") : [item.name, item.detail, item.icon].filter(Boolean).join(" ");

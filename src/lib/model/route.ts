@@ -1,4 +1,4 @@
-import { boxesOverlap, center, expand, polylineLength, segmentHitsBox, simplifyPolyline, unionBoxes } from "./geometry";
+import { boxesOverlap, center, expand, polylineLength, simplifyPolyline, unionBoxes } from "./geometry";
 import { descendants, indexModel, isGroup, isWithin, leafNodes } from "./query";
 import type { Box, DiagramModel, Point } from "./types";
 
@@ -97,97 +97,6 @@ function addMidlines(values: number[]): void {
   for (let i = 1; i < sorted.length; i++) values.push((sorted[i - 1] + sorted[i]) / 2);
 }
 
-function pointKey(ix: number, iy: number, dir: Dir): string {
-  return `${ix},${iy},${dir}`;
-}
-
-function pointInsideBox(p: Point, b: Box): boolean {
-  return p.x > b.x + EPSILON && p.x < right(b) - EPSILON && p.y > b.y + EPSILON && p.y < bottom(b) - EPSILON;
-}
-
-function pointInsideAny(p: Point, boxes: Box[]): boolean {
-  return boxes.some((b) => pointInsideBox(p, b));
-}
-
-function segmentPenalty(a: Point, b: Point, hard: Box[], soft: Box[], softPenalty: number): number | null {
-  for (const box of hard) {
-    if (segmentHitsBox(a, b, box)) return null;
-  }
-  let penalty = 0;
-  for (const box of soft) {
-    if (segmentHitsBox(a, b, box)) penalty += softPenalty;
-  }
-  return penalty;
-}
-
-/** Cost of an axis-aligned move against existing axis-aligned routes: crossings and shared tracks. */
-function crossingPenalty(a: Point, b: Point, lines: Array<[Point, Point]>, penalty: number): number {
-  const horizontal = Math.abs(a.y - b.y) < EPSILON;
-  const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y);
-  const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y);
-  const at = horizontal ? a.y : a.x;
-  let cost = 0;
-  for (const [p, q] of lines) {
-    const lineHorizontal = Math.abs(p.y - q.y) < EPSILON;
-    if (lineHorizontal === horizontal) {
-      // Running along the same track as another route.
-      const lineAt = horizontal ? p.y : p.x;
-      if (Math.abs(lineAt - at) > 2) continue;
-      const llo = horizontal ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
-      const lhi = horizontal ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
-      if (Math.min(hi, lhi) - Math.max(lo, llo) > 2) cost += penalty / 2;
-      continue;
-    }
-    const lineAt = lineHorizontal ? p.y : p.x;
-    const llo = lineHorizontal ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
-    const lhi = lineHorizontal ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
-    if (lineAt > lo + EPSILON && lineAt < hi - EPSILON && at > llo + EPSILON && at < lhi - EPSILON) cost += penalty;
-  }
-  return cost;
-}
-
-function edgeKey(ix: number, iy: number, dir: Dir): string {
-  return `${ix},${iy},${dir}`;
-}
-
-function buildGridObstacles(gridX: number[], gridY: number[], hard: Box[], soft: Box[], softPenalty: number): { blockedPoints: Set<string>; blockedEdges: Set<string>; edgePenalties: Map<string, number> } {
-  const blockedPoints = new Set<string>();
-  for (let iy = 0; iy < gridY.length; iy++) {
-    for (let ix = 0; ix < gridX.length; ix++) {
-      const p = { x: gridX[ix], y: gridY[iy] };
-      if (hard.some((box) => pointInsideBox(p, box))) blockedPoints.add(`${ix},${iy}`);
-    }
-  }
-
-  const blockedEdges = new Set<string>();
-  const edgePenalties = new Map<string, number>();
-  const addEdge = (ix: number, iy: number, dir: Dir, a: Point, b: Point) => {
-    const key = edgeKey(ix, iy, dir);
-    if (hard.some((box) => segmentHitsBox(a, b, box))) {
-      blockedEdges.add(key);
-      return;
-    }
-    const hits = soft.reduce((sum, box) => sum + (segmentHitsBox(a, b, box) ? softPenalty : 0), 0);
-    if (hits > 0) edgePenalties.set(key, hits);
-  };
-  for (let iy = 0; iy < gridY.length; iy++) {
-    for (let ix = 0; ix < gridX.length; ix++) {
-      const a = { x: gridX[ix], y: gridY[iy] };
-      if (ix + 1 < gridX.length) {
-        const b = { x: gridX[ix + 1], y: gridY[iy] };
-        addEdge(ix, iy, "right", a, b);
-        addEdge(ix + 1, iy, "left", b, a);
-      }
-      if (iy + 1 < gridY.length) {
-        const b = { x: gridX[ix], y: gridY[iy + 1] };
-        addEdge(ix, iy, "down", a, b);
-        addEdge(ix, iy + 1, "up", b, a);
-      }
-    }
-  }
-  return { blockedPoints, blockedEdges, edgePenalties };
-}
-
 class MinHeap<T> {
   private readonly items: { item: T; priority: number }[] = [];
 
@@ -239,6 +148,169 @@ interface SearchResult {
   cost: number;
 }
 
+const DIRS: readonly Dir[] = ["up", "right", "down", "left"];
+const DIR_INDEX: Record<Dir, number> = { up: 0, right: 1, down: 2, left: 3 };
+// Neighbour order matters for tie-breaking in the heap: left, right, up, down.
+const STEPS: ReadonlyArray<{ dx: number; dy: number; dir: number }> = [
+  { dx: -1, dy: 0, dir: 3 },
+  { dx: 1, dy: 0, dir: 1 },
+  { dx: 0, dy: -1, dir: 0 },
+  { dx: 0, dy: 1, dir: 2 },
+];
+
+/** Search state buffers, reused across searches; `stamp` marks which entries belong to the current one. */
+const pool = { size: 0, generation: 0, best: new Float64Array(0), prev: new Int32Array(0), stamp: new Uint32Array(0) };
+
+function searchBuffers(states: number): typeof pool {
+  if (pool.size < states) {
+    pool.size = states;
+    pool.best = new Float64Array(states);
+    pool.prev = new Int32Array(states);
+    pool.stamp = new Uint32Array(states);
+    pool.generation = 0;
+  }
+  pool.generation++;
+  if (pool.generation === 0xffffffff) {
+    pool.stamp.fill(0);
+    pool.generation = 1;
+  }
+  return pool;
+}
+
+/** First index whose value is greater than `value` (values sorted ascending). */
+function firstAbove(values: number[], value: number): number {
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] > value) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/** First index whose value is at least `value` (values sorted ascending). */
+function firstAtLeast(values: number[], value: number): number {
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] >= value) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/**
+ * Whether a grid step along one axis, from `a` to `b` at `at` on the other axis, passes through the open
+ * box spanning [lo, hi] × (crossLo, crossHi). The same test as segmentHitsBox for an axis-aligned segment.
+ */
+function stepHitsBox(a: number, b: number, at: number, lo: number, hi: number, crossLo: number, crossHi: number): boolean {
+  if (!(at > crossLo && at < crossHi)) return false;
+  const length = Math.abs(b - a);
+  if (length === 0) return false;
+  return Math.min(Math.max(a, b), hi) - Math.max(Math.min(a, b), lo) > 1e-9 * length;
+}
+
+interface GridCosts {
+  /** Grid points inside a hard obstacle. */
+  pointBlocked: Uint8Array;
+  /** Steps from (ix, iy) to (ix + 1, iy) and to (ix, iy + 1) through a hard obstacle. */
+  hBlocked: Uint8Array;
+  vBlocked: Uint8Array;
+  /** Soft-obstacle and existing-route penalties of those steps. */
+  hPenalty: Float64Array;
+  vPenalty: Float64Array;
+}
+
+/** Per-search step costs, reused across searches (zeroed over the used length). */
+const costPool = { size: 0, pointBlocked: new Uint8Array(0), hBlocked: new Uint8Array(0), vBlocked: new Uint8Array(0), hPenalty: new Float64Array(0), vPenalty: new Float64Array(0) };
+
+/**
+ * Rasterises obstacles and existing routes onto the search grid once, so each step of the search
+ * costs O(1) instead of a scan over every box and line. Semantics match segmentHitsBox,
+ * pointInsideBox and crossingPenalty exactly; only the cells a box or line can touch are visited.
+ */
+function gridCosts(gridX: number[], gridY: number[], hard: Box[], soft: Box[], softPenalty: number, lines: Array<[Point, Point]>, crossPenalty: number): GridCosts {
+  const nx = gridX.length;
+  const ny = gridY.length;
+  const cells = nx * ny;
+  if (costPool.size < cells) {
+    costPool.size = cells;
+    costPool.pointBlocked = new Uint8Array(cells);
+    costPool.hBlocked = new Uint8Array(cells);
+    costPool.vBlocked = new Uint8Array(cells);
+    costPool.hPenalty = new Float64Array(cells);
+    costPool.vPenalty = new Float64Array(cells);
+  } else {
+    costPool.pointBlocked.fill(0, 0, cells);
+    costPool.hBlocked.fill(0, 0, cells);
+    costPool.vBlocked.fill(0, 0, cells);
+    costPool.hPenalty.fill(0, 0, cells);
+    costPool.vPenalty.fill(0, 0, cells);
+  }
+  const costs: GridCosts = costPool;
+  const markBox = (box: Box, onH: (i: number) => void, onV: (i: number) => void) => {
+    const x0 = box.x;
+    const x1 = right(box);
+    const y0 = box.y;
+    const y1 = bottom(box);
+    // Horizontal steps along rows strictly inside the box's height.
+    for (let iy = firstAbove(gridY, y0); iy < ny && gridY[iy] < y1; iy++) {
+      for (let ix = Math.max(0, firstAtLeast(gridX, x0) - 1); ix + 1 < nx && gridX[ix] < x1; ix++) {
+        if (stepHitsBox(gridX[ix], gridX[ix + 1], gridY[iy], x0, x1, y0, y1)) onH(iy * nx + ix);
+      }
+    }
+    // Vertical steps along columns strictly inside the box's width.
+    for (let ix = firstAbove(gridX, x0); ix < nx && gridX[ix] < x1; ix++) {
+      for (let iy = Math.max(0, firstAtLeast(gridY, y0) - 1); iy + 1 < ny && gridY[iy] < y1; iy++) {
+        if (stepHitsBox(gridY[iy], gridY[iy + 1], gridX[ix], y0, y1, x0, x1)) onV(iy * nx + ix);
+      }
+    }
+  };
+  for (const box of hard) {
+    for (let iy = firstAbove(gridY, box.y + EPSILON); iy < ny && gridY[iy] < bottom(box) - EPSILON; iy++) {
+      for (let ix = firstAbove(gridX, box.x + EPSILON); ix < nx && gridX[ix] < right(box) - EPSILON; ix++) costs.pointBlocked[iy * nx + ix] = 1;
+    }
+    markBox(box, (i) => (costs.hBlocked[i] = 1), (i) => (costs.vBlocked[i] = 1));
+  }
+  for (const box of soft) markBox(box, (i) => (costs.hPenalty[i] += softPenalty), (i) => (costs.vPenalty[i] += softPenalty));
+
+  for (const [p, q] of lines) {
+    if (Math.abs(p.y - q.y) < EPSILON) {
+      // A horizontal route: running along it costs half; a vertical step crossing it costs the full penalty.
+      const at = p.y;
+      const lo = Math.min(p.x, q.x);
+      const hi = Math.max(p.x, q.x);
+      for (let iy = firstAtLeast(gridY, at - 2); iy < ny && gridY[iy] <= at + 2; iy++) {
+        if (Math.abs(at - gridY[iy]) > 2) continue;
+        for (let ix = Math.max(0, firstAtLeast(gridX, lo) - 1); ix + 1 < nx && gridX[ix] < hi; ix++) {
+          if (Math.min(gridX[ix + 1], hi) - Math.max(gridX[ix], lo) > 2) costs.hPenalty[iy * nx + ix] += crossPenalty / 2;
+        }
+      }
+      const iy = firstAtLeast(gridY, at) - 1;
+      if (iy >= 0 && iy + 1 < ny && at > gridY[iy] + EPSILON && at < gridY[iy + 1] - EPSILON) {
+        for (let ix = firstAbove(gridX, lo + EPSILON); ix < nx && gridX[ix] < hi - EPSILON; ix++) costs.vPenalty[iy * nx + ix] += crossPenalty;
+      }
+    } else {
+      const at = p.x;
+      const lo = Math.min(p.y, q.y);
+      const hi = Math.max(p.y, q.y);
+      for (let ix = firstAtLeast(gridX, at - 2); ix < nx && gridX[ix] <= at + 2; ix++) {
+        if (Math.abs(at - gridX[ix]) > 2) continue;
+        for (let iy = Math.max(0, firstAtLeast(gridY, lo) - 1); iy + 1 < ny && gridY[iy] < hi; iy++) {
+          if (Math.min(gridY[iy + 1], hi) - Math.max(gridY[iy], lo) > 2) costs.vPenalty[iy * nx + ix] += crossPenalty / 2;
+        }
+      }
+      const ix = firstAtLeast(gridX, at) - 1;
+      if (ix >= 0 && ix + 1 < nx && at > gridX[ix] + EPSILON && at < gridX[ix + 1] - EPSILON) {
+        for (let iy = firstAbove(gridY, lo + EPSILON); iy < ny && gridY[iy] < hi - EPSILON; iy++) costs.hPenalty[iy * nx + ix] += crossPenalty;
+      }
+    }
+  }
+  return costs;
+}
+
 function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: Box[], options: InternalRouteOptions): SearchResult | null {
   const margin = options.margin ?? DEFAULT_MARGIN;
   const bendPenalty = options.bendPenalty ?? DEFAULT_BEND_PENALTY;
@@ -269,79 +341,73 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
   const endIx = gridX.indexOf(snapGrid(end.x));
   const endIy = gridY.indexOf(snapGrid(end.y));
   if (startIx < 0 || startIy < 0 || endIx < 0 || endIy < 0) return null;
-  const obstacleCount = hard.length + soft.length;
-  const precomputeCost = gridX.length * gridY.length * Math.max(1, obstacleCount);
-  const obstacleGrid = obstacleCount > 80 && precomputeCost <= 100_000 ? buildGridObstacles(gridX, gridY, hard, soft, softPenalty) : null;
+  const nx = gridX.length;
+  const ny = gridY.length;
+  const costs = gridCosts(gridX, gridY, hard, soft, softPenalty, options.crossLines ?? [], options.crossPenalty ?? 80);
 
-  const best = new Map<string, number>();
-  const prev = new Map<string, string>();
-  const heap = new MinHeap<{ ix: number; iy: number; dir: Dir }>();
-  const firstKey = pointKey(startIx, startIy, startDir);
-  best.set(firstKey, 0);
-  heap.push({ ix: startIx, iy: startIy, dir: startDir }, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
+  // A state is a grid point and the direction it was entered from: ((iy * nx + ix) * 4 + dir).
+  const buffers = searchBuffers(nx * ny * 4);
+  const { best, prev, stamp, generation } = buffers;
+  const bestOf = (state: number) => (stamp[state] === generation ? best[state] : Infinity);
+  const heap = new MinHeap<number>();
+  const firstState = (startIy * nx + startIx) * 4 + DIR_INDEX[startDir];
+  stamp[firstState] = generation;
+  best[firstState] = 0;
+  prev[firstState] = -1;
+  heap.push(firstState, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
 
-  let endKey: string | null = null;
+  let endState = -1;
   let expansions = 0;
   while (heap.length > 0) {
-    const current = heap.pop();
-    if (!current) break;
+    const state = heap.pop();
+    if (state === undefined) break;
     expansions += 1;
     if (expansions > maxExpansions || (options.budget && --options.budget.remaining < 0)) return null;
-    const key = pointKey(current.ix, current.iy, current.dir);
-    const cost = best.get(key);
-    if (cost === undefined) continue;
-    if (current.ix === endIx && current.iy === endIy) {
-      endKey = key;
+    const cost = best[state];
+    const dir = state & 3;
+    const cell = state >> 2;
+    const ix = cell % nx;
+    const iy = (cell - ix) / nx;
+    if (ix === endIx && iy === endIy) {
+      endState = state;
       break;
     }
-
-    const neighbours = [
-      { ix: current.ix - 1, iy: current.iy, dir: "left" as const },
-      { ix: current.ix + 1, iy: current.iy, dir: "right" as const },
-      { ix: current.ix, iy: current.iy - 1, dir: "up" as const },
-      { ix: current.ix, iy: current.iy + 1, dir: "down" as const },
-    ];
-    const a = { x: gridX[current.ix], y: gridY[current.iy] };
-    for (const n of neighbours) {
-      if (n.ix < 0 || n.iy < 0 || n.ix >= gridX.length || n.iy >= gridY.length) continue;
-      const b = { x: gridX[n.ix], y: gridY[n.iy] };
-      const moveKey = edgeKey(current.ix, current.iy, n.dir);
-      let penalty = 0;
-      if (obstacleGrid) {
-        if (obstacleGrid.blockedPoints.has(`${n.ix},${n.iy}`) || obstacleGrid.blockedEdges.has(moveKey)) continue;
-        penalty = obstacleGrid.edgePenalties.get(moveKey) ?? 0;
-      } else {
-        if (pointInsideAny(b, hard)) continue;
-        const scanPenalty = segmentPenalty(a, b, hard, soft, softPenalty);
-        if (scanPenalty === null) continue;
-        penalty = scanPenalty;
-      }
-      const turnCost = current.dir === n.dir ? 0 : bendPenalty;
-      if (options.crossLines?.length) penalty += crossingPenalty(a, b, options.crossLines, options.crossPenalty ?? 80);
-      const nextCost = cost + Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + turnCost + penalty;
-      const nextKey = pointKey(n.ix, n.iy, n.dir);
-      if (nextCost >= (best.get(nextKey) ?? Infinity)) continue;
-      best.set(nextKey, nextCost);
-      prev.set(nextKey, key);
-      const heuristic = Math.abs(b.x - end.x) + Math.abs(b.y - end.y);
-      heap.push(n, nextCost + heuristic);
+    const ax = gridX[ix];
+    const ay = gridY[iy];
+    for (const step of STEPS) {
+      const nix = ix + step.dx;
+      const niy = iy + step.dy;
+      if (nix < 0 || niy < 0 || nix >= nx || niy >= ny) continue;
+      if (costs.pointBlocked[niy * nx + nix]) continue;
+      // Steps are stored once per pair of neighbours, at the lower-left one.
+      const along = step.dy === 0 ? niy * nx + Math.min(ix, nix) : Math.min(iy, niy) * nx + nix;
+      if (step.dy === 0 ? costs.hBlocked[along] : costs.vBlocked[along]) continue;
+      const penalty = step.dy === 0 ? costs.hPenalty[along] : costs.vPenalty[along];
+      const bx = gridX[nix];
+      const by = gridY[niy];
+      const turnCost = dir === step.dir ? 0 : bendPenalty;
+      const nextCost = cost + Math.abs(ax - bx) + Math.abs(ay - by) + turnCost + penalty;
+      const nextState = (niy * nx + nix) * 4 + step.dir;
+      if (nextCost >= bestOf(nextState)) continue;
+      stamp[nextState] = generation;
+      best[nextState] = nextCost;
+      prev[nextState] = state;
+      heap.push(nextState, nextCost + Math.abs(bx - end.x) + Math.abs(by - end.y));
     }
   }
 
-  if (!endKey) return null;
+  if (endState < 0) return null;
   const path: Point[] = [];
-  let key: string | undefined = endKey;
-  while (key) {
-    const [ix, iy] = key.split(",", 2).map(Number);
-    path.push({ x: gridX[ix], y: gridY[iy] });
-    key = prev.get(key);
+  for (let state = endState; state >= 0; state = prev[state]) {
+    const cell = state >> 2;
+    const ix = cell % nx;
+    path.push({ x: gridX[ix], y: gridY[(cell - ix) / nx] });
   }
   path.reverse();
-  const lastDir = endKey.split(",")[2] as Dir;
-  const cost = (best.get(endKey) ?? polylineLength(path)) + (lastDir === endDir ? 0 : bendPenalty);
+  const lastDir = DIRS[endState & 3];
+  const cost = best[endState] + (lastDir === endDir ? 0 : bendPenalty);
   return { points: path, cost };
 }
-
 function fallbackRoute(from: Box, to: Box, fromSide: Side, toSide: Side, fromOffset: number, toOffset: number): Point[] {
   const start = port(from, fromSide, fromOffset);
   const end = port(to, toSide, toOffset);

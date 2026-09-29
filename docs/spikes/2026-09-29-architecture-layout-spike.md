@@ -95,3 +95,31 @@ The pre-registered threshold stays on record as failed at spike time.
 - Hard constraints are equal.
 
 The decision waits for the end-to-end comparison (b) and the U3 routing work.
+
+## Performance gate (U8, 2026-09-30)
+
+The gate lays out an envelope-size spec (`src/test/envelope-spec.ts`: 60 components, 80 connections, boundaries 5 deep, about 20 deterministic cross-links on top of a realistic topology) in Node (`scripts/spikes/arch-envelope-perf.ts`) and in the browser against `next dev`. The machine was at 100% CPU from other applications throughout, so every number here is pessimistic.
+
+**First measurement: failed by two orders of magnitude.** A full layout took 132 s and the streaming layout 27 s. The chosen layout also had 47 hard violations and 576 crossings. A CPU profile put 92 of 107 s in the A* search for connectors routed after layout. Every step of the search scanned every obstacle box and every existing route with string-keyed maps, and the precomputed obstacle grid never kicked in at this size. The 4,000-expansion cap then ran out on the larger grid, and each failed search fell back to a route that ignores obstacles. That fallback caused all 47 hard violations.
+
+**Changes:**
+
+1. **O(1) search steps.** The router rasterises obstacles, soft obstacles and existing routes onto its grid once per search, and uses numeric states in pooled typed arrays. The grid, costs, neighbour order and heap are unchanged, so every fixture lays out byte-identically. `scripts/spikes/layout-hashes.ts` checks that before and after.
+2. **A realistic search budget.** 40,000 expansions per connector routed after layout, since expansions are now cheap. This removed every hard violation at the envelope size and halved the crossings. No fixture changed.
+3. **Fewer candidates for large diagrams.** Above 60% of the envelope (36 components or 48 connections), five ELK candidates run instead of nine and three are finished instead of four. These are the five that win on the fixtures (`LARGE_CANDIDATE_IDS`). The rule is size-based rather than time-based, so layouts stay deterministic and Tidy up stays stable.
+
+**Result** (full = candidate search; quick = the streaming preview):
+
+| Envelope spec | Before | After |
+|---|---:|---:|
+| Full layout, Node, cold | 132 s | 2.5 s |
+| Full layout, Node, warm | 139 s | 1.7 s |
+| Quick layout, Node, warm | 27 s | 0.3–0.4 s |
+| Hard violations | 47 | 0 |
+| Crossings (layout scorer) | 576 | 285 |
+| Browser, warm Tidy up: main-thread work (long tasks) | – | 1.6–2.6 s in 6 tasks of 0.15–0.7 s |
+| Browser, cold import: main-thread work | – | 2.4 s in 9 tasks of 0.05–0.45 s |
+
+The acceptance fixtures (10–27 components) lay out in 0.26–1.2 s in Node under the same load. The browser page was in the background (`visibilityState: hidden`), where timers are throttled, so its wall-clock times (8–10 s) are not meaningful; the main-thread work is. That work is a dev build (unminified, React development mode).
+
+**Decision: the budget is met without a web worker.** ELK runs each candidate as its own task, so the UI gets breaks between them. The residual risk is long tasks of up to about 0.7 s during large layouts. If users notice jank at that size, moving ELK into a Web Worker is the next step: elkjs supports a worker factory, and our passes after ELK take under 0.5 s.
