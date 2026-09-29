@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import ClarifyPanel, { type ClarifyQuestion } from "./ClarifyPanel";
 import ModelPicker from "./ModelPicker";
 import ReviewPanel from "./ReviewPanel";
 import RunCard from "./RunCard";
+import SettingsMenu from "./SettingsMenu";
 import type { RunRecord } from "@/hooks/useDiagramAgent";
 import type { CatalogModel } from "@/lib/llm/types";
 
@@ -212,5 +213,34 @@ describe("RunCard", () => {
     expect(screen.getByText("Reviewing layout")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(onStop).toHaveBeenCalled();
+  });
+
+  it("shows the style a run used, marks Auto's choice, and offers to redo it in the other style", () => {
+    const onRedoAs = vi.fn();
+    const done = run({ format: "architecture", routed: "heuristic" });
+    render(<RunCard run={done} models={MODELS} onRedoAs={onRedoAs} />);
+    expect(screen.getByText("Architecture · auto")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Redo as Poster" }));
+    expect(onRedoAs).toHaveBeenCalledWith(done, "composition");
+  });
+
+  it("doesn't offer Redo as on edit runs", () => {
+    render(<RunCard run={run({ mode: "edit", format: "composition" })} models={MODELS} onRedoAs={vi.fn()} />);
+    expect(screen.getByText("Poster")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Redo as/ })).toBeNull();
+  });
+});
+
+describe("SettingsMenu", () => {
+  it("offers Auto, Architecture, Poster and Graph and explains the chosen style", () => {
+    const onChange = vi.fn();
+    const settings = { clarify: true, review: true, refinements: 1, style: "auto" as const };
+    render(<SettingsMenu settings={settings} onChange={onChange} models={[]} reviewerChoice="same" onReviewerChange={vi.fn()} reviewerSupportsVision />);
+    fireEvent.click(screen.getByRole("button", { name: "Generation settings" }));
+    const styles = screen.getByRole("radiogroup", { name: "Diagram style" });
+    expect(within(styles).getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Auto", "Architecture", "Poster", "Graph"]);
+    expect(screen.getByText(/Picks Architecture for systems/)).toBeTruthy();
+    fireEvent.click(within(styles).getByRole("radio", { name: "Poster" }));
+    expect(onChange).toHaveBeenCalledWith({ ...settings, style: "poster" });
   });
 });

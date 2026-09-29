@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Box, ImageIcon, Link2, Trash2, X } from "lucide-react";
+import { setArchIcon } from "@/lib/arch/edit";
 import { canTone, detailsOf, hasDetails, setDetails, setTone } from "@/lib/compose/edit";
 import { TONE_COLORS } from "@/lib/compose/theme";
 import { TONES, type DiagramModel, type DiagramNode } from "@/lib/model/types";
-import { isEngineLaidOut } from "@/lib/model/kind";
+import { diagramKind, isEngineLaidOut } from "@/lib/model/kind";
 import { deleteItems, renameItem, setIcon } from "@/lib/model/ops";
 import { indexModel } from "@/lib/model/query";
 import { MODEL_LIMITS } from "@/lib/model/validate";
+import { ArchMeaningField, ArchTextField } from "./ArchFields";
 import IconPicker from "./IconPicker";
 import { Popover } from "./ui/Popover";
 import { Button, IconButton } from "./ui/primitives";
@@ -106,7 +108,12 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
 
   if (!selectedId || (!selectedNode && !selectedEdge)) return null;
   const isEdge = Boolean(selectedEdge);
-  const name = selectedEdge ? `${selectedEdge.from} -> ${selectedEdge.to}` : selectedNode?.id ?? selectedId;
+  const architecture = diagramKind(model) === "architecture";
+  // Generated page nodes (the title) can only be renamed.
+  const generated = Boolean(selectedNode?.generated);
+  const name = selectedEdge ? `${selectedEdge.from} -> ${selectedEdge.to}` : generated ? "Diagram title" : selectedNode?.id ?? selectedId;
+  // Architecture boundaries take their icon from the platform's conventions.
+  const canPickIcon = Boolean(selectedNode) && !generated && !(architecture && selectedNode?.container);
 
   return (
     <div className="absolute bottom-16 left-1/2 z-20 w-[min(440px,calc(100%-2rem))] -translate-x-1/2 animate-slide-up rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
@@ -146,18 +153,24 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
           maxLength={MODEL_LIMITS.labelLength}
           className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] text-zinc-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
         />
-        {selectedNode && (
+        {selectedNode && canPickIcon && (
           <Popover align="end" panelClassName="p-0" trigger={({ open, toggle, id }) => (
             <IconButton label="Change icon" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}><ImageIcon className="size-4" /></IconButton>
           )}>
-            {(close) => <IconPicker value={selectedNode.icon} allowNone autoFocus onSelect={(nextIcon) => { onApply((m) => setIcon(m, selectedNode.id, nextIcon), { coalesceKey: `icon:${selectedNode.id}` }); close(); }} />}
+            {(close) => <IconPicker value={selectedNode.icon} allowNone autoFocus onSelect={(nextIcon) => {
+              // Architecture components keep the icon's registry key, which the spec and exports use.
+              onApply((m) => (architecture ? setArchIcon(m, selectedNode.id, iconKeyOf(nextIcon)) : setIcon(m, selectedNode.id, nextIcon)), { coalesceKey: `icon:${selectedNode.id}` });
+              close();
+            }} />}
           </Popover>
         )}
-        {selectedNode && <IconButton label="Connect to another node" onClick={() => onStartConnect(selectedNode.id)}><Link2 className="size-4" /></IconButton>}
-        <IconButton label="Delete" onClick={() => onApply((m) => deleteItems(m, [selectedId]))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-4" /></IconButton>
+        {selectedNode && !generated && <IconButton label="Connect to another node" onClick={() => onStartConnect(selectedNode.id)}><Link2 className="size-4" /></IconButton>}
+        {!generated && <IconButton label="Delete" onClick={() => onApply((m) => deleteItems(m, [selectedId]))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-4" /></IconButton>}
       </div>
-      {selectedNode && hasDetails(selectedNode) && <ComposedFields key={selectedNode.id} node={selectedNode} onApply={onApply} />}
-      {selectedNode && (
+      {selectedNode && diagramKind(model) === "poster" && hasDetails(selectedNode) && <ComposedFields key={selectedNode.id} node={selectedNode} onApply={onApply} />}
+      {architecture && selectedNode && (selectedNode.role === "service" || selectedNode.role === "boundary") && <ArchTextField key={selectedNode.id} node={selectedNode} onApply={onApply} />}
+      {architecture && selectedEdge && <ArchMeaningField edge={selectedEdge} onApply={onApply} />}
+      {selectedNode && !generated && (
         <p className="mt-2 text-[11px] text-zinc-400">
           {isEngineLaidOut(model) ? "Tip: moved items snap back into the layout with Tidy up." : "Tip: drag the selected node onto another container to move it."}
         </p>
@@ -165,6 +178,10 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
       {selectedEdge && <div className="mt-2"><Button variant="ghost" size="xs" onClick={() => onApply((m) => deleteItems(m, [selectedEdge.id]))}>Delete connection</Button></div>}
     </div>
   );
+}
+
+function iconKeyOf(url: string | undefined): string | undefined {
+  return url?.match(/^\/icons\/([a-z0-9-]+)\.svg$/)?.[1];
 }
 
 const DETAILS_LABEL: Record<string, string> = {

@@ -625,7 +625,7 @@ flowchart TB
 **Verification:**
 - Prompt, intent and route tests pass, and a live smoke run (U12) produces a valid spec on the first attempt.
 
-- [ ] **U8: App integration**
+- [x] **U8: App integration**
 
 **Goal:** Auto, Architecture, Poster and Graph styles in settings; architecture runs render live in the browser; editing and Tidy up work; the chosen style is visible and switchable.
 
@@ -664,7 +664,7 @@ flowchart TB
 **Verification:**
 - Hook and component tests pass, and a browser smoke test (import, edit, drag, Tidy up, export, reload) passes against the dev server.
 
-- [ ] **U9: Exports by tier**
+- [x] **U9: Exports by tier**
 
 **Goal:** The R21 export tiers for architecture models.
 

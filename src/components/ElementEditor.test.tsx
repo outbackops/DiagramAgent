@@ -118,3 +118,57 @@ describe("ElementEditor composed details", () => {
     expect(details().value).toBe("Primary store");
   });
 });
+
+describe("ElementEditor for Architecture diagrams", () => {
+  const archModel: DiagramModel = {
+    version: 1,
+    kind: "architecture",
+    nodes: [
+      { ...node("__title", "Hub and spoke", 0), generated: true, role: "title" },
+      { ...node("hub", "Hub VNet", 0), container: true, role: "boundary", arch: { id: "hub", kind: "vnet", facts: "10.0.0.0/22" } },
+      { ...node("hub.fw", "Azure Firewall", 20), parent: "hub", role: "service", icon: "/icons/azure-firewall.svg", arch: { id: "fw", iconKey: "azure-firewall" } },
+      { ...node("onprem", "Corporate network", 400), role: "service", arch: { id: "onprem" } },
+    ],
+    edges: [{ id: "(onprem -> hub.fw)[0]", from: "onprem", to: "hub.fw", srcArrow: "none", dstArrow: "triangle", style: {}, route: [], meaning: "vpn" }],
+    arch: { title: "Hub and spoke", sequences: [], overlays: [], assumptions: [] },
+  };
+  const applyTo = (onApply: ReturnType<typeof vi.fn>) => onApply.mock.calls.reduce((m: DiagramModel, [op]) => (op as (x: DiagramModel) => DiagramModel)(m), archModel);
+
+  it("edits a component's detail and a boundary's facts on canonical data", () => {
+    const { onApply, rerender, props } = setup(["hub.fw"], { model: archModel });
+    fireEvent.change(screen.getByLabelText(/^Detail/), { target: { value: "Premium" } });
+    fireEvent.blur(screen.getByLabelText(/^Detail/));
+    expect(applyTo(onApply).nodes.find((n) => n.id === "hub.fw")?.arch?.detail).toBe("Premium");
+
+    rerender(<ElementEditor {...props} model={archModel} selection={["hub"]} />);
+    const facts = screen.getByLabelText(/^Facts/) as HTMLInputElement;
+    expect(facts.value).toBe("10.0.0.0/22");
+    expect(screen.queryByLabelText("Change icon")).toBeNull();
+    facts.focus();
+    fireEvent.change(facts, { target: { value: "10.1.0.0/22" } });
+    fireEvent.keyDown(facts, { key: "Enter" });
+    expect(applyTo(onApply).nodes.find((n) => n.id === "hub")?.arch?.facts).toBe("10.1.0.0/22");
+  });
+
+  it("changes a connection's meaning, with both arrowheads for peering", () => {
+    const { onApply } = setup(["(onprem -> hub.fw)[0]"], { model: archModel });
+    const select = screen.getByLabelText("Meaning") as HTMLSelectElement;
+    expect(select.value).toBe("vpn");
+    fireEvent.change(select, { target: { value: "peering" } });
+    expect(applyTo(onApply).edges[0]).toMatchObject({ meaning: "peering", srcArrow: "triangle", dstArrow: "triangle" });
+  });
+
+  it("renames the diagram title in place and offers nothing else for it", () => {
+    const { onApply } = setup(["__title"], { model: archModel });
+    expect(screen.getByText("Diagram title")).toBeTruthy();
+    expect(screen.queryByLabelText("Delete")).toBeNull();
+    expect(screen.queryByLabelText("Connect to another node")).toBeNull();
+    expect(screen.queryByLabelText("Change icon")).toBeNull();
+    const input = screen.getByLabelText("Label");
+    fireEvent.change(input, { target: { value: "Hub and spoke (production)" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const next = applyTo(onApply);
+    expect(next.arch?.title).toBe("Hub and spoke (production)");
+    expect(next.nodes.find((n) => n.id === "__title")?.label).toBe("Hub and spoke (production)");
+  });
+});

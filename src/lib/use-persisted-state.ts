@@ -18,6 +18,8 @@ export function usePersistedState<T>(
   options?: {
     /** Optional schema-style validator. If it returns false, the stored value is discarded. */
     validate?: (value: unknown) => value is T;
+    /** Upgrades a value saved by an older version; runs before validation. */
+    migrate?: (value: unknown) => unknown;
   },
 ): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(initialValue);
@@ -29,7 +31,8 @@ export function usePersistedState<T>(
     try {
       const raw = window.localStorage.getItem(key);
       if (raw !== null) {
-        const parsed = JSON.parse(raw) as unknown;
+        const stored = JSON.parse(raw) as unknown;
+        const parsed = options?.migrate ? options.migrate(stored) : stored;
         if (!options?.validate || options.validate(parsed)) {
           setValue(parsed as T);
         }

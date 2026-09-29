@@ -1,7 +1,8 @@
-import { setArchTitle } from "@/lib/arch/edit";
+import { boundaryMinWidth, componentGeom } from "@/lib/arch/measure";
+import { setArchTitle } from "@/lib/arch/title";
 import { boxesOverlap, bottom, containsBox, polylineHitsBox, right, unionBoxes } from "./geometry";
 import { ancestors, descendants, ensureParentsFirst, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, uniqueKey } from "./query";
-import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point } from "./types";
+import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point, Size } from "./types";
 
 const GROUP_PADDING = 24;
 const GROUP_GAP = 40;
@@ -202,6 +203,28 @@ function makeRoomForExplicitGroupGrowth(prev: DiagramModel, next: DiagramModel):
 
 function labelMinWidth(node: DiagramNode, label: string): number {
   return (node.style.fontSize ?? 16) * 0.6 * label.length + 24;
+}
+
+/**
+ * The smallest box an Architecture node's text needs (name, detail line, header facts), measured
+ * like the layout measures it; undefined for other nodes.
+ */
+export function archFitSize(node: DiagramNode, label = node.label): Size | undefined {
+  if (node.generated) return undefined;
+  if (node.role === "service") {
+    const geom = componentGeom({ type: "component", id: node.arch?.id ?? node.id, name: label, detail: node.arch?.detail, icon: node.arch?.iconKey });
+    return { w: geom.w, h: geom.h };
+  }
+  if (node.role === "boundary") return { w: boundaryMinWidth({ name: label, facts: node.arch?.facts }), h: node.box.h };
+  return undefined;
+}
+
+/** Grows a node to at least `size` (its text got longer), grows its groups to match and re-routes what moved. */
+export function growNodeToFit(model: DiagramModel, id: string, size: Size): DiagramModel {
+  const node = indexModel(model).byId.get(id);
+  if (!node || (node.box.w >= size.w && node.box.h >= size.h)) return model;
+  const draft = cloneWithNode(model, id, (item) => ({ ...item, box: { ...item.box, w: Math.max(item.box.w, size.w), h: Math.max(item.box.h, size.h) } }));
+  return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft, [id]));
 }
 
 function routeIgnores(index: ReturnType<typeof indexModel>, edge: DiagramEdge, boxId: string): boolean {
@@ -437,8 +460,9 @@ export function renameItem(model: DiagramModel, id: string, label: string): Diag
   const node = index.byId.get(id);
   if (node?.generated) return node.role === "title" ? setArchTitle(model, label) : model;
   if (node) {
-    const minWidth = labelMinWidth(node, label);
-    const draft = cloneWithNode(model, id, (item) => ({ ...item, label, box: { ...item.box, w: Math.max(item.box.w, minWidth) } }));
+    // Architecture nodes are measured like the layout measures them (the name wraps to two lines).
+    const fit = archFitSize(node, label) ?? { w: labelMinWidth(node, label), h: node.box.h };
+    const draft = cloneWithNode(model, id, (item) => ({ ...item, label, box: { ...item.box, w: Math.max(item.box.w, fit.w), h: Math.max(item.box.h, fit.h) } }));
     return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft, [id]));
   }
   const edge = index.edgeById.get(id);

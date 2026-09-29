@@ -21,16 +21,18 @@ import { Button } from "@/components/ui/primitives";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { useCopilotSession, useModelChoice } from "@/hooks/useCopilot";
 import { useDiagramAgent, type AgentDocument } from "@/hooks/useDiagramAgent";
-import { looksLikeSpec, suggestsTidyUp, useDiagramDocument } from "@/hooks/useDiagramDocument";
+import { looksLikeSpec, suggestsTidyUp, useDiagramDocument, type ArchitectureConversion } from "@/hooks/useDiagramDocument";
 import { useLiveRender } from "@/hooks/useLiveRender";
 import { useModelQuality } from "@/hooks/useModelQuality";
 import { useTheme } from "@/hooks/useTheme";
 import { useViewportWidth } from "@/hooks/useViewportWidth";
+import { diagramKind, isEngineLaidOut, type DiagramKind } from "@/lib/model/kind";
 import { connect } from "@/lib/model/ops";
 import { pageWidthOf } from "@/lib/compose";
 import { modelToMermaid } from "@/lib/model/to-mermaid";
 import type { DiagramModel } from "@/lib/model/types";
 import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
+import { isSpecFormat, type DiagramFormat } from "@/lib/spec-format";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
 interface Layout {
@@ -53,6 +55,9 @@ const isLayout = (v: unknown): v is Layout =>
 
 const isTab = (v: unknown): v is InspectorTab => v === "code" || v === "quality" || v === "review";
 
+/** The language each kind of document is edited in. */
+const FORMAT_OF_KIND: Record<DiagramKind, DiagramFormat> = { architecture: "architecture", poster: "composition", graph: "d2" };
+
 /** Ids from `ids` that still exist in `model` (nodes or edges). */
 function existingIds(model: DiagramModel | null, ids: string[]): string[] {
   if (!model || ids.length === 0) return [];
@@ -74,15 +79,15 @@ function Workspace() {
   }, [doc]);
 
   const agentDocument: AgentDocument = {
-    currentCode: () => (doc.model ? (doc.model.composed ? doc.specText : doc.d2) : null),
-    currentFormat: () => (doc.model ? (doc.model.composed ? "composition" : "d2") : undefined),
+    currentCode: () => (doc.model ? (isEngineLaidOut(doc.model) ? doc.specText : doc.d2) : null),
+    currentFormat: () => (doc.model ? FORMAT_OF_KIND[diagramKind(doc.model)] : undefined),
     pageWidth: () => pageWidthOf(doc.model),
     onKeep: async (code, info) => {
-      const result = info.format === "composition" ? doc.acceptRunSpec(code) : await doc.acceptRunCode(code, info.layout);
+      const result = info.format === "d2" ? await doc.acceptRunCode(code, info.layout) : await doc.acceptRunSpec(code, info.format);
       if (result.warnings.length > 0) {
         toast({
           tone: "info",
-          title: info.format === "composition" ? "Some parts of the spec were adjusted" : "Some parts of the diagram weren't imported",
+          title: info.format === "d2" ? "Some parts of the diagram weren't imported" : "Some parts of the spec were adjusted",
           description: result.warnings.slice(0, 3).join(" · "),
         });
       }
@@ -110,13 +115,15 @@ function Workspace() {
   const previewing = running && agent.latestRun?.mode === "create";
   // Live renders cover new-diagram previews and code that isn't on the canvas yet (e.g. a draft that failed to render).
   const showLive = previewing || !doc.model;
-  const render = useLiveRender(showLive ? agent.code : "", running);
+  const render = useLiveRender(showLive ? agent.code : "", running, agent.latestRun?.format);
   const modelQuality = useModelQuality(doc.model, !previewing && doc.status === "ready");
 
   const [layout, setLayout] = usePersistedState<Layout>("diagramAgent.layout.v2", DEFAULT_LAYOUT, { validate: isLayout });
   const [tab, setTab] = usePersistedState<InspectorTab>("diagramAgent.inspectorTab", "code", { validate: isTab });
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [conversion, setConversion] = useState<ArchitectureConversion | null>(null);
+  const [converting, setConverting] = useState(false);
   const composerRef = useRef<ComposerHandle>(null);
 
   // Panels shrink with the window; when the canvas would get too narrow the
@@ -231,6 +238,25 @@ function Workspace() {
   const resizeSidebar = useCallback((dx: number) => setLayout((l) => ({ ...l, sidebarWidth: clamp(l.sidebarWidth + dx, 300, 600) })), [setLayout]);
   const resizeInspector = useCallback((dx: number) => setLayout((l) => ({ ...l, inspectorWidth: clamp(l.inspectorWidth - dx, 320, 820) })), [setLayout]);
 
+  const openConversion = useCallback(() => setConversion(doc.previewArchitecture()), [doc]);
+  const confirmConversion = useCallback(async () => {
+    if (!conversion) return;
+    setConverting(true);
+    const outcome = await doc.convertToArchitecture(conversion.spec).then(
+      (warnings) => ({ ok: true as const, warnings }),
+      (err: unknown) => ({ ok: false as const, message: err instanceof Error ? err.message : String(err) }),
+    );
+    setConverting(false);
+    if (!outcome.ok) {
+      toast({ tone: "error", title: "Couldn't convert the diagram", description: outcome.message });
+      return;
+    }
+    setConversion(null);
+    deselect();
+    setFitNonce((n) => n + 1);
+    if (outcome.warnings.length > 0) toast({ tone: "info", title: "Some parts were adjusted", description: outcome.warnings.slice(0, 3).join(" · ") });
+  }, [conversion, deselect, doc, toast]);
+
   const requestNew = useCallback(() => {
     if (doc.model || agent.code.trim() || agent.items.length > 0 || agent.busy !== "idle") setConfirmNew(true);
     else agent.reset();
@@ -318,6 +344,7 @@ function Workspace() {
                   onSend={agent.send}
                   onStop={agent.stop}
                   onRetry={agent.retryRun}
+                  onRedoAs={agent.redoAs}
                   onSubmitClarify={agent.submitClarify}
                   onSkipClarify={agent.skipClarify}
                 />
@@ -372,6 +399,7 @@ function Workspace() {
                   onSelectionChange={setSelection}
                   onStartConnect={setConnectFrom}
                   onTidyUp={tidyUp}
+                  onConvertToArchitecture={diagramKind(doc.model) === "graph" ? openConversion : undefined}
                 />
               ) : null
             }
@@ -417,9 +445,9 @@ function Workspace() {
                 onClose={() => setInspectorVisible(false)}
                 d2={doc.d2 || (looksLikeSpec(agent.code) ? "" : agent.code)}
                 spec={
-                  doc.model?.composed
+                  isEngineLaidOut(doc.model)
                     ? doc.specText
-                    : (!doc.model || (running && latestRun?.format === "composition")) && looksLikeSpec(agent.code)
+                    : (!doc.model || (running && isSpecFormat(latestRun?.format))) && looksLikeSpec(agent.code)
                       ? agent.code
                       : null
                 }
@@ -464,6 +492,42 @@ function Workspace() {
           </>
         }
       />
+
+      <Dialog
+        open={conversion !== null}
+        onClose={() => (converting ? undefined : setConversion(null))}
+        title="Convert to an Architecture diagram?"
+        description="The Architecture engine lays the diagram out again with platform conventions: boundaries, icons, labelled connections. You can undo this afterwards."
+        footer={
+          <>
+            <Button variant="ghost" disabled={converting} onClick={() => setConversion(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" disabled={converting} onClick={() => void confirmConversion()}>
+              {converting ? "Converting…" : "Convert"}
+            </Button>
+          </>
+        }
+      >
+        {conversion && (
+          <div className="space-y-3 text-[13px] text-zinc-600 dark:text-zinc-300">
+            <p>
+              {conversion.components} component{conversion.components === 1 ? "" : "s"}, {conversion.boundaries} boundar{conversion.boundaries === 1 ? "y" : "ies"} and{" "}
+              {conversion.connections} connection{conversion.connections === 1 ? "" : "s"} carry over with their names, nesting and labels.
+            </p>
+            {conversion.lost.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">What doesn&apos;t carry over</p>
+                <ul className="mt-1.5 space-y-1 text-xs text-amber-800 dark:text-amber-100">
+                  {conversion.lost.map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </Dialog>
 
       <DeviceFlowDialog open={deviceOpen} onClose={() => setDeviceOpen(false)} onSignedIn={() => void session.refresh()} />
 

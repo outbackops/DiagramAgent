@@ -32,6 +32,9 @@ describe("renderArchitectureSvg", () => {
     // Every component and boundary is a canvas target; hidden links aren't drawn.
     for (const node of model.nodes.filter((n) => !n.generated)) expect(svg).toContain(`data-id="${node.id}"`);
     for (const edge of model.edges.filter((e) => e.hidden)) expect(svg).not.toContain(`data-edge="${edge.id}"`);
+    // The title can be selected and renamed; the other page blocks follow the diagram.
+    expect(svg).toContain('data-page="title" data-id="__title"');
+    expect(svg).not.toMatch(/data-page="(legend|workflow|assumptions)" data-id=/);
   });
 
   it("draws AWS conventions: tinted public and private subnets, open arrowheads, black badges", async () => {

@@ -330,8 +330,9 @@ export default function ModelCanvas({
         }
         const nextSelection = selection.includes(hit.id) ? selection : [hit.id];
         if (!sameSet(nextSelection, selection)) onSelectionChange(nextSelection);
-        const roots = selectionRootIds(model, nextSelection);
-        gesture.current = { type: "move", roots, nodes: subtreeNodeIds(model, roots), sourceParent: index.byId.get(roots[0])?.parent ?? null };
+        // Generated page nodes (an Architecture title) are placed by the layout, never dragged.
+        const roots = selectionRootIds(model, nextSelection).filter((id) => !index.byId.get(id)?.generated);
+        gesture.current = roots.length > 0 ? { type: "move", roots, nodes: subtreeNodeIds(model, roots), sourceParent: index.byId.get(roots[0])?.parent ?? null } : { type: "click" };
         e.currentTarget.setPointerCapture?.(e.pointerId);
         return;
       }

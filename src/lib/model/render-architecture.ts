@@ -285,7 +285,11 @@ function renderPageNode(node: DiagramNode, model: DiagramModel, page: Platform, 
       parts.push(`<rect x="${num(x + swatch.x)}" y="${num(y + swatch.y - 8)}" width="${Math.ceil(swatch.text.length * 7) + 10}" height="16" rx="8" fill="${attr(pack.background)}" stroke="#ED7100"/><text x="${num(x + swatch.x + 5)}" y="${num(y + swatch.y + 3.5)}" font-size="10" font-weight="700" fill="#ED7100">${esc(swatch.text)}</text>`);
     }
   }
-  return `<g data-page="${attr(node.role ?? "")}">${parts.join("")}</g>`;
+  // The title can be selected and renamed; the other page blocks follow the diagram and aren't selectable.
+  const hook = node.role === "title" ? ` data-id="${attr(node.id)}" data-kind="node"` : "";
+  // A hit area, so clicking between the title's words selects it too.
+  const hit = node.role === "title" ? `<rect x="${num(x)}" y="${num(y)}" width="${num(node.box.w)}" height="${num(node.box.h)}" fill="#FFFFFF" fill-opacity="0"/>` : "";
+  return `<g data-page="${attr(node.role ?? "")}"${hook}>${hit}${parts.join("")}</g>`;
 }
 
 function describe(model: DiagramModel): string {

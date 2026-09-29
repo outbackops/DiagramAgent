@@ -104,6 +104,20 @@ describe("CanvasToolbar", () => {
     expect(current.nodes.some((n) => n.id === "A")).toBe(false);
   });
 
+  it("offers Convert to Architecture on graphs, and only selection for an Architecture title", () => {
+    const onConvert = vi.fn();
+    const props = { readOnly: false, canUndo: false, canRedo: false, onUndo: () => {}, onRedo: () => {}, onApply: () => {}, onSelectionChange: () => {}, onStartConnect: () => {}, onTidyUp: async () => {} };
+    const { rerender } = render(withToast(<CanvasToolbar {...props} model={model()} selection={[]} onConvertToArchitecture={onConvert} />));
+    fireEvent.click(screen.getByLabelText("Convert to an Architecture diagram"));
+    expect(onConvert).toHaveBeenCalled();
+    const title = { id: "__title", parent: null, label: "Title", shape: "text" as const, box: { x: 0, y: -80, w: 300, h: 50 }, style: {}, container: false, role: "title" as const, generated: true };
+    const architecture: DiagramModel = { ...model(), kind: "architecture", nodes: [title, ...model().nodes] };
+    rerender(withToast(<CanvasToolbar {...props} model={architecture} selection={["__title"]} />));
+    expect(screen.queryByLabelText("Convert to an Architecture diagram")).toBeNull();
+    expect(screen.getByLabelText("Delete (Del)")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Connect")).toHaveProperty("disabled", true);
+  });
+
   it("handles undo and redo shortcuts but not while typing", () => {
     const onUndo = vi.fn();
     const onRedo = vi.fn();

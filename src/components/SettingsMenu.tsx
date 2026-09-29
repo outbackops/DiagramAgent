@@ -1,11 +1,18 @@
 "use client";
 
 import { SlidersHorizontal } from "lucide-react";
-import type { AgentSettings } from "@/hooks/useDiagramAgent";
+import type { AgentSettings, DiagramStyle } from "@/hooks/useDiagramAgent";
 import type { CatalogModel, ModelSelection } from "@/lib/llm/types";
 import { selectionForModel } from "@/lib/llm/selection";
 import { Popover } from "./ui/Popover";
 import { IconButton, Segmented, Switch } from "./ui/primitives";
+
+const STYLE_HINT: Record<DiagramStyle, string> = {
+  auto: "Picks Architecture for systems, networks and deployments, and Poster for overviews, journeys and processes. Each run shows the style it used.",
+  architecture: "Reference-architecture diagrams in the platform's conventions: nested boundaries, service icons, labelled connections and numbered flows.",
+  poster: "A designed one-page overview: columns, flow lanes and service cards.",
+  graph: "A free-form graph laid out by D2.",
+};
 
 function Row({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
   return (
@@ -53,15 +60,16 @@ export default function SettingsMenu({
       <div className="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
         <div className="py-2.5">
           <p className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">Diagram style</p>
-          <p className="mb-2 mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-            Composed diagrams are laid out like a designed poster: columns, flow lanes and service cards. Graph lets D2 place a free-form graph.
-          </p>
-          <Segmented
+          <p className="mb-2 mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">{STYLE_HINT[settings.style ?? "auto"]}</p>
+          <Segmented<DiagramStyle>
             ariaLabel="Diagram style"
-            value={settings.style ?? "composed"}
+            size="xs"
+            value={settings.style ?? "auto"}
             options={[
-              { value: "composed", label: "Composed" },
-              { value: "graph", label: "Graph" },
+              { value: "auto", label: "Auto", title: "Architecture or Poster, chosen from your request" },
+              { value: "architecture", label: "Architecture", title: "Reference-architecture conventions: boundaries, icons, numbered flows" },
+              { value: "poster", label: "Poster", title: "A designed one-page overview: columns, lanes and cards" },
+              { value: "graph", label: "Graph", title: "A free-form graph laid out by D2" },
             ]}
             disabled={disabled}
             onChange={(style) => onChange({ ...settings, style })}

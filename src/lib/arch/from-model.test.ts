@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { composeArchitecture, composeArchitectureText, modelToArchSpec, recomposeArchitecture } from "./index";
 import { setArchDetail, setArchFacts, setArchIcon, setArchMeaning, setArchTitle } from "./edit";
+import { scoreArchitecture } from "./quality";
 import { validateModel } from "@/lib/model/validate";
 import { diagramKind } from "@/lib/model/kind";
 import { addNode, connect, deleteItems, moveItems, renameItem, reparent } from "@/lib/model/ops";
@@ -139,6 +140,19 @@ describe("editing Architecture models", () => {
     const spec = modelToArchSpec(next).spec;
     expect(spec.title).toBe("Hub-and-spoke (production)");
     expect(setArchDetail(next, fw.id, "").nodes.find((n) => n.id === fw.id)?.arch?.detail).toBeUndefined();
+  });
+
+  it("grows a component whose detail or name got longer, so its text still fits", async () => {
+    const { model } = await composeArchitectureText(fixture("azure-zone-redundant-web"));
+    const kv = byArch(model, "kv");
+    const edited = renameItem(setArchDetail(model, kv.id, "Premium · soft delete"), kv.id, "Key Vault for application secrets");
+    const grown = byArch(edited, "kv");
+    expect(grown.box.h).toBeGreaterThan(kv.box.h);
+    expect(grown.box.w).toBeGreaterThanOrEqual(kv.box.w);
+    expect(scoreArchitecture(edited).checks.find((c) => c.id === "text_fit")?.status).toBe("pass");
+    const hub = byArch(model, "vnet");
+    const facts = setArchFacts(model, hub.id, "10.20.0.0/16 · peered to the corporate hub");
+    expect(scoreArchitecture(facts).checks.find((c) => c.id === "text_fit")?.status).toBe("pass");
   });
 
   it("protects generated page nodes from shape operations; renaming the title edits the model's title", async () => {

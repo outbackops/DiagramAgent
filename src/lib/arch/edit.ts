@@ -1,22 +1,31 @@
+import { archFitSize, growNodeToFit } from "@/lib/model/ops";
 import type { DiagramModel } from "@/lib/model/types";
 import { ARCH_LIMITS, MEANINGS, type Meaning } from "./spec";
 
+export { setArchTitle } from "./title";
+
 /**
- * Canvas edits of Architecture-specific data. Every helper returns a new model and leaves
- * geometry alone; Tidy up re-lays out. Text is trimmed to the spec's budgets so a round trip
- * through the normaliser never has to repair it.
+ * Canvas edits of Architecture-specific data. Every helper returns a new model; a node whose text
+ * got longer grows to fit (Tidy up re-lays everything out). Text is trimmed to the spec's budgets
+ * so a round trip through the normaliser never has to repair it.
  */
 
 const clean = (text: string, max: number) => text.replace(/\s+/g, " ").trim().slice(0, max);
 
 /** The detail line of a component (SKU or tier, count, version, port); empty removes it. */
 export function setArchDetail(model: DiagramModel, nodeId: string, text: string): DiagramModel {
-  return updateArch(model, nodeId, (arch) => ({ ...arch, detail: clean(text, ARCH_LIMITS.detailChars) || undefined }));
+  return fit(updateArch(model, nodeId, (arch) => ({ ...arch, detail: clean(text, ARCH_LIMITS.detailChars) || undefined })), nodeId);
 }
 
 /** The facts of a boundary (address range, region, zone, namespace); empty removes them. */
 export function setArchFacts(model: DiagramModel, nodeId: string, text: string): DiagramModel {
-  return updateArch(model, nodeId, (arch) => ({ ...arch, facts: clean(text, ARCH_LIMITS.factsChars) || undefined }));
+  return fit(updateArch(model, nodeId, (arch) => ({ ...arch, facts: clean(text, ARCH_LIMITS.factsChars) || undefined })), nodeId);
+}
+
+function fit(model: DiagramModel, nodeId: string): DiagramModel {
+  const node = model.nodes.find((n) => n.id === nodeId);
+  const size = node && archFitSize(node);
+  return size ? growNodeToFit(model, nodeId, size) : model;
 }
 
 /** A connection's meaning; peering and VPN links get arrowheads at both ends. */
@@ -24,19 +33,6 @@ export function setArchMeaning(model: DiagramModel, edgeId: string, meaning: Mea
   if (!MEANINGS.includes(meaning)) return model;
   const both = meaning === "peering" || meaning === "vpn";
   return { ...model, edges: model.edges.map((e) => (e.id === edgeId ? { ...e, meaning, srcArrow: both ? "triangle" : "none", dstArrow: "triangle" } : e)) };
-}
-
-/** The page title (and optionally subtitle): canonical data, projected onto the title node. */
-export function setArchTitle(model: DiagramModel, title: string, subtitle?: string): DiagramModel {
-  if (!model.arch) return model;
-  const nextTitle = clean(title, ARCH_LIMITS.titleChars) || model.arch.title;
-  const arch = { ...model.arch, title: nextTitle };
-  if (subtitle !== undefined) {
-    const s = clean(subtitle, ARCH_LIMITS.subtitleChars);
-    if (s) arch.subtitle = s;
-    else delete arch.subtitle;
-  }
-  return { ...model, arch, nodes: model.nodes.map((n) => (n.generated && n.role === "title" ? { ...n, label: nextTitle } : n)) };
 }
 
 /** A component's icon by registry key (undefined clears it). */
