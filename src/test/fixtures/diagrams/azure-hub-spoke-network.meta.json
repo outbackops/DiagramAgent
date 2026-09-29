@@ -1,0 +1,40 @@
+{
+  "id": "azure-hub-spoke-network",
+  "title": "Azure Hub-Spoke Network",
+  "prompt": "Create an Azure hub-spoke network architecture diagram. Include on-premises datacenter, VPN Gateway, ExpressRoute circuit, hub VNet, Azure Firewall, Azure Bastion, Private DNS Resolver, shared services subnet, management subnet, two spoke VNets for workload A and workload B, peering links, route tables/UDRs, NSGs, application subnets, data subnets, private endpoints, Log Analytics, and Azure Monitor. Show on-prem to hub connectivity, hub-to-spoke routing through the firewall, private endpoint access, and monitoring flows. Group by subscription, region, hub, spokes, and subnets.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 81,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "hub vnet",
+      "hub"
+    ],
+    [
+      "spoke vnet",
+      "spoke"
+    ],
+    [
+      "azure firewall",
+      "firewall"
+    ],
+    [
+      "vpn gateway"
+    ],
+    [
+      "expressroute"
+    ],
+    [
+      "peering"
+    ],
+    [
+      "private endpoint"
+    ],
+    [
+      "route table",
+      "udr"
+    ]
+  ],
+  "minNodes": 14,
+  "generatedOn": "2026-09-28"
+}

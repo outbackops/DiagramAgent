@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveIconUrl, getIconKeys, iconRegistry } from "./icon-registry";
+import { resolveIconUrl, getIconKeys, iconRegistry, resolveIconsInD2Code } from "./icon-registry";
 
 describe("icon-registry", () => {
   it("exposes a non-empty registry", () => {
@@ -40,5 +40,30 @@ describe("icon-registry", () => {
         category: expect.stringMatching(/^(aws|azure|gcp|kubernetes|tech|general)$/),
       });
     }
+  });
+});
+
+describe("resolveIconsInD2Code", () => {
+  const url = resolveIconUrl("aws-ec2")!;
+
+  it.each([
+    ["block line", "a: {\n  icon: aws-ec2\n}", `a: {\n  icon: ${url}\n}`],
+    ["dot notation", "a.icon: aws-ec2", `a.icon: ${url}`],
+    ["inline block", "a: { icon: aws-ec2; label: A }", `a: { icon: ${url}; label: A }`],
+    ["inline block end", "a: { label: A; icon: aws-ec2 }", `a: { label: A; icon: ${url} }`],
+    ["double quoted", 'a: { icon: "aws-ec2" }', `a: { icon: ${url} }`],
+    ["single quoted with comment", "a.icon: 'aws-ec2' # compute", `a.icon: ${url} # compute`],
+  ])("resolves %s", (_name, input, expected) => {
+    expect(resolveIconsInD2Code(input)).toBe(expected);
+  });
+
+  it("leaves URLs and unknown keys untouched", () => {
+    const code = "a.icon: https://example.com/x.svg\nb: { icon: not-a-real-icon-xyz }";
+    expect(resolveIconsInD2Code(code)).toBe(code);
+  });
+
+  it("does not touch labels that merely contain the word icon", () => {
+    const code = 'a: { label: "icon: aws-ec2 inside a label text" }';
+    expect(resolveIconsInD2Code(code)).toBe(code);
   });
 });

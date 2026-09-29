@@ -1,0 +1,314 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+FieldSite.class: region
+FieldSite: {
+  label: FIELD SITE (EDGE)
+  direction: down
+
+  SensorLayer.class: subnet
+  SensorLayer: {
+    label: FIELD SENSORS
+    direction: right
+
+    TemperatureSensor.class: resource
+    TemperatureSensor: {
+      icon: mobile
+      label: Temperature Sensor
+    }
+
+    VibrationSensor.class: resource
+    VibrationSensor: {
+      icon: mobile
+      label: Vibration Sensor
+    }
+
+    PressureSensor.class: resource
+    PressureSensor: {
+      icon: mobile
+      label: Pressure Sensor
+    }
+  }
+
+  EdgeGateway.class: network
+  EdgeGateway: {
+    label: EDGE GATEWAY
+    direction: down
+
+    ProtocolAdapters.class: resource
+    ProtocolAdapters: {
+      icon: api
+      label: Protocol Adapters
+    }
+
+    EdgeRuleEngine.class: resource
+    EdgeRuleEngine: {
+      icon: settings
+      label: Edge Rule Engine
+    }
+
+    LocalBuffer.class: resource
+    LocalBuffer: {
+      icon: queue
+      label: Local Buffer (Store-and-Forward)
+    }
+
+    EdgeAgent.class: resource
+    EdgeAgent: {
+      icon: container
+      label: Edge Agent (Commands / OTA)
+    }
+  }
+}
+
+Operators: {
+  icon: users
+  label: Operators
+}
+
+CloudPlatform.class: subscription
+CloudPlatform: {
+  label: CLOUD PLATFORM
+  grid-columns: 3
+  grid-rows: 2
+
+  SecureIngress.class: resource_group
+  SecureIngress: {
+    label: SECURE INGRESS
+    direction: down
+
+    DeviceIdentity.class: resource
+    DeviceIdentity: {
+      icon: lock
+      label: Device Identity (X.509 / Registry)
+    }
+
+    MQTTBroker.class: resource
+    MQTTBroker: {
+      icon: queue
+      label: Secure MQTT Broker
+    }
+
+    IngestionEndpoint.class: resource
+    IngestionEndpoint: {
+      icon: api
+      label: Ingestion Endpoint
+    }
+  }
+
+  StreamProcessing.class: resource_group
+  StreamProcessing: {
+    label: STREAM PROCESSING
+    direction: down
+
+    StreamProcessor.class: resource
+    StreamProcessor: {
+      icon: server
+      label: Stream Processor
+    }
+
+    AlertingService.class: resource
+    AlertingService: {
+      icon: notification
+      label: Alerting Service
+    }
+  }
+
+  Storage.class: resource_group
+  Storage: {
+    label: STORAGE
+    direction: down
+
+    HotPath.class: subnet
+    HotPath: {
+      label: HOT PATH
+
+      TimeSeriesDB.class: resource
+      TimeSeriesDB: {
+        icon: database
+        label: Time-Series DB
+        shape: cylinder
+      }
+    }
+
+    ColdPath.class: subnet
+    ColdPath: {
+      label: COLD PATH
+
+      ObjectStorage.class: resource
+      ObjectStorage: {
+        icon: storage
+        label: Object Storage (Data Lake)
+      }
+    }
+  }
+
+  Applications.class: resource_group
+  Applications: {
+    label: APPLICATIONS
+    direction: down
+
+    DeviceMgmtPortal.class: resource
+    DeviceMgmtPortal: {
+      icon: desktop
+      label: Device Mgmt Portal
+    }
+
+    AnalyticsDashboard.class: resource
+    AnalyticsDashboard: {
+      icon: monitor
+      label: Analytics Dashboard
+    }
+  }
+
+  DeviceOps.class: resource_group
+  DeviceOps: {
+    label: DEVICE OPS
+    direction: down
+
+    OTAUpdateService.class: resource
+    OTAUpdateService: {
+      icon: cloud
+      label: OTA Update Service
+    }
+
+    FirmwareRepo.class: resource
+    FirmwareRepo: {
+      icon: storage
+      label: Signed Firmware Repo
+    }
+  }
+
+  Observability.class: resource_group
+  Observability: {
+    label: OBSERVABILITY
+    direction: down
+
+    Monitoring.class: resource
+    Monitoring: {
+      icon: monitor
+      label: Monitoring (Metrics / Logs)
+    }
+  }
+}
+
+# Connections
+FieldSite.SensorLayer -> FieldSite.EdgeGateway.ProtocolAdapters: "1. Modbus / OPC UA / BLE" {
+  style.stroke: "#1e88e5"
+}
+FieldSite.EdgeGateway.ProtocolAdapters -> FieldSite.EdgeGateway.EdgeRuleEngine: "2. Normalized" {
+  style.stroke: "#1e88e5"
+}
+FieldSite.EdgeGateway.EdgeRuleEngine -> FieldSite.EdgeGateway.LocalBuffer: "3. Filtered Events" {
+  style.stroke: "#1e88e5"
+}
+FieldSite.EdgeGateway.LocalBuffer -> CloudPlatform.SecureIngress.MQTTBroker: "4. MQTT mTLS :8883" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.SecureIngress.MQTTBroker -> CloudPlatform.SecureIngress.DeviceIdentity: "AuthN / ACL" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.SecureIngress.MQTTBroker -> CloudPlatform.SecureIngress.IngestionEndpoint: "Topic Bridge" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.SecureIngress.IngestionEndpoint -> CloudPlatform.StreamProcessing.StreamProcessor: "5. Event Stream" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.StreamProcessing.StreamProcessor -> CloudPlatform.Storage.HotPath.TimeSeriesDB: "6a. Hot Writes" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.StreamProcessing.StreamProcessor -> CloudPlatform.Storage.ColdPath.ObjectStorage: "6b. Parquet Archive" {
+  style.stroke: "#8e24aa"
+  style.stroke-dash: 4
+}
+CloudPlatform.StreamProcessing.StreamProcessor -> CloudPlatform.StreamProcessing.AlertingService: "7. Anomaly Events" {
+  style.stroke: "#1e88e5"
+}
+CloudPlatform.StreamProcessing.AlertingService -> Operators: "Email / SMS / Webhook" {
+  style.stroke: "#ef6c00"
+  style.stroke-dash: 4
+}
+Operators -> CloudPlatform.Applications.AnalyticsDashboard: "HTTPS (SSO)"
+CloudPlatform.Applications.AnalyticsDashboard -> CloudPlatform.Storage.HotPath.TimeSeriesDB: "8. Queries" {
+  style.stroke: "#1e88e5"
+}
+Operators -> CloudPlatform.Applications.DeviceMgmtPortal: "HTTPS (SSO)"
+CloudPlatform.Applications.DeviceMgmtPortal -> CloudPlatform.SecureIngress.MQTTBroker: "9. C2D Commands" {
+  style.stroke: "#ef6c00"
+}
+CloudPlatform.SecureIngress.MQTTBroker -> FieldSite.EdgeGateway.EdgeAgent: "MQTT Subscribe" {
+  style.stroke: "#ef6c00"
+  style.stroke-dash: 4
+}
+CloudPlatform.Applications.DeviceMgmtPortal -> CloudPlatform.DeviceOps.OTAUpdateService: "10. Staged Rollout" {
+  style.stroke: "#ef6c00"
+}
+CloudPlatform.DeviceOps.OTAUpdateService -> CloudPlatform.DeviceOps.FirmwareRepo: "Signed Image" {
+  style.stroke: "#ef6c00"
+}
+CloudPlatform.DeviceOps.OTAUpdateService -> FieldSite.EdgeGateway.EdgeAgent: "HTTPS Firmware" {
+  style.stroke: "#ef6c00"
+  style.stroke-dash: 4
+}
+FieldSite.EdgeGateway.EdgeAgent -> FieldSite.SensorLayer: "Flash / Config" {
+  style.stroke: "#ef6c00"
+  style.stroke-dash: 4
+}
+FieldSite.EdgeGateway -> CloudPlatform.Observability.Monitoring: "Heartbeat" {
+  style.stroke: "#757575"
+  style.stroke-dash: 4
+}
+CloudPlatform.StreamProcessing -> CloudPlatform.Observability.Monitoring: "Metrics / Logs" {
+  style.stroke: "#757575"
+  style.stroke-dash: 4
+}

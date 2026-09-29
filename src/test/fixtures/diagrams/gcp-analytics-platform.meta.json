@@ -1,0 +1,40 @@
+{
+  "id": "gcp-analytics-platform",
+  "title": "GCP Analytics Platform",
+  "prompt": "Create a Google Cloud analytics architecture diagram. Include data producers, Cloud Pub/Sub topics, Dataflow streaming pipeline, Cloud Storage raw landing bucket, Dataproc or Dataform transformation stage, BigQuery warehouse, Looker dashboards, Cloud Composer orchestration, Data Catalog, Secret Manager, Cloud Monitoring, and IAM service accounts. Show streaming ingestion, raw storage, transformation, warehouse loading, BI access, scheduled orchestration, metadata registration, and monitoring. Group by GCP project, region, VPC/network where appropriate, data ingestion, processing, storage, analytics, and operations zones.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 91,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "pub/sub",
+      "pubsub"
+    ],
+    [
+      "dataflow"
+    ],
+    [
+      "cloud storage",
+      "storage"
+    ],
+    [
+      "bigquery"
+    ],
+    [
+      "looker"
+    ],
+    [
+      "composer"
+    ],
+    [
+      "data catalog",
+      "catalog"
+    ],
+    [
+      "cloud monitoring",
+      "monitoring"
+    ]
+  ],
+  "minNodes": 11,
+  "generatedOn": "2026-09-28"
+}

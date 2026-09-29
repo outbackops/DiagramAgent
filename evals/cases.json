@@ -1,0 +1,182 @@
+[
+  {
+    "id": "azure-sql-always-on-hadr",
+    "title": "Azure SQL Always On HA/DR Across Two Regions",
+    "prompt": "Create a vendor-specific Azure architecture diagram for SQL Server Always On availability groups across two Azure regions. Show external users entering through Azure Traffic Manager and Azure Application Gateway in each region. Each region must have its own VNet, web subnet, application subnet, data subnet, SQL Server VM pair, Availability Group listener, domain controller, Azure Bastion, Network Security Groups, Azure Monitor, Log Analytics, and Backup Vault. Show synchronous replication inside the primary region, asynchronous replication to the DR region, health probes, failover path, and backup flow. Use clear Primary Region and DR Region boundaries with mirrored structure.",
+    "expect": {
+      "keywords": [
+        ["traffic manager", "azure traffic manager"],
+        ["application gateway", "app gateway"],
+        ["availability group", "always on"],
+        ["sql server", "sql vm"],
+        ["listener", "ag listener"],
+        ["backup vault", "recovery services"],
+        ["monitor", "azure monitor"],
+        ["dr region", "secondary region"]
+      ],
+      "minNodes": 14
+    }
+  },
+  {
+    "id": "aws-three-tier-web",
+    "title": "AWS Three-Tier Web Application",
+    "prompt": "Create an AWS three-tier web application architecture diagram. Include internet users, Route 53, CloudFront, WAF, a public Application Load Balancer across two Availability Zones, EC2 Auto Scaling Group instances in private application subnets, RDS Multi-AZ in private data subnets, ElastiCache Redis, NAT Gateways, S3 static assets, Secrets Manager, CloudWatch, and VPC Flow Logs. Show HTTPS request flow from users through CloudFront and ALB to EC2, then SQL to RDS and cache calls to Redis. Group by AWS account, region, VPC, public/private subnets, and Availability Zones.",
+    "expect": {
+      "keywords": [
+        ["cloudfront", "cdn"],
+        ["application load balancer", "alb"],
+        ["ec2", "auto scaling"],
+        ["rds", "aurora"],
+        ["elasticache", "redis"],
+        ["route 53", "dns"],
+        ["waf"],
+        ["cloudwatch"]
+      ],
+      "minNodes": 12
+    }
+  },
+  {
+    "id": "aws-serverless-events",
+    "title": "AWS Serverless Event-Driven Application",
+    "prompt": "Create an AWS serverless event-driven architecture diagram for an order processing API. Include users, Amazon API Gateway, Lambda authorizer, order Lambda functions, SQS queue, EventBridge event bus, DynamoDB orders table, Step Functions workflow, SNS notifications, S3 receipt bucket, CloudWatch logs and alarms, IAM roles, and DLQ. Show synchronous API request/response, asynchronous queue processing, EventBridge fan-out, retry/DLQ path, and notifications. Group resources by AWS account and region, with clear API, processing, data, and observability zones.",
+    "expect": {
+      "keywords": [
+        ["api gateway"],
+        ["lambda"],
+        ["sqs", "queue"],
+        ["dynamodb"],
+        ["eventbridge", "event bus"],
+        ["step functions", "state machine"],
+        ["sns"],
+        ["dlq", "dead letter"]
+      ],
+      "minNodes": 11
+    }
+  },
+  {
+    "id": "kubernetes-microservices-mesh",
+    "title": "Kubernetes Microservices With Service Mesh",
+    "prompt": "Create a vendor-neutral Kubernetes microservices architecture diagram. Show external users, DNS, ingress controller, API gateway, Kubernetes cluster, namespaces for frontend, backend services, data, and observability. Include service mesh sidecars, frontend service, orders service, payments service, inventory service, PostgreSQL, Redis, message broker, Prometheus, Grafana, Jaeger tracing, log collector, secrets, and horizontal pod autoscaler. Show north-south ingress traffic, east-west mTLS service-to-service traffic, async events to the broker, metrics/logs/traces to observability, and database/cache access.",
+    "expect": {
+      "keywords": [
+        ["ingress"],
+        ["service mesh", "mesh"],
+        ["frontend"],
+        ["orders"],
+        ["payments"],
+        ["postgresql", "postgres"],
+        ["prometheus"],
+        ["jaeger", "tracing"]
+      ],
+      "minNodes": 13
+    }
+  },
+  {
+    "id": "github-actions-aks-cicd",
+    "title": "GitHub Actions CI/CD to AKS",
+    "prompt": "Create an Azure CI/CD architecture diagram showing GitHub Actions deploying a containerized application to Azure Kubernetes Service. Include developers, GitHub repository, pull request validation workflow, build workflow, test stage, container image build, Azure Container Registry, deployment workflow using federated identity/OIDC, Azure Key Vault for secrets, AKS cluster, ingress controller, app namespace, staging and production environments, Azure Monitor/Application Insights, and rollback path. Show code commit, CI validation, image push, deployment to AKS, secret retrieval, and telemetry feedback.",
+    "expect": {
+      "keywords": [
+        ["github actions"],
+        ["repository", "github repository"],
+        ["azure container registry", "acr"],
+        ["aks", "kubernetes service"],
+        ["key vault"],
+        ["oidc", "federated identity"],
+        ["application insights", "azure monitor"],
+        ["rollback"]
+      ],
+      "minNodes": 12
+    }
+  },
+  {
+    "id": "streaming-kafka-spark-lakehouse",
+    "title": "Streaming Kafka to Lakehouse Analytics",
+    "prompt": "Create a vendor-neutral streaming data pipeline diagram. Include producers, Kafka cluster with topics, schema registry, stream ingestion service, Apache Spark streaming jobs, checkpoint storage, raw data lake zone, curated data lake zone, batch quality checks, data warehouse, BI dashboard, metadata catalog, monitoring, and alerting. Show event ingestion, schema validation, stream processing, writes to raw and curated zones, warehouse loading, BI queries, and operational metrics. Group into ingestion, processing, storage, serving, and operations zones.",
+    "expect": {
+      "keywords": [
+        ["kafka"],
+        ["schema registry"],
+        ["spark"],
+        ["checkpoint"],
+        ["data lake"],
+        ["warehouse"],
+        ["bi", "dashboard"],
+        ["catalog"]
+      ],
+      "minNodes": 11
+    }
+  },
+  {
+    "id": "azure-hub-spoke-network",
+    "title": "Azure Hub-Spoke Network",
+    "prompt": "Create an Azure hub-spoke network architecture diagram. Include on-premises datacenter, VPN Gateway, ExpressRoute circuit, hub VNet, Azure Firewall, Azure Bastion, Private DNS Resolver, shared services subnet, management subnet, two spoke VNets for workload A and workload B, peering links, route tables/UDRs, NSGs, application subnets, data subnets, private endpoints, Log Analytics, and Azure Monitor. Show on-prem to hub connectivity, hub-to-spoke routing through the firewall, private endpoint access, and monitoring flows. Group by subscription, region, hub, spokes, and subnets.",
+    "expect": {
+      "keywords": [
+        ["hub vnet", "hub"],
+        ["spoke vnet", "spoke"],
+        ["azure firewall", "firewall"],
+        ["vpn gateway"],
+        ["expressroute"],
+        ["peering"],
+        ["private endpoint"],
+        ["route table", "udr"]
+      ],
+      "minNodes": 14
+    }
+  },
+  {
+    "id": "azure-rag-llm-app",
+    "title": "Azure RAG / LLM Application",
+    "prompt": "Create an Azure retrieval-augmented generation application architecture diagram. Include users, Azure Front Door, App Service web app, managed identity, Azure OpenAI, Azure AI Search vector index, Blob Storage document store, Cosmos DB chat/session store, document ingestion function, chunking/embedding pipeline, Key Vault, Application Insights, Azure Monitor, and private endpoints. Show user query flow, retrieval from AI Search, prompt completion through Azure OpenAI, document upload ingestion, embeddings creation, metadata persistence, secret access, and telemetry. Group by Azure subscription, region, resource group, app subnet, data/private endpoint subnet, and operations.",
+    "expect": {
+      "keywords": [
+        ["app service"],
+        ["azure openai", "openai"],
+        ["ai search", "search"],
+        ["blob storage", "blob"],
+        ["cosmos db", "cosmos"],
+        ["embedding", "embeddings"],
+        ["key vault"],
+        ["private endpoint"]
+      ],
+      "minNodes": 12
+    }
+  },
+  {
+    "id": "gcp-analytics-platform",
+    "title": "GCP Analytics Platform",
+    "prompt": "Create a Google Cloud analytics architecture diagram. Include data producers, Cloud Pub/Sub topics, Dataflow streaming pipeline, Cloud Storage raw landing bucket, Dataproc or Dataform transformation stage, BigQuery warehouse, Looker dashboards, Cloud Composer orchestration, Data Catalog, Secret Manager, Cloud Monitoring, and IAM service accounts. Show streaming ingestion, raw storage, transformation, warehouse loading, BI access, scheduled orchestration, metadata registration, and monitoring. Group by GCP project, region, VPC/network where appropriate, data ingestion, processing, storage, analytics, and operations zones.",
+    "expect": {
+      "keywords": [
+        ["pub/sub", "pubsub"],
+        ["dataflow"],
+        ["cloud storage", "storage"],
+        ["bigquery"],
+        ["looker"],
+        ["composer"],
+        ["data catalog", "catalog"],
+        ["cloud monitoring", "monitoring"]
+      ],
+      "minNodes": 11
+    }
+  },
+  {
+    "id": "iot-edge-cloud-telemetry",
+    "title": "Vendor-Neutral IoT Edge-to-Cloud Telemetry",
+    "prompt": "Create a vendor-neutral IoT edge-to-cloud telemetry architecture diagram. Include field sensors, edge gateway, local protocol adapters, edge rule engine, local buffer, device identity service, secure MQTT broker, cloud ingestion endpoint, stream processor, hot path time-series database, cold path object storage, alerting service, device management portal, analytics dashboard, monitoring, and OTA update service. Show telemetry collection, local filtering, buffered offline operation, secure publish, cloud stream processing, hot/cold storage paths, alerting, dashboard queries, device management commands, and OTA update flow.",
+    "expect": {
+      "keywords": [
+        ["sensor", "sensors"],
+        ["edge gateway", "gateway"],
+        ["mqtt"],
+        ["stream processor", "stream"],
+        ["time-series", "time series"],
+        ["object storage", "storage"],
+        ["device management"],
+        ["ota", "update"]
+      ],
+      "minNodes": 12
+    }
+  }
+]

@@ -1,0 +1,293 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+Users: {
+  icon: users
+  label: Users
+}
+
+AWSAccount.class: subscription
+AWSAccount: {
+  label: AWS ACCOUNT – PRODUCTION (ORDER PLATFORM)
+  direction: down
+
+  Region_apse2.class: region
+  Region_apse2: {
+    label: REGION AP-SOUTHEAST-2 (SYDNEY)
+
+    APIZone.class: resource_group
+    APIZone: {
+      label: API ZONE
+      direction: down
+
+      APIGateway.class: resource
+      APIGateway: {
+        icon: aws-api-gateway
+        label: API Gateway (REST /orders)
+      }
+
+      LambdaAuthorizer.class: resource
+      LambdaAuthorizer: {
+        icon: aws-lambda
+        label: Lambda Authorizer (JWT)
+      }
+
+      CreateOrderLambda.class: resource
+      CreateOrderLambda: {
+        icon: aws-lambda
+        label: CreateOrder Lambda (POST)
+      }
+
+      GetOrderLambda.class: resource
+      GetOrderLambda: {
+        icon: aws-lambda
+        label: GetOrder Lambda (GET)
+      }
+    }
+
+    ProcessingZone.class: resource_group
+    ProcessingZone: {
+      label: PROCESSING ZONE
+      grid-columns: 2
+      grid-gap: 60
+
+      QueueStage.class: resource_group
+      QueueStage: {
+        label: ASYNC QUEUE PROCESSING
+        style.fill: "#f3faff"
+        direction: right
+
+        OrderQueue.class: resource
+        OrderQueue: {
+          icon: aws-sqs
+          label: SQS OrderQueue
+        }
+
+        OrderProcessorLambda.class: resource
+        OrderProcessorLambda: {
+          icon: aws-lambda
+          label: OrderProcessor Lambda
+        }
+
+        OrderDLQ.class: resource
+        OrderDLQ: {
+          icon: aws-sqs
+          label: SQS Dead-Letter Queue
+        }
+      }
+
+      EventRouting.class: resource_group
+      EventRouting: {
+        label: EVENT ROUTING
+        style.fill: "#f3faff"
+
+        EventBus.class: resource
+        EventBus: {
+          icon: aws-eventbridge
+          label: EventBridge Orders Bus + Rules
+        }
+      }
+
+      Orchestration.class: resource_group
+      Orchestration: {
+        label: FULFILLMENT ORCHESTRATION
+        style.fill: "#f3faff"
+        direction: right
+
+        FulfillmentWorkflow.class: resource
+        FulfillmentWorkflow: {
+          icon: aws-step-functions
+          label: Step Functions Workflow (Retry/Catch)
+        }
+
+        ReceiptLambda.class: resource
+        ReceiptLambda: {
+          icon: aws-lambda
+          label: GenerateReceipt Lambda
+        }
+      }
+
+      Notifications.class: resource_group
+      Notifications: {
+        label: NOTIFICATIONS
+        style.fill: "#f3faff"
+
+        OrderNotificationsTopic.class: resource
+        OrderNotificationsTopic: {
+          icon: aws-sns
+          label: SNS OrderNotifications
+        }
+      }
+    }
+
+    DataZone.class: resource_group
+    DataZone: {
+      label: DATA ZONE
+      direction: down
+
+      OrdersTable.class: resource
+      OrdersTable: {
+        icon: aws-dynamodb
+        label: DynamoDB Orders Table
+      }
+
+      ReceiptBucket.class: resource
+      ReceiptBucket: {
+        icon: aws-s3
+        label: S3 Receipt Bucket
+      }
+    }
+
+    ObservabilityZone.class: resource_group
+    ObservabilityZone: {
+      label: OBSERVABILITY ZONE
+      direction: right
+
+      CloudWatchLogs.class: resource
+      CloudWatchLogs: {
+        icon: aws-cloudwatch
+        label: CloudWatch Logs
+      }
+
+      CloudWatchAlarms.class: resource
+      CloudWatchAlarms: {
+        icon: aws-cloudwatch
+        label: CloudWatch Alarms (DLQ, Errors, Throttles)
+      }
+
+      OpsAlertTopic.class: resource
+      OpsAlertTopic: {
+        icon: aws-sns
+        label: SNS Ops Alerts
+      }
+    }
+  }
+
+  IAM.class: resource_group
+  IAM: {
+    label: IAM (GLOBAL) – EXECUTION ROLES
+    direction: right
+
+    AuthorizerRole.class: resource
+    AuthorizerRole: {
+      icon: aws-iam
+      label: Authorizer Role
+    }
+
+    ApiHandlerRole.class: resource
+    ApiHandlerRole: {
+      icon: aws-iam
+      label: API Handler Role
+    }
+
+    ProcessorRole.class: resource
+    ProcessorRole: {
+      icon: aws-iam
+      label: Processor Role
+    }
+
+    StepFunctionsRole.class: resource
+    StepFunctionsRole: {
+      icon: aws-iam
+      label: Step Functions Role
+    }
+  }
+}
+
+CustomerInbox: {
+  icon: email
+  label: Customer Inbox
+}
+
+# Connections
+Users <-> AWSAccount.Region_apse2.APIZone.APIGateway: "HTTPS (202/200)"
+AWSAccount.Region_apse2.APIZone.APIGateway -> AWSAccount.Region_apse2.APIZone.LambdaAuthorizer: "Authorize"
+AWSAccount.Region_apse2.APIZone.APIGateway -> AWSAccount.Region_apse2.APIZone.CreateOrderLambda: "POST /orders"
+AWSAccount.Region_apse2.APIZone.APIGateway -> AWSAccount.Region_apse2.APIZone.GetOrderLambda: "GET /orders/{id}"
+AWSAccount.Region_apse2.APIZone.CreateOrderLambda -> AWSAccount.Region_apse2.DataZone.OrdersTable: "PutItem PENDING"
+AWSAccount.Region_apse2.APIZone.CreateOrderLambda -> AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderQueue: "SendMessage" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderQueue -> AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderProcessorLambda: "Poll Batch" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderQueue -> AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderDLQ: "Retry x3 → DLQ" {
+  style.stroke-dash: 5
+  style.stroke: "#d32f2f"
+  style.font-color: "#d32f2f"
+}
+AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderProcessorLambda -> AWSAccount.Region_apse2.DataZone.OrdersTable: "UpdateItem PROCESSING"
+AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderProcessorLambda -> AWSAccount.Region_apse2.ProcessingZone.EventRouting.EventBus: "PutEvents" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.EventRouting.EventBus -> AWSAccount.Region_apse2.ProcessingZone.Orchestration.FulfillmentWorkflow: "StartExecution" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.EventRouting.EventBus -> AWSAccount.Region_apse2.ProcessingZone.Notifications.OrderNotificationsTopic: "OrderPlaced" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.EventRouting.EventBus -> AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderDLQ: "Retries Exhausted" {
+  style.stroke-dash: 5
+  style.stroke: "#d32f2f"
+  style.font-color: "#d32f2f"
+}
+AWSAccount.Region_apse2.ProcessingZone.Orchestration.FulfillmentWorkflow -> AWSAccount.Region_apse2.ProcessingZone.Orchestration.ReceiptLambda: "Task"
+AWSAccount.Region_apse2.ProcessingZone.Orchestration.ReceiptLambda -> AWSAccount.Region_apse2.DataZone.ReceiptBucket: "PutObject"
+AWSAccount.Region_apse2.ProcessingZone.Orchestration.FulfillmentWorkflow -> AWSAccount.Region_apse2.DataZone.OrdersTable: "UpdateItem COMPLETED"
+AWSAccount.Region_apse2.ProcessingZone.Orchestration.FulfillmentWorkflow -> AWSAccount.Region_apse2.ProcessingZone.Notifications.OrderNotificationsTopic: "OrderCompleted" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.Notifications.OrderNotificationsTopic -> CustomerInbox: "Email / SMS" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.APIZone -> AWSAccount.Region_apse2.ObservabilityZone.CloudWatchLogs: "Logs" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone -> AWSAccount.Region_apse2.ObservabilityZone.CloudWatchLogs: "Logs & Metrics" {
+  style.stroke-dash: 5
+}
+AWSAccount.Region_apse2.ProcessingZone.QueueStage.OrderDLQ -> AWSAccount.Region_apse2.ObservabilityZone.CloudWatchAlarms: "DLQ Depth > 0" {
+  style.stroke-dash: 5
+  style.stroke: "#d32f2f"
+  style.font-color: "#d32f2f"
+}
+AWSAccount.Region_apse2.ObservabilityZone.CloudWatchAlarms -> AWSAccount.Region_apse2.ObservabilityZone.OpsAlertTopic: "Alarm Action" {
+  style.stroke-dash: 5
+}
+AWSAccount.IAM -> AWSAccount.Region_apse2: "AssumeRole" {
+  style.stroke-dash: 5
+}

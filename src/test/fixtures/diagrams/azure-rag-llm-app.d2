@@ -1,0 +1,300 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+Users.class: resource
+Users: {
+  icon: users
+  label: "Users"
+}
+
+Subscription.class: subscription
+Subscription: {
+  label: "AZURE SUBSCRIPTION (PRODUCTION)"
+
+  GlobalServices.class: region
+  GlobalServices: {
+    label: "GLOBAL SERVICES"
+    direction: down
+
+    FrontDoor.class: resource
+    FrontDoor: {
+      icon: azure-front-door
+      label: "Azure Front Door Premium + WAF"
+    }
+  }
+
+  Region.class: region
+  Region: {
+    label: "AZURE REGION (PRIMARY)"
+
+    RAG_RG.class: resource_group
+    RAG_RG: {
+      label: "RG-RAG-APP"
+      grid-columns: 2
+      horizontal-gap: 80
+      vertical-gap: 60
+
+      AppVNet.class: network
+      AppVNet: {
+        label: "APP VNET (10.0.0.0/16)"
+
+        AppSubnet.class: subnet
+        AppSubnet: {
+          label: "APP SUBNET (VNET INTEGRATION, NSG)"
+          direction: down
+
+          WebApp.class: resource
+          WebApp: {
+            icon: azure-app-service
+            label: "App Service Web App (RAG Orchestrator / Chat UI + API)"
+          }
+
+          IngestionGroup.class: resource_group
+          IngestionGroup: {
+            label: "DOCUMENT INGESTION"
+            direction: down
+
+            IngestionFunction.class: resource
+            IngestionFunction: {
+              icon: azure-functions
+              label: "Ingestion Function (Blob / Event Grid Trigger)"
+            }
+
+            ChunkEmbedPipeline.class: resource
+            ChunkEmbedPipeline: {
+              icon: azure-functions
+              label: "Chunking & Embedding Pipeline (Durable Functions)"
+            }
+          }
+        }
+
+        PrivateEndpointSubnet.class: subnet
+        PrivateEndpointSubnet: {
+          label: "DATA / PRIVATE ENDPOINT SUBNET (NSG)"
+          direction: down
+
+          PE_OpenAI.class: resource
+          PE_OpenAI: {
+            icon: azure-private-link
+            label: "PE OpenAI"
+          }
+
+          PE_Search.class: resource
+          PE_Search: {
+            icon: azure-private-link
+            label: "PE AI Search"
+          }
+
+          PE_Blob.class: resource
+          PE_Blob: {
+            icon: azure-private-link
+            label: "PE Blob"
+          }
+
+          PE_Cosmos.class: resource
+          PE_Cosmos: {
+            icon: azure-private-link
+            label: "PE Cosmos DB"
+          }
+
+          PE_KeyVault.class: resource
+          PE_KeyVault: {
+            icon: azure-private-link
+            label: "PE Key Vault"
+          }
+        }
+
+        PrivateDNSZones.class: resource
+        PrivateDNSZones: {
+          icon: azure-dns
+          label: "Private DNS Zones (privatelink.*)"
+        }
+      }
+
+      AIDataServices.class: resource_group
+      AIDataServices: {
+        label: "AI & DATA SERVICES (PUBLIC ACCESS DISABLED)"
+        direction: down
+
+        AzureOpenAI.class: resource
+        AzureOpenAI: {
+          icon: azure-cognitive-services
+          label: "Azure OpenAI (GPT Chat + Text-Embedding)"
+        }
+
+        AISearch.class: resource
+        AISearch: {
+          icon: azure-search
+          label: "Azure AI Search (Vector + Hybrid Index)"
+        }
+
+        BlobStorage.class: resource
+        BlobStorage: {
+          icon: azure-blob-storage
+          label: "Blob Storage (Document Store)"
+        }
+
+        CosmosDB.class: resource
+        CosmosDB: {
+          icon: azure-cosmos-db
+          label: "Cosmos DB (Chat Sessions + Doc Metadata)"
+          shape: cylinder
+        }
+      }
+
+      SecurityIdentity.class: resource_group
+      SecurityIdentity: {
+        label: "SECURITY & IDENTITY"
+        direction: down
+
+        ManagedIdentity.class: resource
+        ManagedIdentity: {
+          icon: azure-active-directory
+          label: "User-Assigned Managed Identity (Entra ID, Shared by All Compute)"
+        }
+
+        KeyVault.class: resource
+        KeyVault: {
+          icon: azure-key-vault
+          label: "Key Vault"
+        }
+      }
+
+      Operations.class: resource_group
+      Operations: {
+        label: "OPERATIONS"
+        direction: down
+
+        AppInsights.class: resource
+        AppInsights: {
+          icon: azure-app-insights
+          label: "Application Insights"
+        }
+
+        LogAnalytics.class: resource
+        LogAnalytics: {
+          icon: azure-log-analytics
+          label: "Log Analytics Workspace"
+        }
+
+        AzureMonitor.class: resource
+        AzureMonitor: {
+          icon: azure-monitor
+          label: "Azure Monitor (Alerts, Dashboards)"
+        }
+      }
+    }
+  }
+}
+
+# Connections
+Users -> Subscription.GlobalServices.FrontDoor: "1. HTTPS" {
+  style.stroke: "#1e88e5"
+}
+Subscription.GlobalServices.FrontDoor -> Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp: "2. HTTPS (Private Link)" {
+  style.stroke: "#1e88e5"
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp -> Subscription.Region.RAG_RG.SecurityIdentity.ManagedIdentity: "MI Token" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Search: "3. Vector Retrieval" {
+  style.stroke: "#1e88e5"
+}
+Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Search -> Subscription.Region.RAG_RG.AIDataServices.AISearch: "Private Link"
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_OpenAI: "4. Embed + Completion" {
+  style.stroke: "#1e88e5"
+}
+Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_OpenAI -> Subscription.Region.RAG_RG.AIDataServices.AzureOpenAI: "Private Link"
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Cosmos: "5. Session History" {
+  style.stroke: "#1e88e5"
+}
+Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Cosmos -> Subscription.Region.RAG_RG.AIDataServices.CosmosDB: "Private Link"
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.WebApp -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Blob: "A. Upload Docs" {
+  style.stroke: "#00897b"
+}
+Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Blob -> Subscription.Region.RAG_RG.AIDataServices.BlobStorage: "Private Link"
+Subscription.Region.RAG_RG.AIDataServices.BlobStorage -> Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.IngestionFunction: "B. BlobCreated (Event Grid)" {
+  style.stroke: "#00897b"
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.IngestionFunction -> Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.ChunkEmbedPipeline: "C. Orchestrate" {
+  style.stroke: "#00897b"
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.ChunkEmbedPipeline -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_OpenAI: "D. Embeddings" {
+  style.stroke: "#00897b"
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.ChunkEmbedPipeline -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Search: "E. Index Vectors" {
+  style.stroke: "#00897b"
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet.IngestionGroup.ChunkEmbedPipeline -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_Cosmos: "F. Metadata" {
+  style.stroke: "#00897b"
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet -> Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_KeyVault: "Secrets (MI)" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AppVNet.PrivateEndpointSubnet.PE_KeyVault -> Subscription.Region.RAG_RG.SecurityIdentity.KeyVault: "Private Link" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AppVNet.AppSubnet -> Subscription.Region.RAG_RG.Operations.AppInsights: "Telemetry" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.Operations.AppInsights -> Subscription.Region.RAG_RG.Operations.LogAnalytics: "Telemetry Sink" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.AIDataServices -> Subscription.Region.RAG_RG.Operations.LogAnalytics: "Diagnostics" {
+  style.stroke-dash: 5
+}
+Subscription.Region.RAG_RG.Operations.LogAnalytics -> Subscription.Region.RAG_RG.Operations.AzureMonitor: "Alerts" {
+  style.stroke-dash: 5
+}

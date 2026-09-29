@@ -210,8 +210,13 @@ When creating High Availability (HA) or Disaster Recovery (DR) diagrams (e.g., P
 
 ### 3. Aspect Ratio & Compaction
 - **Target 16:9 Ratio**: Avoid extremely tall or extremely wide diagrams.
+- **Hard limit**: keep the rendered diagram between 0.6:1 and 3:1 whenever possible. A long horizontal strip is a failed diagram.
+- **Compact Grid**: For complex diagrams, arrange major zones into 2 rows (entry/compute on the first row, data/ops on the second) instead of one long left-to-right chain.
+- **Local Direction**: Keep \`direction: right\` globally, but add \`direction: down\` inside large containers or sidecar containers (operations, security, management, observability, CI/CD stages) so their children stack vertically and do not widen the canvas.
 - **Vertical Stacking**: If a container has > 5 items, use vertical groups or sub-containers to stack them.
 - **Compactness**: Keep edge connection lengths short by grouping related items close together.
+- **Sidecar Placement**: Put monitoring, security, identity, backup, and management sidecars inside or directly next to the region/resource group they observe; do not strand them at the far right if that creates long dashed lines.
+- **External Actors**: Place users, operators, developers, and on-prem systems adjacent to the boundary they connect to, not at distant corners.
 
 ### 4. Component Anchoring
 - Place shared components (Traffic Manager, Global DNS, CDN) outside and *between* or *above* the regional containers.
@@ -244,6 +249,16 @@ Follow the plan EXACTLY:
 - **ZONE-DATA** (center-right): Databases, Caches, Message Queues, Storage Accounts
 - **ZONE-OPS** (rightmost or floating): Monitoring, Logging, Backup, Key Vault
 - **ZONE-GLOBAL** (above regions): Cross-cutting services spanning multiple regions
+
+### Compact Layout Requirement
+- Do NOT lay every zone out in one horizontal line. For more than 4 major zones, use a compact 2-row grid:
+  - Row 1: entry, API, compute, workflow
+  - Row 2: data, messaging, observability, security
+- Add \`direction: down\` inside operations/security/management/workflow containers to stack children vertically.
+- Prefer short local telemetry/security edges to nearby sidecars over one far-away global ops block.
+- Avoid routing edges through unrelated containers just to reach a distant monitoring or operator node.
+- \`grid-rows\` / \`grid-columns\` give every cell the same size: only grid siblings of similar size, and never put a large zone in the same grid as a small one (it leaves huge empty panels and shrinks the text).
+- Keep external actors (users, clients, on-prem) on the entry side of the layout so north-south traffic reads in the global direction, not backwards.
 
 ### Component Overlap & Isolation Rules
 
@@ -537,4 +552,3 @@ AWSAccount.US-East-1.VPC.PublicSubnet.ALB -> AWSAccount.US-East-1.VPC.PrivateSub
 
 Now generate the D2 diagram for the user's request.`;
 }
-

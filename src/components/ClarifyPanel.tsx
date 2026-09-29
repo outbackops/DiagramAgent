@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
+import { Check, HelpCircle, Sparkles } from "lucide-react";
+import { Button, cn } from "./ui/primitives";
 
 export interface ClarifyQuestion {
   id: string;
   question: string;
-  rationale?: string;
+  rationale?: string | null;
   type: "single" | "multi";
   options: { label: string; value: string }[];
 }
@@ -21,57 +23,38 @@ interface ClarifyPanelProps {
   isSubmitting?: boolean;
 }
 
-export default function ClarifyPanel({
-  questions,
-  onSubmit,
-  onSkip,
-  isSubmitting = false,
-}: ClarifyPanelProps) {
+const isOtherValue = (value: string) => value.toLowerCase() === "other";
+
+export default function ClarifyPanel({ questions, onSubmit, onSkip, isSubmitting = false }: ClarifyPanelProps) {
   const [answers, setAnswers] = useState<ClarifyAnswers>({});
   const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
 
-  const isOtherValue = (value: string) => value.toLowerCase() === "other";
+  const clearOther = (qId: string) =>
+    setOtherTexts((prev) => {
+      if (!(qId in prev)) return prev;
+      const next = { ...prev };
+      delete next[qId];
+      return next;
+    });
 
   const handleSingleSelect = useCallback((qId: string, value: string) => {
     setAnswers((prev) => ({ ...prev, [qId]: value }));
-    // Clear other text if switching away from Other
-    if (!isOtherValue(value)) {
-      setOtherTexts((prev) => {
-        const next = { ...prev };
-        delete next[qId];
-        return next;
-      });
-    }
+    if (!isOtherValue(value)) clearOther(qId);
   }, []);
 
-  const handleMultiToggle = useCallback((qId: string, value: string) => {
-    setAnswers((prev) => {
-      const current = (prev[qId] as string[]) || [];
-      const next = current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value];
-      return { ...prev, [qId]: next };
-    });
-    // Clear other text if deselecting Other
-    if (isOtherValue(value)) {
-      setOtherTexts((prev) => {
-        const current = (answers[qId] as string[]) || [];
-        if (current.includes(value)) {
-          const next = { ...prev };
-          delete next[qId];
-          return next;
-        }
-        return prev;
+  const handleMultiToggle = useCallback(
+    (qId: string, value: string) => {
+      const wasSelected = ((answers[qId] as string[]) || []).includes(value);
+      setAnswers((prev) => {
+        const current = (prev[qId] as string[]) || [];
+        return { ...prev, [qId]: current.includes(value) ? current.filter((v) => v !== value) : [...current, value] };
       });
-    }
-  }, [answers]);
-
-  const handleOtherText = useCallback((qId: string, text: string) => {
-    setOtherTexts((prev) => ({ ...prev, [qId]: text }));
-  }, []);
+      if (wasSelected && isOtherValue(value)) clearOther(qId);
+    },
+    [answers],
+  );
 
   const handleSubmit = useCallback(() => {
-    // Merge "Other" text into answers before submitting
     const merged: ClarifyAnswers = { ...answers };
     for (const [qId, text] of Object.entries(otherTexts)) {
       const trimmed = text.trim();
@@ -79,19 +62,15 @@ export default function ClarifyPanel({
       const current = merged[qId];
       if (typeof current === "string" && isOtherValue(current)) {
         merged[qId] = `other: ${trimmed}`;
-      } else if (Array.isArray(current) && current.includes("other")) {
+      } else if (Array.isArray(current) && current.some(isOtherValue)) {
         merged[qId] = current.map((v) => (isOtherValue(v) ? `other: ${trimmed}` : v));
       }
     }
     onSubmit(merged);
   }, [answers, otherTexts, onSubmit]);
 
-  const answeredCount = Object.keys(answers).filter((k) => {
-    const v = answers[k];
-    return v && (typeof v === "string" ? v.trim().length > 0 : v.length > 0);
-  }).length;
+  const answeredCount = Object.values(answers).filter((v) => (typeof v === "string" ? v.trim().length > 0 : v.length > 0)).length;
 
-  // Check if "Other" is selected for a given question
   const isOtherSelected = (qId: string): boolean => {
     const v = answers[qId];
     if (typeof v === "string") return isOtherValue(v);
@@ -99,139 +78,94 @@ export default function ClarifyPanel({
     return false;
   };
 
+  const isSelected = (q: ClarifyQuestion, value: string) =>
+    q.type === "single" ? answers[q.id] === value : ((answers[q.id] as string[]) || []).includes(value);
+
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      {/* Header */}
-      <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-        <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>A few quick questions to refine your diagram:</span>
-      </div>
+    <section
+      aria-label="Clarifying questions"
+      className="animate-slide-up overflow-hidden rounded-2xl border border-indigo-200/70 bg-gradient-to-b from-indigo-50/80 to-white shadow-sm dark:border-indigo-500/20 dark:from-indigo-500/10 dark:to-zinc-900"
+    >
+      <header className="flex items-center gap-2 border-b border-indigo-100 px-4 py-3 dark:border-indigo-500/10">
+        <span className="flex size-6 items-center justify-center rounded-lg bg-indigo-600 text-white">
+          <HelpCircle className="size-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">A few quick questions</p>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Answer what matters — skip the rest.</p>
+        </div>
+        <span className="text-[11px] font-medium tabular-nums text-indigo-600 dark:text-indigo-300">
+          {answeredCount}/{questions.length}
+        </span>
+      </header>
 
-      {/* Questions */}
-      <div className="space-y-4">
+      <ol className="space-y-4 px-4 py-4">
         {questions.map((q, idx) => (
-          <div key={q.id} className="space-y-1.5">
-            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
-              {idx + 1}. {q.question}
-            </p>
-            {q.rationale && (
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 italic mt-0.5">
-                💡 {q.rationale}
+          <li key={q.id} className="space-y-2">
+            <div>
+              <p className="text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
+                <span className="mr-1.5 text-zinc-400">{idx + 1}.</span>
+                {q.question}
+                {q.type === "multi" && <span className="ml-1.5 text-[11px] font-normal text-zinc-400">(pick any)</span>}
               </p>
-            )}
-
-            {q.type === "single" && (
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap gap-1.5">
-                  {q.options.map((opt) => {
-                    const selected = answers[q.id] === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => handleSingleSelect(q.id, opt.value)}
-                        disabled={isSubmitting}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-all duration-150 ${
-                          selected
-                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
-                        } ${isSubmitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {isOtherSelected(q.id) && (
-                  <input
-                    type="text"
-                    value={otherTexts[q.id] || ""}
-                    onChange={(e) => handleOtherText(q.id, e.target.value)}
-                    placeholder="Please specify..."
+              {q.rationale && <p className="mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">{q.rationale}</p>}
+            </div>
+            <div className="flex flex-wrap gap-1.5" role={q.type === "single" ? "radiogroup" : "group"} aria-label={q.question}>
+              {q.options.map((opt) => {
+                const selected = isSelected(q, opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role={q.type === "single" ? "radio" : "checkbox"}
+                    aria-checked={selected}
                     disabled={isSubmitting}
-                    autoFocus
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-blue-300 dark:border-blue-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-                  />
-                )}
-              </div>
+                    onClick={() => (q.type === "single" ? handleSingleSelect(q.id, opt.value) : handleMultiToggle(q.id, opt.value))}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 disabled:cursor-not-allowed disabled:opacity-50",
+                      selected
+                        ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:border-indigo-300 hover:text-indigo-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-indigo-400/60 dark:hover:text-indigo-200",
+                    )}
+                  >
+                    {selected && q.type === "multi" && <Check className="size-3" />}
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            {isOtherSelected(q.id) && (
+              <input
+                type="text"
+                value={otherTexts[q.id] || ""}
+                onChange={(e) => setOtherTexts((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                placeholder="Please specify…"
+                aria-label={`Other answer for: ${q.question}`}
+                disabled={isSubmitting}
+                autoFocus
+                className="w-full rounded-lg border border-indigo-300 bg-white px-2.5 py-1.5 text-xs text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-50 dark:border-indigo-500/40 dark:bg-zinc-800 dark:text-zinc-200"
+              />
             )}
-
-            {q.type === "multi" && (
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap gap-1.5">
-                  {q.options.map((opt) => {
-                    const selected = ((answers[q.id] as string[]) || []).includes(opt.value);
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => handleMultiToggle(q.id, opt.value)}
-                        disabled={isSubmitting}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-all duration-150 ${
-                          selected
-                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
-                        } ${isSubmitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                      >
-                        {selected && (
-                          <svg className="w-3 h-3 inline mr-0.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {isOtherSelected(q.id) && (
-                  <input
-                    type="text"
-                    value={otherTexts[q.id] || ""}
-                    onChange={(e) => handleOtherText(q.id, e.target.value)}
-                    placeholder="Please specify..."
-                    disabled={isSubmitting}
-                    autoFocus
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-gray-800 border border-blue-300 dark:border-blue-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-                  />
-                )}
-              </div>
-            )}
-
-          </div>
+          </li>
         ))}
-      </div>
+      </ol>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2 pt-1">
-        <button
+      <footer className="flex items-center gap-2 border-t border-indigo-100 bg-white/60 px-4 py-3 dark:border-indigo-500/10 dark:bg-zinc-900/60">
+        <Button
+          variant="primary"
+          size="sm"
           onClick={handleSubmit}
-          disabled={isSubmitting || answeredCount === 0}
-          className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
+          disabled={answeredCount === 0}
+          loading={isSubmitting}
+          icon={<Sparkles className="size-3.5" />}
         >
-          {isSubmitting ? (
-            <>
-              <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Generating...
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Generate Diagram
-              <span className="ml-0.5 text-blue-200">({answeredCount}/{questions.length})</span>
-            </>
-          )}
-        </button>
-
-        <button
-          onClick={onSkip}
-          disabled={isSubmitting}
-          className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Skip &amp; generate directly
-        </button>
-      </div>
-    </div>
+          Generate diagram
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onSkip} disabled={isSubmitting}>
+          Skip questions
+        </Button>
+      </footer>
+    </section>
   );
 }

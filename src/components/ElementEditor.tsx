@@ -1,169 +1,160 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Box, ImageIcon, Link2, Trash2, X } from "lucide-react";
+import type { DiagramModel } from "@/lib/model/types";
+import { deleteItems, renameItem, setIcon } from "@/lib/model/ops";
+import { indexModel } from "@/lib/model/query";
+import { MODEL_LIMITS } from "@/lib/model/validate";
+import IconPicker from "./IconPicker";
+import { Popover } from "./ui/Popover";
+import { Button, IconButton } from "./ui/primitives";
 
-export interface SelectedElement {
-  path: string;
-  isConnection: boolean;
-  connectionFrom?: string;
-  connectionTo?: string;
-  label?: string;
+export interface ElementEditorProps {
+  model: DiagramModel | null;
+  selection: string[];
+  readOnly: boolean;
+  connectFrom: string | null;
+  renameRequest?: { id: string; nonce: number };
+  onApply(op: (m: DiagramModel) => DiagramModel, options?: { coalesceKey?: string }): void;
+  onStartConnect(from: string): void;
+  onCancelConnect(): void;
+  onDeselect(): void;
 }
 
-interface ElementEditorProps {
-  selected: SelectedElement | null;
-  /** Whether we're waiting for the user to pick a second node for a new connection */
-  connectMode: boolean;
-  onUpdateLabel: (path: string, newLabel: string, isConnection: boolean) => void;
-  onDelete: (path: string, isConnection: boolean) => void;
-  onStartConnect: () => void;
-  onCancelConnect: () => void;
-  onDeselect: () => void;
-}
-
-export default function ElementEditor({
-  selected,
-  connectMode,
-  onUpdateLabel,
-  onDelete,
-  onStartConnect,
-  onCancelConnect,
-  onDeselect,
-}: ElementEditorProps) {
-  const [editingLabel, setEditingLabel] = useState(false);
+export default function ElementEditor({ model, selection, readOnly, connectFrom, renameRequest, onApply, onStartConnect, onCancelConnect, onDeselect }: ElementEditorProps) {
   const [labelValue, setLabelValue] = useState("");
+  const skipBlurSave = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // The draft belongs to the item it was typed for: clicking another item must
+  // never rename that one with this text (the selection changes before blur).
+  const draftRef = useRef<{ id: string | null; value: string; dirty: boolean }>({ id: null, value: "", dirty: false });
+  const handledRename = useRef<number | null>(null);
+  const index = model ? indexModel(model) : null;
+  const selectedId = selection.length === 1 ? selection[0] : null;
+  const selectedNode = selectedId && index ? index.byId.get(selectedId) ?? null : null;
+  const selectedEdge = selectedId && index ? index.edgeById.get(selectedId) ?? null : null;
+  const selectedLabel = selectedNode?.label ?? selectedEdge?.label ?? "";
 
-  // Reset editing state when the parent picks a different element.
-  // The setState calls are intentional: this is the standard "reset on prop
-  // change" pattern, where the source-of-truth lives outside React.
+  const commitDraft = useCallback(() => {
+    const draft = draftRef.current;
+    if (!draft.dirty || !draft.id) return;
+    draftRef.current = { ...draft, dirty: false };
+    const next = draft.value.trim();
+    const id = draft.id;
+    if (next) onApply((m) => renameItem(m, id, next), { coalesceKey: `rename:${id}` });
+  }, [onApply]);
+
   useEffect(() => {
+    // A pending edit for the previous selection is saved to that item before switching.
+    if (draftRef.current.id !== selectedId) commitDraft();
+    else if (draftRef.current.dirty) return;
+    draftRef.current = { id: selectedId, value: selectedLabel, dirty: false };
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEditingLabel(false);
-    setLabelValue(selected?.label || "");
-  }, [selected]);
+    setLabelValue(selectedLabel);
+  }, [commitDraft, selectedId, selectedLabel]);
 
-  const handleLabelSave = useCallback(() => {
-    if (selected && labelValue.trim()) {
-      onUpdateLabel(selected.path, labelValue.trim(), selected.isConnection);
+  useEffect(() => {
+    if (!renameRequest || renameRequest.id !== selectedId || handledRename.current === renameRequest.nonce) return;
+    handledRename.current = renameRequest.nonce;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [renameRequest, selectedId]);
+
+  const save = useCallback(() => {
+    if (skipBlurSave.current) {
+      skipBlurSave.current = false;
+      return;
     }
-    setEditingLabel(false);
-  }, [selected, labelValue, onUpdateLabel]);
+    commitDraft();
+  }, [commitDraft]);
 
-  const handleLabelKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") handleLabelSave();
-      if (e.key === "Escape") {
-        setEditingLabel(false);
-        setLabelValue(selected?.label || "");
-      }
-    },
-    [handleLabelSave, selected]
-  );
+  const discardDraft = useCallback(() => {
+    draftRef.current = { ...draftRef.current, value: selectedLabel, dirty: false };
+    setLabelValue(selectedLabel);
+  }, [selectedLabel]);
 
-  // Connect mode banner
-  if (connectMode) {
+  if (readOnly || !model) return null;
+
+  if (connectFrom) {
     return (
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-sm animate-in fade-in slide-in-from-bottom-2">
-        <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-        <span>Click a target node to create a connection</span>
-        <button
-          onClick={onCancelConnect}
-          className="px-2 py-0.5 bg-blue-500 hover:bg-blue-400 rounded text-xs transition-colors"
-        >
-          Cancel
-        </button>
+      <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 animate-slide-up items-center gap-3 rounded-xl bg-indigo-600 px-4 py-2 text-[13px] text-white shadow-lg">
+        <span className="size-2 animate-pulse-soft rounded-full bg-white" />
+        Click the target node to connect
+        <button type="button" onClick={onCancelConnect} className="rounded-md bg-white/15 px-2 py-0.5 text-xs hover:bg-white/25">Cancel</button>
       </div>
     );
   }
 
-  if (!selected) return null;
+  if (selection.length === 0) return null;
 
-  const displayName = selected.isConnection
-    ? `${selected.connectionFrom} → ${selected.connectionTo}`
-    : selected.path;
+  if (selection.length > 1) {
+    return (
+      <div className="absolute bottom-16 left-1/2 z-20 w-[min(440px,calc(100%-2rem))] -translate-x-1/2 animate-slide-up rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+        <div className="flex items-center gap-2">
+          <span className="flex size-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800"><Box className="size-3.5" /></span>
+          <span className="min-w-0 flex-1 text-[13px] font-medium text-zinc-700 dark:text-zinc-200">{selection.length} items selected</span>
+          <IconButton label="Deselect (Esc)" size="sm" onClick={onDeselect}><X className="size-3.5" /></IconButton>
+          <IconButton label="Delete" onClick={() => onApply((m) => deleteItems(m, selection))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-4" /></IconButton>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedId || (!selectedNode && !selectedEdge)) return null;
+  const isEdge = Boolean(selectedEdge);
+  const name = selectedEdge ? `${selectedEdge.from} -> ${selectedEdge.to}` : selectedNode?.id ?? selectedId;
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl px-4 py-3 min-w-[320px] max-w-[480px] animate-in fade-in slide-in-from-bottom-2">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          {selected.isConnection ? (
-            <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-            </svg>
-          )}
-          <span className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate max-w-[200px]" title={displayName}>
-            {displayName}
-          </span>
-        </div>
-        <button
-          onClick={onDeselect}
-          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-          title="Deselect"
-        >
-          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+    <div className="absolute bottom-16 left-1/2 z-20 w-[min(440px,calc(100%-2rem))] -translate-x-1/2 animate-slide-up rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+      <div className="flex items-center gap-2">
+        <span className="flex size-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
+          {isEdge ? <ArrowRight className="size-3.5" /> : <Box className="size-3.5" />}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400" title={name}>{name}</span>
+        <IconButton label="Deselect (Esc)" size="sm" onClick={onDeselect}><X className="size-3.5" /></IconButton>
       </div>
-
-      {/* Label editor */}
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400 w-12 shrink-0">Label:</span>
-        {editingLabel ? (
-          <div className="flex-1 flex gap-1.5">
-            <input
-              type="text"
-              value={labelValue}
-              onChange={(e) => setLabelValue(e.target.value)}
-              onKeyDown={handleLabelKeyDown}
-              onBlur={handleLabelSave}
-              autoFocus
-              className="flex-1 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-800 dark:text-gray-200"
-            />
-          </div>
-        ) : (
-          <button
-            onClick={() => {
-              setLabelValue(selected.label || "");
-              setEditingLabel(true);
-            }}
-            className="flex-1 text-left px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded hover:border-blue-400 transition-colors text-gray-700 dark:text-gray-300 truncate"
-            title="Click to edit label"
-          >
-            {selected.label || "(no label)"}
-          </button>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          ref={inputRef}
+          value={labelValue}
+          onChange={(e) => {
+            const value = e.target.value;
+            setLabelValue(value);
+            draftRef.current = { id: selectedId, value, dirty: value.trim() !== selectedLabel };
+          }}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+              skipBlurSave.current = true;
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              skipBlurSave.current = true;
+              discardDraft();
+              e.currentTarget.blur();
+            }
+          }}
+          placeholder="Label"
+          aria-label="Label"
+          maxLength={MODEL_LIMITS.labelLength}
+          className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] text-zinc-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        />
+        {selectedNode && (
+          <Popover align="end" panelClassName="p-0" trigger={({ open, toggle, id }) => (
+            <IconButton label="Change icon" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}><ImageIcon className="size-4" /></IconButton>
+          )}>
+            {(close) => <IconPicker value={selectedNode.icon} allowNone autoFocus onSelect={(nextIcon) => { onApply((m) => setIcon(m, selectedNode.id, nextIcon), { coalesceKey: `icon:${selectedNode.id}` }); close(); }} />}
+          </Popover>
         )}
+        {selectedNode && <IconButton label="Connect to another node" onClick={() => onStartConnect(selectedNode.id)}><Link2 className="size-4" /></IconButton>}
+        <IconButton label="Delete" onClick={() => onApply((m) => deleteItems(m, [selectedId]))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-4" /></IconButton>
       </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 pt-1 border-t border-gray-100 dark:border-gray-700">
-        {!selected.isConnection && (
-          <button
-            onClick={onStartConnect}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-            </svg>
-            Connect to...
-          </button>
-        )}
-        <div className="flex-1" />
-        <button
-          onClick={() => onDelete(selected.path, selected.isConnection)}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-          Delete
-        </button>
-      </div>
+      {selectedNode && <p className="mt-2 text-[11px] text-zinc-400">Tip: drag the selected node onto another container to move it.</p>}
+      {selectedEdge && <div className="mt-2"><Button variant="ghost" size="xs" onClick={() => onApply((m) => deleteItems(m, [selectedEdge.id]))}>Delete connection</Button></div>}
     </div>
   );
 }

@@ -1,205 +1,177 @@
-# DiagramAgent — AI-Powered Architecture Diagram Generator
+# DiagramAgent
 
-Generate professional cloud architecture diagrams from natural language using AI and D2 diagram-as-code.
+Describe a system in plain language and get a clean, editable architecture diagram — planned, drawn, rendered, reviewed and refined by the **GitHub Copilot models your account already has** (Claude Opus 5.5 at medium reasoning by default). No API keys.
 
-![Next.js](https://img.shields.io/badge/Next.js-16-black) ![D2](https://img.shields.io/badge/D2-WASM-blue) ![Azure AI](https://img.shields.io/badge/Azure_AI-Foundry-purple) ![Version](https://img.shields.io/badge/version-0.1-green)
+![DiagramAgent](docs/images/app-light.png)
 
-## Sample Output
+## Highlights
 
-### Azure SQL Always On with Disaster Recovery
+- **Sign in with your GitHub/Copilot identity** — uses the account signed in on your machine (`gh auth login` / `copilot login`), or an in-app *Sign in with GitHub* device-code flow. Organizations that federate GitHub with **Microsoft Entra ID** sign in through Entra as part of GitHub's normal sign-in.
+- **Pick any model you're entitled to** — the model picker lists your Copilot catalog (Claude, GPT, Grok and more — whatever your plan includes) with vision/reasoning badges and a reasoning-effort control. Default: `claude-opus-5.5` @ `medium`.
+- **A real pipeline, not a single prompt** — optional clarifying questions → architecture plan → D2 generation (streamed live) → render → deterministic quality checks → vision review → targeted refinement. Every refinement is re-checked and the best version wins.
+- **Quality you can see** — a *Quality* tab scores every render (0–100) with 16 deterministic checks (phantom nodes, unknown icons, overlaps, edges through nodes, crossings, aspect ratio, orphans, label coverage, …); a *Review* tab shows the vision model's score, findings and fixes per round.
+- **Edit by hand or by chat** — drag nodes and groups, drop them into other groups, resize groups, add nodes from an icon palette, connect, rename, change icons, align and distribute, with full undo/redo. Ask in chat ("add a Redis cache") and the change is merged into your layout: nothing you arranged moves. *Tidy up* re-runs the automatic layout when you want it.
+- **Export what you see** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io and native Visio `.vsdx` at the positions on your canvas, plus D2 and Mermaid source.
+- **Polished UX** — resizable panels, light/dark/system themes, live progress with timings, stop at any time (<kbd>Esc</kbd>), keyboard shortcuts, and state that survives reloads.
 
-> **Prompt:** "SQL Always On Availability Group on Azure with disaster recovery"
+## Quick start
 
-<p align="center">
-  <img src="samples/Generation1.svg" alt="Azure SQL Always On AG with DR" width="100%">
-</p>
-
-### Azure Platform Architecture
-
-> **Prompt:** "Azure SQL HA architecture with primary and DR regions, private endpoints, and monitoring"
-
-<p align="center">
-  <img src="samples/Generation2.svg" alt="Azure Platform Architecture" width="100%">
-</p>
-
-## UI Overview
-
-DiagramAgent uses a **three-panel layout**:
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  DiagramAgent              [Vision Refine ○]  [Model: GPT-5.2]  │
-├────────────┬──────────────┬──────────────────────────────────────┤
-│            │              │                                      │
-│   Chat     │  D2 Code     │   Diagram Preview                    │
-│   Panel    │  Editor      │   (pan/zoom/export)                  │
-│            │  (Monaco)    │                                      │
-│  Clarify   │              │      ┌────┐    ┌────┐    ┌────┐     │
-│  Questions │  direction:  │      │ LB │───→│ VM │───→│ DB │     │
-│  appear    │  right       │      └────┘    └────┘    └────┘     │
-│  here      │  classes: {  │                                      │
-│            │    ...       │                                      │
-│ [textarea] │  }           │              [SVG] [PNG]             │
-├────────────┴──────────────┴──────────────────────────────────────┤
-│  Ctrl+Enter to send                                              │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-**Flow:**
-1. Type a prompt in the chat panel (left)
-2. Answer clarifying questions via clickable pills
-3. Watch D2 code stream into the editor (center)
-4. See the diagram render live in the preview (right)
-5. Export as SVG or PNG, or zoom/pan to inspect
-
-## Example Prompts
-
-Try these prompts to see what DiagramAgent can generate:
-
-| Prompt | What You Get |
-|--------|-------------|
-| `SQL Always On Availability Group on Azure with disaster recovery` | Multi-region Azure architecture with AG listeners, replication, blob backup, and monitoring |
-| `Three-tier web application on AWS with auto-scaling and CDN` | CloudFront → ALB → EC2 Auto Scaling → RDS with read replicas and ElastiCache |
-| `Microservices architecture on Kubernetes with service mesh` | K8s cluster with Istio/Linkerd, API gateway, 4+ services, Prometheus monitoring |
-| `Serverless event-driven architecture on AWS` | API Gateway → Lambda → DynamoDB/SQS/SNS → CloudWatch |
-| `CI/CD pipeline with GitHub Actions, Docker, and Kubernetes` | Source → Build → Test → Container Registry → K8s Deployment |
-| `Multi-region active-active setup on Azure` | Two regions with Traffic Manager, paired App Services, Cosmos DB geo-replication |
-| `Data pipeline with Kafka, Spark, and Snowflake` | Producers → Kafka → Spark Streaming → Snowflake → BI dashboards |
-| `Real-time analytics platform with Kafka and Elasticsearch` | Event ingestion → Kafka → Logstash → Elasticsearch → Kibana |
-
-## Features
-
-- **Natural Language → Diagram** — Describe any architecture and get a styled, horizontal-layout diagram
-- **Clarifying Questions** — AI asks targeted follow-up questions before generating, with clickable option pills and "Other" freetext support
-- **5 LLM Models** — GPT-4o, GPT-5, GPT-5.2 Chat, GPT-5 Nano, o3-mini (all via Azure OpenAI)
-- **Vision Refinement** — GPT-4o evaluates the rendered diagram image and iterates up to 3 times to hit quality targets (8+/10)
-- **Color-Coded Containers** — Eraser.io-style colored boundaries: orange (access), green (network), blue (compute), pink (data), purple (ops), yellow (security), gray (platform)
-- **Horizontal Layout** — Containers ordered left-to-right: entry points → compute → data → security/monitoring
-- **200+ Cloud Icons** — AWS, Azure, GCP, Kubernetes, and general tech icons via Iconify
-- **Split-Pane Editor** — Monaco code editor + live D2 preview side by side
-- **Streaming Generation** — Watch diagram code appear in real-time
-- **Export** — Download diagrams as SVG or PNG
-- **Pan & Zoom** — Interactive diagram viewer with mouse drag and scroll zoom
-- **Iterative Refinement** — Modify existing diagrams with follow-up prompts
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- Azure OpenAI resource with models deployed (gpt-4o required for vision; others optional)
-- Azure CLI logged in (`az login`) — uses `DefaultAzureCredential` for auth
-
-### Setup
+Prerequisites: Node.js **20.19+ or 22.12+**, and a GitHub account with GitHub Copilot.
 
 ```bash
-# Clone
-git clone https://github.com/outbackops/DiagramAgent.git
-cd DiagramAgent
+# 1. Sign in once on this machine (either works; Entra SSO happens in the browser if your org uses it)
+gh auth login --web        # or: copilot login
 
-# Install dependencies
+# 2. Install and run
 npm install
-
-# Configure environment
-cp .env.local.example .env.local
-# Edit .env.local with your Azure OpenAI endpoint
-```
-
-### Environment Variables
-
-Create `.env.local`:
-
-```env
-# Azure OpenAI endpoint (required)
-AZURE_AI_FOUNDRY_ENDPOINT=https://your-resource.openai.azure.com
-
-# API key (optional — DefaultAzureCredential is used by default)
-AZURE_AI_FOUNDRY_API_KEY=your-key-if-needed
-
-# Default model for diagram generation
-AZURE_AI_FOUNDRY_MODEL=gpt-5.2-chat
-
-# Role-based model overrides (optional)
-# MODEL_GENERATOR=gpt-5.2-chat
-# MODEL_CLARIFIER=gpt-5.2-chat
-# MODEL_PLANNER=gpt-5.2-chat
-# MODEL_JUDGE=gpt-4o
-```
-
-> **Note:** The model selector in the UI controls the **generator** role only.
-> Clarifier, planner, and judge models are configured via the `MODEL_*` env vars above.
-> The judge defaults to `gpt-4o` (vision-capable) for diagram quality assessment.
-
-> **Note:** Key-based auth may be disabled on your Azure resource. The app uses `DefaultAzureCredential` from `@azure/identity`, which works with Azure CLI login, managed identities, and environment credentials.
-
-### Run
-
-```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open http://localhost:3000, pick an example (or describe your own system), and watch it build.
 
-## How It Works
+No `.env` file is needed for local use. See [`.env.example`](.env.example) for everything you *can* configure.
 
-1. **User enters a prompt** (e.g., "SQL Always On Availability Group on Azure with disaster recovery")
-2. **Clarify API** generates 4-7 targeted questions with clickable options (powered by GPT-4o)
-3. **User answers** by clicking option pills — selecting "Other" reveals a freetext input
-4. **Enhanced prompt** is built from the original request + user selections
-5. **LLM streams** valid D2 code with color-coded container classes, proper nesting, and full dot-path connections
-6. **D2 WASM engine** renders it as SVG with dagre layout
-7. **Vision refinement** (optional): SVG is converted to PNG via sharp, sent to GPT-4o for assessment — if score < 8/10, the feedback is sent back to the LLM for up to 3 refinement rounds
-8. **User can edit** D2 code in the Monaco editor, modify via follow-up prompts, or export as SVG/PNG
+## Signing in and model access
 
-## Tech Stack
+DiagramAgent talks to models through the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). Copilot entitlements belong to a GitHub identity, so there are two ways a request can run:
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 16 (App Router, TypeScript) |
-| Styling | Tailwind CSS 4 |
-| Diagram Engine | D2 via WASM (`@terrastruct/d2`) |
-| Code Editor | Monaco Editor (`@monaco-editor/react`) |
-| LLM Backend | Azure OpenAI (chat completions, streaming) |
-| Vision Assessment | GPT-4o with image input (SVG→PNG via `sharp`) |
-| Auth | `@azure/identity` DefaultAzureCredential |
-| Icons | Iconify CDN + Azure icon collection (200+ icons) |
+| Mode | When | How it works |
+|------|------|--------------|
+| **This machine's login** | Default for `npm run dev` | The server uses the GitHub account signed in via `gh auth login` or `copilot login`. The account menu shows *Signed in on this machine*. |
+| **In-app GitHub sign-in** | When `GITHUB_OAUTH_CLIENT_ID` is set | *Sign in with GitHub* shows a device code; approve it on github.com (Entra ID SSO/EMU users are routed through Entra automatically). The token is sealed with AES-256-GCM into an `HttpOnly`, `SameSite=Lax` cookie that expires after 8 hours: it lives in your browser, page scripts can't read it, and it's useless without the server's secret. Signing out clears the cookie but doesn't revoke the app on GitHub; do that under *Settings → Applications*. |
 
-## Project Structure
+Production builds **refuse** the machine login unless you opt in with `DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN=true` — a hosted instance never lends its operator's Copilot seat to anonymous visitors. Even when it's allowed, the machine login only serves requests addressed to `localhost`, `127.0.0.1` or `[::1]` (add trusted names with `DIAGRAM_AGENT_ALLOWED_HOSTS`), so the app opened through a LAN address or a rebinding DNS name can't borrow your GitHub session. `npm run dev` listens on `127.0.0.1` only for the same reason; `npm run dev -- -H 0.0.0.0` opens it up, and other devices then need the in-app sign-in.
+
+To enable in-app sign-in, register a GitHub OAuth App (or GitHub App) with **Enable Device Flow** checked and set:
+
+```env
+GITHUB_OAUTH_CLIENT_ID=<your app's client id>        # public identifier, not a secret
+DIAGRAM_AGENT_SESSION_SECRET=<32+ random characters>  # required in production
+```
+
+### Models
+
+- The picker shows only the models the signed-in account can use (from Copilot's model list), grouped by provider, with the default pinned first.
+- Reasoning effort (low → max) is offered for models that support it.
+- **Generation settings** let you turn clarifying questions and vision review on/off, choose 0–3 refinement rounds, and pick a different (vision-capable) *reviewer* model for a second opinion.
+- Change the default with `DIAGRAM_AGENT_DEFAULT_MODEL=copilot:<model>@<effort>`. If the default isn't in an account's catalog, the next best available model is chosen.
+- Unknown model IDs are rejected server-side (the Copilot runtime would otherwise silently fall back to another model).
+
+**Optional: Azure OpenAI.** Set `AZURE_AI_FOUNDRY_ENDPOINT` to also list your Azure OpenAI / AI Foundry deployments in the picker. Those calls authenticate with Microsoft Entra ID through `DefaultAzureCredential` (`az login`, managed identity, …) — no keys. Because that is the *server's* Azure identity, Azure models are offered only to the machine login and to GitHub users listed in `DIAGRAM_AGENT_AZURE_USERS` (`*` = everyone signed in).
+
+## How it works
+
+```
+prompt ──► clarify (optional) ──► plan ──► generate D2 (streamed) ──► layout (D2 WASM, ELK) ──► diagram model
+                                                     ▲                                             │
+                                                     │                         quality checks + model renderer
+                                                     │                                             │
+                                             refine with findings ◄──────────────── vision review (score /10)
+                                                     │
+                                          best candidate ──► canvas (hand edits, undo) ──► exports
+```
+
+- **Plan** — an architecture blueprint (components, hierarchy, zones, connections, HA/DR mirroring) plus a deterministic D2 scaffold so the generator refines a complete skeleton instead of dropping components.
+- **Quality checks** — computed from the compiled layout on every render, no model involved. Critical failures (e.g. duplicate nodes created by unqualified connection paths) are fixed before spending a vision review.
+- **Vision review** — the reviewer model looks at a PNG of the diagram (icons and fonts embedded) and scores intent coverage, flow, grouping, routing and style. Pass = 7/10, computed server-side.
+- **Refinement** — review findings plus failed checks are fed back; every refined candidate is rendered and reviewed again, and a regression guard keeps the best one.
+- **Diagram model** — D2 is the layout engine and the language the AI writes, but the app works on a diagram model (nodes, groups, connections, icons, styles and positions) imported from D2's compiled layout. One renderer draws the model for the canvas, the exports and the vision reviewer, so they always match. Hand edits change the model directly and lines re-route around nodes that don't move.
+- **Chat edits keep your layout** — for an edit, the current model is exported to D2, the AI changes it, and the result is merged back by node id: existing items keep their positions, new ones are placed next to what they connect to, and groups grow to make room. New diagrams, *Tidy up* and *Apply suggested fixes* use a fresh full layout (fixes ask first if you've arranged things by hand). Everything is undoable.
+- **Code tab** — shows the D2 and Mermaid generated from the model (read-only), and *Import D2…* opens D2 from elsewhere. Diagrams saved by earlier versions are imported automatically.
+
+Model calls run in isolated, tool-less Copilot sessions (`mode: "empty"`, replaced system prompt, no filesystem or shell access) with their state kept outside your `~/.copilot`.
+
+## Quality and testing
+
+```bash
+npm test                  # unit, component, route and diagram-fixture tests (Vitest)
+npm run lint
+npx tsc --noEmit
+npm run eval:diagrams     # live end-to-end eval against real Copilot models (see below)
+```
+
+- **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` lays each out with the real D2 engine (no network), imports it into the model, and asserts quality score, no critical failures, that scoring the model matches scoring the compiled layout, keyword coverage (also in the D2 exported from the model), and that draw.io/Visio export works. `src/lib/model/d2-convert.test.ts` round-trips every fixture through D2 export and re-import with the same ids, groups, labels, styles and connections.
+- **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures`.
+
+### Latest eval (2026-09-28)
+
+10 cases, `claude-opus-5.5` @ medium for every step (plan, generate, review), 1 refinement round:
+
+| Case | Quality | Review | Aspect | Keywords | Time |
+|------|--------:|-------:|-------:|---------:|-----:|
+| aws-three-tier-web | 90 (A) | 6/10 | 4.03:1 | 8/8 | 4.0 min |
+| aws-serverless-events | 89 (B) | 6/10 | 2.21:1 | 8/8 | 4.2 min |
+| azure-sql-always-on-hadr | 88 (B) | 6/10 | 6.57:1 | 7/8 | 5.7 min |
+| azure-hub-spoke-network | 82 (B) | 6/10 | 2.89:1 | 8/8 | 5.9 min |
+| azure-rag-llm-app | 88 (B) | 6/10 | 3.87:1 | 8/8 | 4.5 min |
+| kubernetes-microservices-mesh | 89 (B) | 6/10 | 2.50:1 | 8/8 | 4.7 min |
+| github-actions-aks-cicd | 86 (B) | 6/10 | 4.44:1 | 8/8 | 4.8 min |
+| streaming-kafka-spark-lakehouse | 86 (B) | 6/10 | 0.99:1 | 8/8 | 4.0 min |
+| gcp-analytics-platform | 88 (B) | 6/10 | 5.44:1 | 8/8 | 4.6 min |
+| iot-edge-cloud-telemetry | 89 (B) | 6/10 | 0.84:1 | 8/8 | 4.2 min |
+
+Every case renders, covers at least 7 of 8 required components and scores 82–90 on the deterministic checks. The vision reviewer consistently rates them **6/10 — "usable but needs work"**: its recurring findings are wide layouts (5 of 10 are wider than 3.5:1), long edges looping across containers, and colliding labels in dense areas. No run reached the 7/10 pass mark, so the app reports *Reviewed* with the findings and an **Apply suggested fixes** action rather than *Passed review*. Better automatic layout for large systems is the main open quality item.
+
+### Example output
+
+Real pipeline output (golden fixtures), rendered by the app:
+
+| IoT edge-to-cloud | Kubernetes microservices | RAG chat app on Azure |
+|---|---|---|
+| ![IoT edge to cloud](docs/images/iot-edge-cloud-telemetry.png) | ![Kubernetes microservices](docs/images/kubernetes-microservices-mesh.png) | ![RAG app on Azure](docs/images/azure-rag-llm-app.png) |
+
+| Vision review with suggested fixes | In-app GitHub sign-in |
+|---|---|
+| ![Review tab](docs/images/app-review-dark.png) | ![Device-code sign-in](docs/images/sign-in.png) |
+
+Editing on the canvas: a selected group with resize handles, the toolbar (undo/redo, add node or group, connect, align, distribute, delete, Tidy up) and the element editor:
+
+![Editable canvas](docs/images/canvas-editing.png)
+
+## Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DIAGRAM_AGENT_DEFAULT_MODEL` | `copilot:claude-opus-5.5@medium` | Default model (`provider:model@effort`) |
+| `GITHUB_OAUTH_CLIENT_ID` | — | Enables in-app *Sign in with GitHub* (device flow) |
+| `DIAGRAM_AGENT_SESSION_SECRET` | per-process random key in dev | Encrypts the session cookie; required in production with in-app sign-in |
+| `DIAGRAM_AGENT_ALLOW_MACHINE_LOGIN` | `true` in dev, `false` in production | Let requests use the server machine's GitHub login |
+| `DIAGRAM_AGENT_ALLOWED_HOSTS` | — | Extra host names (comma-separated) that may use the machine login besides loopback |
+| `DIAGRAM_AGENT_COPILOT_HOME` | `~/.diagram-agent/copilot` | Copilot runtime state directory (kept apart from your `~/.copilot`) |
+| `AZURE_AI_FOUNDRY_ENDPOINT` | — | Optional Azure OpenAI / AI Foundry endpoint (Entra ID auth) |
+| `DIAGRAM_AGENT_AZURE_USERS` | — | GitHub logins (comma-separated, or `*`) allowed to use the Azure models besides the machine login |
+| `DIAGRAM_AGENT_RENDER_TIMEOUT_MS` | `45000` | Per-step D2 layout/render limit before the renderer is recycled |
+| `DIAGRAM_AGENT_RENDER_QUEUE_LIMIT` | `8` | Renders allowed to wait for the (single) D2 engine before `/api/render` answers 503 |
+
+## Security
+
+- No keys or tokens in the repo; `.env*` is git-ignored and CI runs a full-history [gitleaks](https://github.com/gitleaks/gitleaks) scan on every push and PR.
+- API routes accept JSON only, reject cross-site/cross-origin browser requests, and cap request bodies (413) — a random web page can't spend your Copilot quota through your browser.
+- Every model, render and export route needs a credential: an in-app sign-in, or the machine login where it's allowed (see above).
+- Rendered SVG is sanitised (DOMPurify) before it is inserted into the page, because labels, links and tooltips are model-generated.
+- Errors returned to the browser never include upstream payloads or stack traces.
+
+## Project structure
 
 ```
 src/
 ├── app/
-│   ├── api/
-│   │   ├── assess/route.ts      # Vision-based diagram quality assessment
-│   │   ├── clarify/route.ts     # Clarifying questions generation
-│   │   ├── generate/route.ts    # LLM streaming D2 code generation
-│   │   ├── models/route.ts      # Available models list
-│   │   └── render/route.ts      # D2 WASM rendering to SVG
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx                 # Main app — chat, editor, preview
-├── components/
-│   ├── ClarifyPanel.tsx         # Clickable question pills + Other freetext
-│   ├── CodeEditor.tsx           # Monaco D2 editor (read-only during generation)
-│   ├── D2Renderer.tsx           # SVG viewer with pan/zoom/export
-│   └── PromptInput.tsx          # Chat panel with message history
+│   ├── page.tsx                 # Workspace: top bar, conversation, canvas, inspector
+│   └── api/                     # auth/*, models, clarify, plan, generate (SSE), assess, render, export/*
+├── components/                  # UI (ModelCanvas, CanvasToolbar, ElementEditor, ConversationPanel, RunCard, Inspector, …)
+├── hooks/                       # useDiagramDocument (model + undo), useDiagramAgent (conversation + pipeline), useCopilot, …
 └── lib/
-    ├── azure-auth.ts            # Shared Azure credential + token caching
-    ├── icon-registry.ts         # 200+ icon key → URL mappings
-    ├── models.ts                # Model configs (tokens, temperature, streaming)
-    └── system-prompt.ts         # D2 generation prompt with styling + layout rules
+    ├── model/                   # diagram model: operations, stable merge, router, renderer, D2 import/export, draw.io/Visio/Mermaid
+    ├── llm/                     # Copilot SDK provider, optional Azure provider, model selection
+    ├── auth/                    # device flow, sealed session cookie, machine-login policy
+    ├── pipeline/                # prompts, server steps, pure refine loop shared by UI and evals
+    ├── quality/                 # deterministic diagram scoring
+    ├── d2-render.ts             # D2 WASM compile (automatic layout)
+    └── svg-raster.ts            # SVG → PNG with embedded icons and fonts
+evals/                           # live eval cases
+scripts/eval-diagrams.ts         # eval harness
 ```
-
-## Supported Models
-
-| Model | Description | Temperature |
-|-------|-------------|-------------|
-| GPT-5.2 Chat | Best architecture reasoning (default) | Default only |
-| GPT-5 | Good balance of speed and quality | Default only |
-| GPT-4o | Fast and reliable, supports vision | Configurable |
-| GPT-5 Nano | Quick iterations | Default only |
-| o3-mini | Deep reasoning, slower | Not supported |
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Bundled icons are third-party assets; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

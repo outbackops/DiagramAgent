@@ -1,165 +1,79 @@
 import { NextRequest } from "next/server";
-import { buildSystemPrompt } from "@/lib/system-prompt";
-import { getModelConfig, getModelByRole } from "@/lib/models";
-import { getAuthHeaders, getAzureEndpoint } from "@/lib/azure-auth";
-import { buildChatCompletionsUrl } from "@/lib/azure-openai";
+import { resolveStepContext } from "@/lib/api/context";
+import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
+import { GenerateBody, parseBody } from "@/lib/api/schemas";
+import { errorResponseBody, isLlmError } from "@/lib/llm/errors";
+import { runGenerate } from "@/lib/pipeline/server";
 
-const AZURE_ENDPOINT = getAzureEndpoint();
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
+/**
+ * Streams D2 as server-sent events:
+ *   data: {"content": "..."}          — incremental text
+ *   data: {"done": true, "model", "usage"}
+ *   data: {"error": "...", "code"}    — failure after the stream started
+ *   data: [DONE]
+ */
 export async function POST(request: NextRequest) {
+  const blocked = guardApiRequest(request);
+  if (blocked) return blocked;
+
+  let body: ReturnType<typeof GenerateBody.parse>;
+  let ctx: Awaited<ReturnType<typeof resolveStepContext>>;
   try {
-    const { prompt, existingCode, history, model: requestedModel } = await request.json();
+    body = parseBody(GenerateBody, await readJsonBody(request, 1_000_000));
+    ctx = await resolveStepContext(request, body.model);
+  } catch (err) {
+    return jsonError(err, "Generate API error");
+  }
 
-    if (!prompt || typeof prompt !== "string") {
-      return new Response(JSON.stringify({ error: "Prompt is required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+  const abort = new AbortController();
+  request.signal.addEventListener("abort", () => abort.abort(), { once: true });
+  if (request.signal.aborted) abort.abort();
+  const encoder = new TextEncoder();
 
-    if (!AZURE_ENDPOINT) {
-      return new Response(
-        JSON.stringify({ error: "Azure AI Foundry is not configured." }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const modelId = requestedModel || getModelByRole('generator').id;
-    const modelConfig = getModelConfig(modelId);
-    const systemPrompt = buildSystemPrompt();
-
-    const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: systemPrompt },
-    ];
-
-    // Append conversation history if present
-    if (Array.isArray(history) && history.length > 0) {
-      for (const msg of history) {
-        if (msg.role && msg.content) {
-          messages.push({ role: msg.role, content: msg.content });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (payload: unknown) => {
+        try {
+          const data = typeof payload === "string" ? payload : JSON.stringify(payload);
+          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+        } catch {
+          // Client went away; nothing to deliver to.
+        }
+      };
+      try {
+        const result = await runGenerate(
+          { prompt: body.prompt, existingCode: body.existingCode, history: body.history },
+          { ...ctx, signal: abort.signal },
+          (chunk) => send({ content: chunk }),
+        );
+        send({ done: true, model: ctx.selection, usage: result.usage });
+      } catch (err) {
+        if (!(isLlmError(err) && err.code === "aborted")) {
+          if (!isLlmError(err)) console.error("Generate stream error:", err);
+          send(errorResponseBody(err));
+        }
+      } finally {
+        send("[DONE]");
+        try {
+          controller.close();
+        } catch {
+          // Already closed by a disconnect.
         }
       }
-    }
+    },
+    cancel() {
+      abort.abort();
+    },
+  });
 
-    if (existingCode) {
-      messages.push({
-        role: "assistant",
-        content: existingCode,
-      });
-      messages.push({
-        role: "user",
-        content: `Modify the above D2 diagram based on this request: ${prompt}. Output the COMPLETE updated D2 code.`,
-      });
-    } else {
-      messages.push({
-        role: "user",
-        content: prompt,
-      });
-    }
-
-    const apiUrl = buildChatCompletionsUrl(modelId, modelConfig.apiVersion);
-
-    console.log(`Calling Azure AI [${modelId}]:`, apiUrl);
-
-    const authHeaders = await getAuthHeaders();
-
-    // Build request body with model-appropriate params
-    const requestBody: Record<string, unknown> = {
-      model: modelId,
-      messages,
-      stream: modelConfig.supportsStreaming,
-    };
-
-    if (modelConfig.useMaxCompletionTokens) {
-      requestBody.max_completion_tokens = modelConfig.maxTokens;
-    } else {
-      requestBody.max_tokens = modelConfig.maxTokens;
-    }
-
-    if (modelConfig.supportsTemperature) {
-      requestBody.temperature = 0.3;
-    }
-
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Azure AI error:", response.status, errorText);
-      return new Response(
-        JSON.stringify({ error: `LLM API error: ${response.status}`, details: errorText }),
-        { status: response.status, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Stream the response back as SSE
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const reader = response.body?.getReader();
-        if (!reader) { controller.close(); return; }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith("data: ")) continue;
-
-              const data = trimmed.slice(6);
-              if (data === "[DONE]") {
-                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                continue;
-              }
-
-              try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
-                if (content) {
-                  controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
-                  );
-                }
-              } catch {
-                // Skip
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Stream error:", err);
-        } finally {
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (error) {
-    console.error("Generate API error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }

@@ -1,0 +1,42 @@
+{
+  "id": "iot-edge-cloud-telemetry",
+  "title": "Vendor-Neutral IoT Edge-to-Cloud Telemetry",
+  "prompt": "Create a vendor-neutral IoT edge-to-cloud telemetry architecture diagram. Include field sensors, edge gateway, local protocol adapters, edge rule engine, local buffer, device identity service, secure MQTT broker, cloud ingestion endpoint, stream processor, hot path time-series database, cold path object storage, alerting service, device management portal, analytics dashboard, monitoring, and OTA update service. Show telemetry collection, local filtering, buffered offline operation, secure publish, cloud stream processing, hot/cold storage paths, alerting, dashboard queries, device management commands, and OTA update flow.",
+  "model": "copilot:claude-opus-5.5@medium",
+  "qualityScore": 89,
+  "reviewScore": null,
+  "keywords": [
+    [
+      "sensor",
+      "sensors"
+    ],
+    [
+      "edge gateway",
+      "gateway"
+    ],
+    [
+      "mqtt"
+    ],
+    [
+      "stream processor",
+      "stream"
+    ],
+    [
+      "time-series",
+      "time series"
+    ],
+    [
+      "object storage",
+      "storage"
+    ],
+    [
+      "device management"
+    ],
+    [
+      "ota",
+      "update"
+    ]
+  ],
+  "minNodes": 12,
+  "generatedOn": "2026-09-28"
+}

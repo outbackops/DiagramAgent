@@ -1,0 +1,374 @@
+direction: right
+
+classes: {
+  subscription: {
+    style.fill: "#ede7f6"
+    style.stroke: "#5c6bc0"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#3949ab"
+    style.bold: true
+  }
+  resource_group: {
+    style.fill: "#e1f5fe"
+    style.stroke: "#039be5"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#0277bd"
+    style.bold: true
+  }
+  region: {
+    style.fill: "#f5f5f5"
+    style.stroke: "#616161"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#424242"
+    style.bold: true
+  }
+  network: {
+    style.fill: "#fff3e0"
+    style.stroke: "#ef6c00"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#e65100"
+    style.bold: true
+  }
+  subnet: {
+    style.fill: "#e8f5e9"
+    style.stroke: "#2e7d32"
+    style.border-radius: 8
+    style.stroke-width: 2
+    style.font-color: "#1b5e20"
+    style.bold: true
+  }
+  resource: {
+    style.fill: "#ffffff"
+    style.stroke: "#757575"
+    style.border-radius: 6
+    style.stroke-width: 1
+    style.font-color: "#424242"
+    style.bold: true
+  }
+}
+
+ExternalClients.class: region
+ExternalClients: {
+  label: INTERNET / EXTERNAL CLIENTS
+
+  Users.class: resource
+  Users: {
+    icon: users
+    label: External Users (Browser / Mobile)
+  }
+}
+
+GlobalEdge.class: network
+GlobalEdge: {
+  label: EDGE NETWORK
+  direction: down
+
+  DNS.class: resource
+  DNS: {
+    icon: internet
+    label: DNS (app.example.com)
+  }
+
+  ExternalLoadBalancer.class: resource
+  ExternalLoadBalancer: {
+    icon: load-balancer
+    label: External L4 Load Balancer
+  }
+}
+
+K8sCluster.class: subscription
+K8sCluster: {
+  label: KUBERNETES CLUSTER
+  grid-columns: 3
+  grid-gap: 60
+
+  IngressNS.class: resource_group
+  IngressNS: {
+    label: NAMESPACE: INGRESS
+    direction: down
+
+    IngressController.class: resource
+    IngressController: {
+      icon: k8s-ingress
+      label: Ingress Controller (TLS)
+    }
+
+    APIGateway.class: resource
+    APIGateway: {
+      icon: api
+      label: API Gateway (AuthN, Rate Limit)
+    }
+  }
+
+  FrontendNS.class: resource_group
+  FrontendNS: {
+    label: NAMESPACE: FRONTEND
+    direction: down
+
+    FrontendPod.class: subnet
+    FrontendPod: {
+      label: FRONTEND POD
+      direction: right
+
+      FrontendService.class: resource
+      FrontendService: {
+        icon: k8s-deployment
+        label: frontend-svc
+      }
+
+      FrontendSidecar.class: resource
+      FrontendSidecar: {
+        icon: envoy
+        label: Mesh Sidecar
+        style.fill: "#e0f2f1"
+      }
+    }
+  }
+
+  BackendNS.class: resource_group
+  BackendNS: {
+    label: NAMESPACE: BACKEND
+    direction: down
+
+    OrdersPod.class: subnet
+    OrdersPod: {
+      label: ORDERS POD
+      direction: right
+
+      OrdersService.class: resource
+      OrdersService: {
+        icon: k8s-deployment
+        label: orders-svc
+      }
+
+      OrdersSidecar.class: resource
+      OrdersSidecar: {
+        icon: envoy
+        label: Mesh Sidecar
+        style.fill: "#e0f2f1"
+      }
+    }
+
+    PaymentsPod.class: subnet
+    PaymentsPod: {
+      label: PAYMENTS POD
+      direction: right
+
+      PaymentsService.class: resource
+      PaymentsService: {
+        icon: k8s-deployment
+        label: payments-svc
+      }
+
+      PaymentsSidecar.class: resource
+      PaymentsSidecar: {
+        icon: envoy
+        label: Mesh Sidecar
+        style.fill: "#e0f2f1"
+      }
+    }
+
+    InventoryPod.class: subnet
+    InventoryPod: {
+      label: INVENTORY POD
+      direction: right
+
+      InventoryService.class: resource
+      InventoryService: {
+        icon: k8s-deployment
+        label: inventory-svc
+      }
+
+      InventorySidecar.class: resource
+      InventorySidecar: {
+        icon: envoy
+        label: Mesh Sidecar
+        style.fill: "#e0f2f1"
+      }
+    }
+  }
+
+  PlatformNS.class: resource_group
+  PlatformNS: {
+    label: NAMESPACE: PLATFORM / MESH-SYSTEM
+    direction: down
+
+    MeshControlPlane.class: resource
+    MeshControlPlane: {
+      icon: settings
+      label: Mesh Control Plane (CA, Config)
+    }
+
+    Secrets.class: resource
+    Secrets: {
+      icon: k8s-secret
+      label: Secrets
+    }
+
+    HPA.class: resource
+    HPA: {
+      icon: k8s-hpa
+      label: Horizontal Pod Autoscaler (per Deployment)
+    }
+  }
+
+  ObservabilityNS.class: resource_group
+  ObservabilityNS: {
+    label: NAMESPACE: OBSERVABILITY
+    grid-columns: 2
+    grid-gap: 40
+
+    Prometheus.class: resource
+    Prometheus: {
+      icon: prometheus
+      label: Prometheus (Metrics)
+    }
+
+    Grafana.class: resource
+    Grafana: {
+      icon: grafana
+      label: Grafana (Dashboards)
+    }
+
+    Jaeger.class: resource
+    Jaeger: {
+      icon: monitor
+      label: Jaeger (Tracing)
+    }
+
+    LogCollector.class: resource
+    LogCollector: {
+      icon: k8s-daemonset
+      label: Log Collector (DaemonSet)
+    }
+
+    LogStore.class: resource
+    LogStore: {
+      icon: storage
+      label: Log Store
+    }
+  }
+
+  DataNS.class: resource_group
+  DataNS: {
+    label: NAMESPACE: DATA
+    direction: down
+
+    PostgreSQL.class: resource
+    PostgreSQL: {
+      icon: postgresql
+      label: PostgreSQL (StatefulSet + PVC)
+      shape: cylinder
+    }
+
+    Redis.class: resource
+    Redis: {
+      icon: redis
+      label: Redis Cache
+    }
+
+    MessageBroker.class: resource
+    MessageBroker: {
+      icon: queue
+      label: Message Broker (Event Bus)
+      shape: queue
+    }
+  }
+}
+
+# Connections
+ExternalClients.Users -> GlobalEdge.DNS: DNS {
+  style.stroke-dash: 5
+  style.stroke: "#1565c0"
+}
+ExternalClients.Users -> GlobalEdge.ExternalLoadBalancer: HTTPS {
+  style.stroke: "#1565c0"
+  style.stroke-width: 2
+}
+GlobalEdge.ExternalLoadBalancer -> K8sCluster.IngressNS.IngressController: HTTPS {
+  style.stroke: "#1565c0"
+  style.stroke-width: 2
+}
+K8sCluster.IngressNS.IngressController -> K8sCluster.IngressNS.APIGateway: HTTP {
+  style.stroke: "#1565c0"
+  style.stroke-width: 2
+}
+K8sCluster.IngressNS.APIGateway -> K8sCluster.FrontendNS.FrontendPod.FrontendSidecar: mTLS {
+  style.stroke: "#1565c0"
+  style.stroke-width: 2
+}
+K8sCluster.FrontendNS.FrontendPod.FrontendSidecar -> K8sCluster.BackendNS.OrdersPod.OrdersSidecar: mTLS gRPC {
+  style.stroke: "#2e7d32"
+  style.stroke-width: 2
+}
+K8sCluster.BackendNS.OrdersPod.OrdersSidecar -> K8sCluster.BackendNS.PaymentsPod.PaymentsSidecar: mTLS {
+  style.stroke: "#2e7d32"
+  style.stroke-width: 2
+}
+K8sCluster.BackendNS.OrdersPod.OrdersSidecar -> K8sCluster.BackendNS.InventoryPod.InventorySidecar: mTLS {
+  style.stroke: "#2e7d32"
+  style.stroke-width: 2
+}
+K8sCluster.BackendNS.OrdersPod.OrdersService -> K8sCluster.DataNS.PostgreSQL: SQL {
+  style.stroke: "#424242"
+}
+K8sCluster.BackendNS.PaymentsPod.PaymentsService -> K8sCluster.DataNS.PostgreSQL: SQL {
+  style.stroke: "#424242"
+}
+K8sCluster.BackendNS.InventoryPod.InventoryService -> K8sCluster.DataNS.Redis: Cache R/W {
+  style.stroke: "#424242"
+}
+K8sCluster.FrontendNS.FrontendPod.FrontendService -> K8sCluster.DataNS.Redis: Sessions {
+  style.stroke: "#424242"
+}
+K8sCluster.BackendNS.OrdersPod.OrdersService -> K8sCluster.DataNS.MessageBroker: Publish {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+K8sCluster.DataNS.MessageBroker -> K8sCluster.BackendNS.PaymentsPod.PaymentsService: Consume {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+K8sCluster.DataNS.MessageBroker -> K8sCluster.BackendNS.InventoryPod.InventoryService: Consume {
+  style.stroke-dash: 5
+  style.stroke: "#ef6c00"
+}
+K8sCluster.ObservabilityNS.Prometheus -> K8sCluster.BackendNS: Scrape {
+  style.stroke-dash: 5
+  style.stroke: "#6a1b9a"
+}
+K8sCluster.BackendNS -> K8sCluster.ObservabilityNS.LogCollector: Logs {
+  style.stroke-dash: 5
+  style.stroke: "#6a1b9a"
+}
+K8sCluster.BackendNS -> K8sCluster.ObservabilityNS.Jaeger: Traces {
+  style.stroke-dash: 5
+  style.stroke: "#6a1b9a"
+}
+K8sCluster.ObservabilityNS.LogCollector -> K8sCluster.ObservabilityNS.LogStore: Ship {
+  style.stroke-dash: 5
+  style.stroke: "#6a1b9a"
+}
+K8sCluster.ObservabilityNS.Grafana -> K8sCluster.ObservabilityNS.Prometheus: PromQL {
+  style.stroke: "#6a1b9a"
+}
+K8sCluster.ObservabilityNS.Prometheus -> K8sCluster.PlatformNS.HPA: Custom Metrics {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+K8sCluster.PlatformNS.HPA -> K8sCluster.BackendNS: Scale {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+K8sCluster.PlatformNS.Secrets -> K8sCluster.BackendNS: Secrets {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}
+K8sCluster.PlatformNS.MeshControlPlane -> K8sCluster.BackendNS: Certs + Config {
+  style.stroke-dash: 5
+  style.stroke: "#757575"
+}

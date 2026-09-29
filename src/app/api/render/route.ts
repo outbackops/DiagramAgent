@@ -1,91 +1,84 @@
-import { NextRequest } from "next/server";
-import { resolveIconsInD2Code } from "@/lib/icon-registry";
-import { convertConnectionsToOrthogonal } from "@/lib/svg-orthogonal";
-import { errorMessage as toErrorMessage } from "@/lib/error-message";
+import { NextRequest, NextResponse } from "next/server";
+import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
+import { getRequestCredentials } from "@/lib/auth/session";
+import { compileD2, D2BusyError, D2RenderError } from "@/lib/d2-render";
+import { LlmError } from "@/lib/llm/errors";
+import { modelFromCompiled } from "@/lib/model/from-d2";
+import { modelToCompiled } from "@/lib/model/quality";
+import { renderModelSvg } from "@/lib/model/render-svg";
+import { routeModelEdges } from "@/lib/model/route";
+import { modelToD2 } from "@/lib/model/to-d2";
+import { validateModel } from "@/lib/model/validate";
+import { scoreDiagram, type QualityReport } from "@/lib/quality/diagram-quality";
 
-// Narrow structural typing for the parts of the D2 API we actually use,
-// without trying to mirror the upstream type surface (which is large and
-// not stable across versions).
-type D2Like = {
-  compile: (code: string, opts: { layout: string; sketch: boolean; pad: number }) => Promise<{
-    diagram: unknown;
-    renderOptions: Record<string, unknown>;
-  }>;
-  render: (diagram: unknown, opts: Record<string, unknown>) => Promise<string>;
-};
+export const dynamic = "force-dynamic";
 
-let d2Instance: D2Like | null = null;
-let d2InitPromise: Promise<D2Like> | null = null;
+const MAX_CODE_LENGTH = 200_000;
+const MAX_BODY_BYTES = 4_000_000;
 
-async function getD2(): Promise<D2Like> {
-  if (d2Instance) return d2Instance;
-  if (d2InitPromise) return d2InitPromise;
-
-  d2InitPromise = (async () => {
-    const { D2 } = await import("@terrastruct/d2");
-    // The upstream constructor signature is broader than D2Like; we narrow
-    // it via an unknown bounce so the assignment is explicit.
-    const inst = new D2() as unknown as D2Like;
-    d2Instance = inst;
-    return inst;
-  })();
-
-  return d2InitPromise;
+function score(code: string, diagram: Parameters<typeof scoreDiagram>[1]): QualityReport | null {
+  try {
+    return scoreDiagram(code, diagram);
+  } catch (err) {
+    console.error("Quality scoring failed:", err);
+    return null;
+  }
 }
 
+/**
+ * Renders a diagram and scores it deterministically.
+ * - `{ code }`: D2 is compiled (full automatic layout) and imported into a model.
+ * - `{ model }`: an edited model is rendered as-is.
+ * Either way the SVG comes from the model renderer, so the canvas, exports and
+ * the vision reviewer all see the same picture.
+ */
 export async function POST(request: NextRequest) {
+  const blocked = guardApiRequest(request);
+  if (blocked) return blocked;
+
+  if (!getRequestCredentials(request)) {
+    return jsonError(new LlmError("unauthenticated", "Sign in with GitHub to use DiagramAgent."));
+  }
+
+  let body: Record<string, unknown> | null;
   try {
-    const { code } = await request.json();
-
-    if (!code || typeof code !== "string" || !code.trim()) {
-      return new Response(JSON.stringify({ error: "No D2 code provided" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const d2 = await getD2();
-    const resolvedCode = resolveIconsInD2Code(code);
-
-    const result = await d2.compile(resolvedCode, {
-      layout: "elk",
-      sketch: false,
-      pad: 40,
-    });
-    console.log("[Render API] D2 compiled");
-
-    const svg = await d2.render(result.diagram, {
-      ...result.renderOptions,
-      themeID: 0,
-      center: true,
-      noXMLTag: true,
-    });
-    console.log("[Render API] D2 rendered, length:", svg.length);
-
-    // Post-process: convert curved connectors to orthogonal (right-angled) lines
-    const processedSvg = convertConnectionsToOrthogonal(svg, 8);
-    console.log("[Render API] Orthogonal post-processing complete, length:", processedSvg.length);
-
-    return new Response(JSON.stringify({ svg: processedSvg }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    body = await readJsonBody(request, MAX_BODY_BYTES);
   } catch (err) {
-    console.error("D2 render error:", err);
+    return jsonError(err, "Render API error");
+  }
 
-    // Try to extract useful error message
-    let errorText = toErrorMessage(err) || "Failed to render diagram";
-    try {
-      const parsed = JSON.parse(errorText);
-      if (Array.isArray(parsed) && parsed[0]?.errmsg) {
-        errorText = parsed.map((e: { errmsg?: string }) => e.errmsg ?? "").join("\n");
-      }
-    } catch {
-      // keep original message
+  if (body?.model !== undefined) {
+    const result = validateModel(body.model);
+    if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
+    const model = routeModelEdges(result.model, { fallbackOnly: true });
+    return NextResponse.json({ svg: renderModelSvg(model), quality: score(modelToD2(model), modelToCompiled(model)) });
+  }
+
+  const code = body?.code;
+  if (typeof code !== "string" || !code.trim()) {
+    return NextResponse.json({ error: "No D2 code provided" }, { status: 400 });
+  }
+  if (code.length > MAX_CODE_LENGTH) {
+    return NextResponse.json({ error: "Diagram code is too large" }, { status: 413 });
+  }
+
+  try {
+    const { diagram } = await compileD2(code, { signal: request.signal });
+    const { model, warnings } = modelFromCompiled(diagram, { code });
+    const validated = validateModel(model);
+    if (!validated.ok) {
+      console.error("Imported D2 model failed validation:", validated.error);
+      return NextResponse.json({ error: `Imported D2 model is invalid: ${validated.error}` }, { status: 500 });
     }
-
-    return new Response(
-      JSON.stringify({ error: errorText }),
-      { status: 422, headers: { "Content-Type": "application/json" } }
-    );
+    return NextResponse.json({ svg: renderModelSvg(validated.model), quality: score(code, diagram), model: validated.model, warnings });
+  } catch (err) {
+    if (err instanceof D2BusyError) return NextResponse.json({ error: err.message }, { status: 503 });
+    if (err instanceof Error && err.name === "AbortError") return NextResponse.json({ error: "Request was cancelled" }, { status: 499 });
+    // 422 means "the D2 is wrong" to clients (they offer an AI fix); anything else is ours.
+    if (!(err instanceof D2RenderError)) {
+      console.error("D2 render error:", err);
+      return NextResponse.json({ error: "Failed to render diagram" }, { status: 500 });
+    }
+    return NextResponse.json({ error: err.message }, { status: 422 });
   }
 }

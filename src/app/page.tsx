@@ -1,1026 +1,490 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import dynamic from "next/dynamic";
-import ChatPanel, { ChatMessage } from "@/components/PromptInput";
-import ClarifyPanel, { ClarifyQuestion, ClarifyAnswers } from "@/components/ClarifyPanel";
-import { resolveAnswerSpecs } from "@/lib/clarify-utils";
-import ElementEditor, { SelectedElement } from "@/components/ElementEditor";
-import {
-  parseConnectionPath,
-  findElementLabel,
-  updateElementLabel,
-  deleteElement,
-  addConnection,
-  deleteConnection,
-  updateConnectionLabel,
-  moveNodeToContainer,
-} from "@/lib/d2-editor";
-import { analyzeD2Code } from "@/lib/d2-analyzer";
-import { hashSvg } from "@/lib/svg-hash";
-import { planToD2Scaffold } from "@/lib/plan-to-d2";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AccountMenu from "@/components/AccountMenu";
+import ConversationPanel from "@/components/ConversationPanel";
+import type { ComposerHandle } from "@/components/Composer";
+import DeviceFlowDialog from "@/components/DeviceFlowDialog";
+import CanvasToolbar from "@/components/CanvasToolbar";
+import DiagramCanvas from "@/components/DiagramCanvas";
+import ElementEditor from "@/components/ElementEditor";
+import Inspector, { type InspectorTab } from "@/components/Inspector";
+import ModelCanvas from "@/components/ModelCanvas";
+import ModelPicker from "@/components/ModelPicker";
+import ResizeHandle from "@/components/ResizeHandle";
+import { phaseLabel } from "@/components/RunCard";
+import SettingsMenu from "@/components/SettingsMenu";
+import SignInGate from "@/components/SignInGate";
+import TopBar from "@/components/TopBar";
+import { Dialog } from "@/components/ui/Dialog";
+import { Button } from "@/components/ui/primitives";
+import { ToastProvider, useToast } from "@/components/ui/Toast";
+import { useCopilotSession, useModelChoice } from "@/hooks/useCopilot";
+import { useDiagramAgent, type AgentDocument } from "@/hooks/useDiagramAgent";
+import { suggestsTidyUp, useDiagramDocument } from "@/hooks/useDiagramDocument";
+import { useLiveRender } from "@/hooks/useLiveRender";
+import { useModelQuality } from "@/hooks/useModelQuality";
+import { useTheme } from "@/hooks/useTheme";
+import { useViewportWidth } from "@/hooks/useViewportWidth";
+import { connect } from "@/lib/model/ops";
+import { modelToMermaid } from "@/lib/model/to-mermaid";
+import type { DiagramModel } from "@/lib/model/types";
+import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
-
-const CodeEditor = dynamic(() => import("@/components/CodeEditor"), { ssr: false });
-const D2Renderer = dynamic(() => import("@/components/D2Renderer"), { ssr: false });
-
-interface ModelInfo {
-  id: string;
-  label: string;
-  description: string;
+interface Layout {
+  sidebarWidth: number;
+  inspectorWidth: number;
+  sidebarOpen: boolean;
+  inspectorOpen: boolean;
 }
 
-interface RefinementStatus {
-  phase: "generating" | "rendering" | "assessing" | "refining" | "done";
-  iteration: number;
-  maxIterations: number;
-  score?: number;
-  issues?: string[];
+const DEFAULT_LAYOUT: Layout = { sidebarWidth: 384, inspectorWidth: 460, sidebarOpen: true, inspectorOpen: true };
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+const isLayout = (v: unknown): v is Layout =>
+  !!v &&
+  typeof v === "object" &&
+  typeof (v as Layout).sidebarWidth === "number" &&
+  typeof (v as Layout).inspectorWidth === "number" &&
+  typeof (v as Layout).sidebarOpen === "boolean" &&
+  typeof (v as Layout).inspectorOpen === "boolean";
+
+const isTab = (v: unknown): v is InspectorTab => v === "code" || v === "quality" || v === "review";
+
+/** Ids from `ids` that still exist in `model` (nodes or edges). */
+function existingIds(model: DiagramModel | null, ids: string[]): string[] {
+  if (!model || ids.length === 0) return [];
+  const known = new Set<string>([...model.nodes.map((n) => n.id), ...model.edges.map((e) => e.id)]);
+  return ids.filter((id) => known.has(id));
 }
 
-const MAX_REFINE_ITERATIONS = 3;
-const useRefinementGuard = true;
+function Workspace() {
+  const theme = useTheme();
+  const { toast } = useToast();
+  const session = useCopilotSession();
+  const choice = useModelChoice(session.catalog);
+  const doc = useDiagramDocument();
+  const [fitNonce, setFitNonce] = useState(0);
 
-export default function Home() {
-  // Persisted state — survives page reloads via localStorage. Keys are namespaced
-  // under "diagramAgent." so a future migration can find/clean them as a group.
-  const [d2Code, setD2Code] = usePersistedState<string>("diagramAgent.d2Code", "");
-  const [chatMessages, setChatMessages] = usePersistedState<ChatMessage[]>(
-    "diagramAgent.chatMessages",
-    [],
-    { validate: (v): v is ChatMessage[] => Array.isArray(v) },
+  const tidyUp = useCallback(async () => {
+    await doc.tidyUp();
+    setFitNonce((n) => n + 1);
+  }, [doc]);
+
+  const agentDocument: AgentDocument = {
+    currentCode: () => (doc.model ? doc.d2 : null),
+    onKeep: async (code, info) => {
+      const result = await doc.acceptRunCode(code, info.layout);
+      if (result.warnings.length > 0) {
+        toast({ tone: "info", title: "Some parts of the diagram weren't imported", description: result.warnings.slice(0, 3).join(" · ") });
+      }
+      // Stable merges tuck new items in around the existing layout; many of them deserve a fresh layout (R16).
+      if (suggestsTidyUp(result, info.layout)) {
+        toast({
+          tone: "info",
+          title: `${result.added + result.regrouped} items were added or moved into new groups`,
+          description: "They were placed around your layout. Tidy up to re-arrange the whole diagram.",
+          action: { label: "Tidy up", onClick: () => void tidyUp().catch((err: unknown) => toast({ tone: "error", title: "Tidy up failed", description: err instanceof Error ? err.message : String(err) })) },
+        });
+      }
+    },
+  };
+  const agent = useDiagramAgent(
+    {
+      selection: choice.selection,
+      reviewer: choice.reviewer,
+      reviewerSupportsVision: choice.reviewerSupportsVision,
+    },
+    agentDocument,
   );
-  const [selectedModel, setSelectedModel] = usePersistedState<string>(
-    "diagramAgent.selectedModel",
-    "gpt-5.2-chat",
-    { validate: (v): v is string => typeof v === "string" },
-  );
-  const [autoRefine, setAutoRefine] = usePersistedState<boolean>(
-    "diagramAgent.autoRefine",
-    true,
-    { validate: (v): v is boolean => typeof v === "boolean" },
-  );
-  const [maxIterations, setMaxIterations] = usePersistedState<number>(
-    "diagramAgent.maxIterations",
-    1,
-    { validate: (v): v is number => typeof v === "number" && v >= 1 && v <= MAX_REFINE_ITERATIONS },
-  );
-  const [chatCollapsed, setChatCollapsed] = usePersistedState<boolean>(
-    "diagramAgent.chatCollapsed",
-    false,
-    { validate: (v): v is boolean => typeof v === "boolean" },
-  );
-  const [codeCollapsed, setCodeCollapsed] = usePersistedState<boolean>(
-    "diagramAgent.codeCollapsed",
-    false,
-    { validate: (v): v is boolean => typeof v === "boolean" },
+  const running = agent.busy === "running";
+  // New diagrams stream in as a live preview; edits keep showing your layout until the result is merged in.
+  const previewing = running && agent.latestRun?.mode === "create";
+  // Live renders cover new-diagram previews and code that isn't on the canvas yet (e.g. a draft that failed to render).
+  const showLive = previewing || !doc.model;
+  const render = useLiveRender(showLive ? agent.code : "", running);
+  const modelQuality = useModelQuality(doc.model, !previewing && doc.status === "ready");
+
+  const [layout, setLayout] = usePersistedState<Layout>("diagramAgent.layout.v2", DEFAULT_LAYOUT, { validate: isLayout });
+  const [tab, setTab] = usePersistedState<InspectorTab>("diagramAgent.inspectorTab", "code", { validate: isTab });
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const composerRef = useRef<ComposerHandle>(null);
+
+  // Panels shrink with the window; when the canvas would get too narrow the
+  // inspector floats over it instead of squeezing it.
+  const viewport = useViewportWidth();
+  const sidebarWidth = clamp(layout.sidebarWidth, 300, Math.max(300, viewport * 0.4));
+  const inspectorWidth = clamp(layout.inspectorWidth, 320, Math.max(320, viewport * 0.45));
+  const inspectorFloating = viewport - (layout.sidebarOpen ? sidebarWidth : 0) - inspectorWidth < 480;
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const inspectorVisible = inspectorFloating ? overlayOpen : layout.inspectorOpen;
+  const setInspectorVisible = useCallback(
+    (open: boolean | ((open: boolean) => boolean)) => {
+      if (inspectorFloating) setOverlayOpen((v) => (typeof open === "function" ? open(v) : open));
+      else setLayout((l) => ({ ...l, inspectorOpen: typeof open === "function" ? open(l.inspectorOpen) : open }));
+    },
+    [inspectorFloating, setLayout],
   );
 
-  // Transient state — not persisted (network, generation lifecycle, UI focus).
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState<string | null>(null);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [refinementStatus, setRefinementStatus] = useState<RefinementStatus | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectionState, setSelection] = useState<string[]>([]);
+  const [connectFrom, setConnectFrom] = useState<string | null>(null);
+  const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | undefined>(undefined);
+  const [pendingFixes, setPendingFixes] = useState<ReviewAssessment | null>(null);
+  // Undo, AI edits and deletes can remove selected items; only pass on what still exists.
+  const selection = useMemo(() => existingIds(doc.model, selectionState), [doc.model, selectionState]);
 
-  // Clarify state
-  const [clarifyQuestions, setClarifyQuestions] = useState<ClarifyQuestion[] | null>(null);
-  const [clarifyPrompt, setClarifyPrompt] = useState<string>(""); // the original prompt waiting for clarification
-  const [isClarifying, setIsClarifying] = useState(false);
-  const [clarifyAnalysis, setClarifyAnalysis] = useState<Record<string, unknown> | null>(null);
+  const deselect = useCallback(() => {
+    setSelection([]);
+    setConnectFrom(null);
+  }, []);
 
-  // Diagram interaction state
-  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const [connectMode, setConnectMode] = useState(false);
-  const [connectSource, setConnectSource] = useState<string | null>(null);
+  const canUseModels = Boolean(session.auth?.signedIn || session.auth?.providers.azure);
+  const showGate = !session.loading && !canUseModels;
+  const latestRun = agent.latestRun;
+  const fitKey =
+    latestRun?.status === "running" ? `running-${latestRun.id}` : `${latestRun?.id ?? "none"}-${latestRun?.endedAt ?? 0}-${doc.status}-${fitNonce}`;
+  const canvasModel = previewing ? render.model : (doc.model ?? render.model);
 
-  // Load available models
+  const activePhase = latestRun?.status === "running" ? latestRun.steps.findLast((s) => s.status === "active") : undefined;
+  const status =
+    agent.busy === "clarifying"
+      ? "Analyzing request"
+      : running
+        ? activePhase
+          ? phaseLabel(activePhase)
+          : "Starting"
+        : null;
+
+  // A run rewrites the code, so a selection made before it could point at nodes that no longer exist.
   useEffect(() => {
-    fetch("/api/models")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.models) setModels(data.models);
-      })
-      .catch(() => {});
-  }, []);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (running) deselect();
+  }, [running, deselect]);
 
-  // Stream generate and return the final D2 code
-  const streamGenerate = useCallback(
-    async (
-      prompt: string,
-      existingCode: string,
-      history: ChatMessage[],
-      signal?: AbortSignal,
-      architecturePlan?: Record<string, unknown> | null
-    ): Promise<string> => {
-      // If an architecture plan is provided, prefix it to the prompt.
-      // Item 5: also build a deterministic D2 scaffold from the plan and feed
-      // it to the LLM as a starting point so it refines instead of
-      // reconstructing (and dropping nodes).
-      let scaffoldBlock = "";
-      if (architecturePlan) {
-        const scaffold = planToD2Scaffold(architecturePlan);
-        if (scaffold.d2 && scaffold.componentCount > 0) {
-          scaffoldBlock = `\n\nD2 SCAFFOLD (deterministic, derived from plan — refine, do not rebuild from scratch):\n${scaffold.d2}`;
-        }
+  // Keyboard shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        if (agent.busy !== "idle") agent.stop();
+        else if (selection.length > 0 || connectFrom) deselect();
+      } else if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        composerRef.current?.focus();
+      } else if (mod && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setLayout((l) => ({ ...l, sidebarOpen: !l.sidebarOpen }));
+      } else if (mod && e.key === ".") {
+        e.preventDefault();
+        setInspectorVisible((v) => !v);
       }
-      const finalPrompt = architecturePlan
-        ? `ARCHITECTURE PLAN:\n${JSON.stringify(architecturePlan, null, 2)}${scaffoldBlock}\n\nUSER REQUEST:\n${prompt}`
-        : prompt;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [agent, connectFrom, deselect, selection.length, setInspectorVisible, setLayout]);
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: finalPrompt,
-          existingCode,
-          history,
-          model: selectedModel,
-        }),
-        signal,
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error || `API error ${res.status}`);
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response stream");
-
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) {
-              accumulated += parsed.content;
-              const cleaned = accumulated
-                .replace(/^```d2?\n?/m, "")
-                .replace(/\n?```$/m, "");
-              setD2Code(cleaned);
-            }
-          } catch {
-            // skip
-          }
-        }
-      }
-
-      const final = accumulated
-        .replace(/^```d2?\n?/m, "")
-        .replace(/\n?```$/m, "")
-        .trim();
-      setD2Code(final);
-      return final;
+  /** Hand edits; blocked while a run is changing the diagram (R12). */
+  const applyEdit = useCallback(
+    (op: (model: DiagramModel) => DiagramModel, options?: { coalesceKey?: string }) => {
+      if (running) return;
+      doc.apply(op, options);
     },
-    [selectedModel]
+    [doc, running],
   );
 
-  // Render D2 code to SVG via the render API
-  const renderToSvg = useCallback(async (code: string): Promise<string> => {
-    const res = await fetch("/api/render", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Render failed");
-    return data.svg;
-  }, []);
-
-  // Assess a rendered diagram using vision model
-  const assessDiagram = useCallback(
-    async (
-      svg: string,
-      prompt: string,
-      code: string,
-      signal?: AbortSignal
-    ): Promise<{
-      score: number;
-      pass: boolean;
-      reasoning?: string;
-      issues?: string[];
-      suggestions?: string[];
-      missing_components?: string[];
-      layout_issues?: string[];
-      specific_fixes?: string[];
-    }> => {
-      const res = await fetch("/api/assess", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ svg, prompt, d2Code: code }),
-        signal,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Assessment failed");
-      return data.assessment;
+  const onConnect = useCallback(
+    (from: string, to: string) => {
+      applyEdit((model) => connect(model, from, to).model);
+      setConnectFrom(null);
     },
-    []
+    [applyEdit],
   );
 
-  // Fetch architecture plan from the planning API
-  const fetchArchitecturePlan = useCallback(
-    async (prompt: string, analysis?: Record<string, unknown> | null): Promise<Record<string, unknown> | null> => {
-      try {
-        const res = await fetch("/api/plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, analysis }),
-        });
-        const data = await res.json();
-        if (res.ok && data.plan) {
-          return data.plan;
-        }
-      } catch (err) {
-        console.error("Architecture planning failed, proceeding without plan:", err);
-      }
-      return null;
+  const importD2 = useCallback(
+    async (code: string, signal: AbortSignal) => {
+      const warnings = await doc.importD2(code, signal);
+      deselect();
+      setFitNonce((n) => n + 1);
+      return warnings;
     },
-    []
+    [deselect, doc],
   );
 
-  // Full generate + refine loop
-  const generateWithRefinement = useCallback(
-    async (prompt: string, existingCode: string, history: ChatMessage[], analysis?: Record<string, unknown> | null) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      setIsGenerating(true);
-      setGenerationError(null);
-      if (!existingCode) setD2Code("");
-      // Clear any lingering done-status timer
-      if (doneTimerRef.current) {
-        clearTimeout(doneTimerRef.current);
-        doneTimerRef.current = null;
-      }
-
-      // Phase 0: Architecture Planning (for new diagrams only)
-      let architecturePlan: Record<string, unknown> | null = null;
-      if (!existingCode) {
-        setRefinementStatus({
-          phase: "generating",
-          iteration: 0,
-          maxIterations: autoRefine ? maxIterations : 1,
-        });
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "🏗️ Planning architecture layout..." },
-        ]);
-        architecturePlan = await fetchArchitecturePlan(prompt, analysis);
-        if (architecturePlan) {
-          setChatMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: "✅ Architecture plan ready. Generating D2 code..." },
-          ]);
-        }
-      }
-
-      setRefinementStatus({
-        phase: "generating",
-        iteration: 1,
-        maxIterations: autoRefine ? maxIterations : 1,
-      });
-
-      try {
-        // Step 1: Initial generation (with architecture plan if available)
-        let currentCode = await streamGenerate(prompt, existingCode, history, controller.signal, architecturePlan);
-
-        if (!autoRefine || controller.signal.aborted) {
-          setChatMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: "Diagram generated." },
-          ]);
-          setRefinementStatus(null);
-          return;
-        }
-
-        // Step 2: Iterative refinement loop
-        // Regression guard: track the best candidate across iterations
-        let bestCode = currentCode;
-        let _bestSvg = "";
-        let bestScore = -1;
-        let _bestAssessment: { score: number; pass: boolean } | null = null;
-        let consecutiveNonImproving = 0;
-        // Item 6: skip vision assess when SVG is identical to a prior iteration
-        let lastAssessedSvgHash: string | null = null;
-        let lastAssessment: {
-          score: number;
-          pass: boolean;
-          reasoning?: string;
-          issues?: string[];
-          suggestions?: string[];
-          missing_components?: string[];
-          layout_issues?: string[];
-          specific_fixes?: string[];
-        } | null = null;
-
-        for (let i = 0; i < maxIterations; i++) {
-          if (controller.signal.aborted) break;
-
-          // 2a: Render to SVG
-          console.log(`[Client] Starting render iteration ${i + 1}`);
-          setRefinementStatus({
-            phase: "rendering",
-            iteration: i + 1,
-            maxIterations: maxIterations,
-          });
-
-
-          let svg: string;
-          try {
-            svg = await renderToSvg(currentCode);
-            console.log(`[Client] Render complete, length: ${svg?.length}`);
-          } catch (renderErr: unknown) {
-            const errMsg = renderErr instanceof Error ? renderErr.message : String(renderErr);
-            console.error("[Client] Render error:", renderErr);
-            setGenerationError(`Render error: ${errMsg}`);
-            setRefinementStatus({
-              phase: "refining",
-              iteration: i + 1,
-              maxIterations: maxIterations,
-              issues: [`Render error: ${errMsg}`],
-            });
-
-            const fixPrompt = `The D2 code has a rendering error: "${errMsg}". Fix the D2 syntax while keeping the architecture intact. Output the COMPLETE corrected D2 code.`;
-            currentCode = await streamGenerate(fixPrompt, currentCode, [], controller.signal);
-            continue;
-          }
-
-          setGenerationError(null);
-
-          if (controller.signal.aborted) break;
-
-          // 2b-pre: Cheap structural preflight via deterministic analyzer.
-          // If the code has hard structural problems (no connections, no
-          // containers, no direction) we refine immediately without burning
-          // a vision-model call.
-          const structural = analyzeD2Code(currentCode);
-          const hardStructuralIssues: string[] = [];
-          if (structural.connectionCount === 0) hardStructuralIssues.push("No connections in the diagram");
-          if (structural.nodeCount < 2) hardStructuralIssues.push("Diagram has fewer than 2 nodes");
-          if (!structural.hasDirection) hardStructuralIssues.push("No 'direction:' set — layout may be poor");
-
-          if (hardStructuralIssues.length > 0 && structural.codeScore < 4) {
-            console.log(`[Client] Structural preflight failed (codeScore ${structural.codeScore}), skipping vision assess`);
-            setRefinementStatus({
-              phase: "refining",
-              iteration: i + 1,
-              maxIterations: maxIterations,
-              score: structural.codeScore,
-              issues: hardStructuralIssues,
-            });
-            const allIssues = [...hardStructuralIssues, ...structural.issues];
-            const issuesList = allIssues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
-            const refinePrompt = `A deterministic structural analysis found these issues (code score ${structural.codeScore}/10):\n\nIssues:\n${issuesList}\n\nFix these issues in the D2 code. Output the COMPLETE updated D2 code.`;
-            currentCode = await streamGenerate(refinePrompt, currentCode, [], controller.signal);
-            continue;
-          }
-
-          // 2b: Assess with vision model (skip if SVG identical to last assessed iteration)
-          const svgHash = hashSvg(svg);
-          if (svgHash === lastAssessedSvgHash && lastAssessment) {
-            console.log(`[Client] SVG unchanged from last iteration — reusing assessment (score ${lastAssessment.score})`);
-          } else {
-            setRefinementStatus({
-              phase: "assessing",
-              iteration: i + 1,
-              maxIterations: maxIterations,
-            });
-          }
-
-          let assessment: {
-            score: number;
-            pass: boolean;
-            reasoning?: string;
-            issues?: string[];
-            suggestions?: string[];
-            missing_components?: string[];
-            layout_issues?: string[];
-            specific_fixes?: string[];
-          };
-          if (svgHash === lastAssessedSvgHash && lastAssessment) {
-            assessment = lastAssessment;
-          } else {
-            try {
-              assessment = await assessDiagram(svg, prompt, currentCode, controller.signal);
-              lastAssessedSvgHash = svgHash;
-              lastAssessment = assessment;
-            } catch (assessErr: unknown) {
-              const errMsg = assessErr instanceof Error ? assessErr.message : String(assessErr);
-              console.warn("Assessment failed, skipping:", errMsg);
-              setGenerationError(`Assessment failed: ${errMsg}`);
-              break;
-            }
-          }
-
-          setRefinementStatus({
-            phase: "assessing",
-            iteration: i + 1,
-            maxIterations: maxIterations,
-            score: assessment.score,
-            issues: assessment.issues || assessment.layout_issues || [],
-          });
-
-          // Track best candidate (regression guard)
-          if (useRefinementGuard) {
-            if (assessment.score > bestScore) {
-              bestCode = currentCode;
-              _bestSvg = svg;
-              bestScore = assessment.score;
-              _bestAssessment = assessment;
-              consecutiveNonImproving = 0;
-            } else if (assessment.score < bestScore + 1) {
-              consecutiveNonImproving++;
-            }
-          }
-
-          // 2c: If passing, we're done
-          if (assessment.pass) {
-            const finalCode = useRefinementGuard && bestScore > assessment.score ? bestCode : currentCode;
-            const finalScore = useRefinementGuard && bestScore > assessment.score ? bestScore : assessment.score;
-            setD2Code(finalCode);
-            setChatMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content: `Diagram generated and verified (score: ${finalScore}/10 after ${i + 1} iteration${i > 0 ? "s" : ""}).`,
-              },
-            ]);
-            setRefinementStatus({ phase: "done", iteration: i + 1, maxIterations: maxIterations, score: finalScore });
-            doneTimerRef.current = setTimeout(() => {
-              setRefinementStatus(null);
-              doneTimerRef.current = null;
-            }, 4000);
-            return;
-          }
-
-          // Early stop: 2 consecutive non-improving rounds
-          if (useRefinementGuard && consecutiveNonImproving >= 2) {
-            console.log(`[Client] Early stop: 2 consecutive non-improving rounds. Best score: ${bestScore}`);
-            break;
-          }
-
-          if (controller.signal.aborted) break;
-
-          const issues: string[] = assessment.issues || assessment.layout_issues || [];
-          const missingComponents: string[] = assessment.missing_components || [];
-          const suggestions: string[] = assessment.suggestions || assessment.specific_fixes || [];
-          const allIssues = [...missingComponents.map((c: string) => `Missing: ${c}`), ...issues];
-
-          // 2d: Refine based on assessment feedback
-          setRefinementStatus({
-            phase: "refining",
-            iteration: i + 1,
-            maxIterations: maxIterations,
-            score: assessment.score,
-            issues: allIssues,
-          });
-
-          const issuesList = allIssues.map((iss, idx) => `${idx + 1}. ${iss}`).join("\n");
-          const suggestionsList = suggestions.map((s, idx) => `${idx + 1}. ${s}`).join("\n");
-
-          const refinePrompt = `A vision-based assessment of the rendered diagram found these issues (score ${assessment.score}/10):
-
-Issues:
-${issuesList}
-
-Suggested fixes:
-${suggestionsList}
-
-Fix these issues in the D2 code. Maintain the overall architecture but improve layout, grouping, connections, and completeness. Output the COMPLETE updated D2 code.`;
-
-          currentCode = await streamGenerate(refinePrompt, currentCode, [], controller.signal);
-        }
-
-        // Exhausted iterations or early stop — commit best candidate if guard is on
-        if (useRefinementGuard && bestScore >= 0) {
-          setD2Code(bestCode);
-          setChatMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: `Diagram generated — best candidate (score: ${bestScore}/10) from ${maxIterations} refinement iterations.`,
-            },
-          ]);
-        } else {
-          setChatMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: `Diagram generated with ${maxIterations} refinement iterations.`,
-            },
-          ]);
-        }
-        setRefinementStatus(null);
-      } catch (err: unknown) {
-        const isAbort = err instanceof Error && err.name === "AbortError";
-        if (!isAbort) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          console.error("Generation error:", err);
-          setGenerationError(errMsg);
-          setChatMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `⚠️ Error: ${errMsg}` },
-          ]);
-        }
-        setRefinementStatus(null);
-      } finally {
-        setIsGenerating(false);
-        if (abortRef.current === controller) {
-           // Clear abort controller only if it's the current one
-           abortRef.current = null;
-        }
-      }
+  // Reviewer fixes re-arrange the layout (R22): confirm first when it was arranged by hand.
+  const applyReview = useCallback(
+    (assessment: ReviewAssessment) => {
+      if (doc.model?.handArranged) setPendingFixes(assessment);
+      else agent.applyReview(assessment);
     },
-    [selectedModel, autoRefine, maxIterations, streamGenerate, renderToSvg, assessDiagram, fetchArchitecturePlan]
+    [agent, doc.model?.handArranged],
   );
 
-  // Fetch clarifying questions for a new diagram prompt
-  const fetchClarifyQuestions = useCallback(
-    async (prompt: string) => {
-      setIsClarifying(true);
-      setClarifyPrompt(prompt);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "user", content: prompt },
-      ]);
+  const resizeSidebar = useCallback((dx: number) => setLayout((l) => ({ ...l, sidebarWidth: clamp(l.sidebarWidth + dx, 300, 600) })), [setLayout]);
+  const resizeInspector = useCallback((dx: number) => setLayout((l) => ({ ...l, inspectorWidth: clamp(l.inspectorWidth - dx, 320, 820) })), [setLayout]);
 
-      try {
-        const res = await fetch("/api/clarify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, model: selectedModel }),
-        });
-        const data = await res.json();
+  const requestNew = useCallback(() => {
+    if (doc.model || agent.code.trim() || agent.items.length > 0 || agent.busy !== "idle") setConfirmNew(true);
+    else agent.reset();
+  }, [agent, doc.model]);
 
-        // Store analysis from the expert intent review
-        const analysis = data.analysis || null;
-        setClarifyAnalysis(analysis);
-
-        if (res.ok && data.skipClarification) {
-          // Request is comprehensive enough — skip questions, go straight to planning + generation
-          setClarifyQuestions(null);
-          setClarifyPrompt("");
-          setChatMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: "Request is detailed enough — skipping clarification." },
-          ]);
-          generateWithRefinement(prompt, "", [], analysis);
-        } else if (res.ok && data.questions && data.questions.length > 0) {
-          setClarifyQuestions(data.questions);
-        } else {
-          // Clarify failed — generate directly
-          setClarifyQuestions(null);
-          setClarifyPrompt("");
-          generateWithRefinement(prompt, "", [], analysis);
-        }
-      } catch {
-        // Fallback: generate directly
-        setClarifyQuestions(null);
-        setClarifyPrompt("");
-        setClarifyAnalysis(null);
-        generateWithRefinement(prompt, "", []);
-      } finally {
-        setIsClarifying(false);
-      }
+  const openInspector = useCallback(
+    (next: InspectorTab) => {
+      setTab(next);
+      setInspectorVisible(true);
     },
-    [selectedModel, generateWithRefinement]
+    [setInspectorVisible, setTab],
   );
 
-  // Build enhanced prompt from clarify answers
-  const buildEnhancedPrompt = useCallback(
-    (originalPrompt: string, questions: ClarifyQuestion[], answers: ClarifyAnswers): string => {
-      const specs = resolveAnswerSpecs(questions, answers);
-      if (specs.length === 0) return originalPrompt;
-
-      const parts: string[] = [originalPrompt, "\n\nAdditional specifications:"];
-      for (const spec of specs) {
-        parts.push(`- ${spec}`);
-      }
-      return parts.join("\n");
-    },
-    []
+  const controls = useMemo(
+    () =>
+      canUseModels ? (
+        <>
+          <ModelPicker
+            models={choice.models}
+            selection={choice.selection}
+            defaultSelection={session.catalog?.defaultSelection ?? null}
+            onChange={choice.setSelection}
+            disabled={agent.busy !== "idle"}
+            loading={session.loading}
+            error={session.catalogError ?? (session.catalog?.errors.copilot ? session.catalog.errors.copilot.message : null)}
+          />
+          <SettingsMenu
+            settings={agent.settings}
+            onChange={agent.setSettings}
+            models={choice.models}
+            reviewerChoice={choice.reviewerChoice}
+            onReviewerChange={choice.setReviewerChoice}
+            reviewerSupportsVision={choice.reviewerSupportsVision}
+            disabled={agent.busy !== "idle"}
+          />
+        </>
+      ) : null,
+    [agent.busy, agent.setSettings, agent.settings, canUseModels, choice, session.catalog, session.catalogError, session.loading],
   );
-
-  // Handle clarify answers submitted
-  const handleClarifySubmit = useCallback(
-    (answers: ClarifyAnswers) => {
-      if (!clarifyQuestions || !clarifyPrompt) return;
-
-      const enhancedPrompt = buildEnhancedPrompt(clarifyPrompt, clarifyQuestions, answers);
-
-      // Show a summary of selections in chat
-      const answeredSpecs = resolveAnswerSpecs(clarifyQuestions, answers);
-
-      if (answeredSpecs.length > 0) {
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "user", content: answeredSpecs.map((s) => `• ${s}`).join("\n") },
-        ]);
-      }
-
-      // Clear clarify state and generate with planning
-      setClarifyQuestions(null);
-      setClarifyPrompt("");
-      generateWithRefinement(enhancedPrompt, "", [], clarifyAnalysis);
-    },
-    [clarifyQuestions, clarifyPrompt, clarifyAnalysis, buildEnhancedPrompt, generateWithRefinement]
-  );
-
-  // Skip clarification and generate directly
-  const handleClarifySkip = useCallback(() => {
-    const prompt = clarifyPrompt;
-    setClarifyQuestions(null);
-    setClarifyPrompt("");
-    if (prompt) {
-      generateWithRefinement(prompt, "", []);
-    }
-  }, [clarifyPrompt, generateWithRefinement]);
-
-  const handleSend = useCallback(
-    (prompt: string) => {
-      const userMsg: ChatMessage = { role: "user", content: prompt };
-
-      if (d2Code) {
-        // Existing diagram — update directly (no clarify)
-        const newMessages = [...chatMessages, userMsg];
-        setChatMessages(newMessages);
-        generateWithRefinement(prompt, d2Code, chatMessages);
-      } else {
-        // New diagram — dismiss any existing clarify panel and start fresh
-        setClarifyQuestions(null);
-        setClarifyPrompt("");
-        fetchClarifyQuestions(prompt);
-      }
-    },
-    [chatMessages, d2Code, generateWithRefinement, fetchClarifyQuestions]
-  );
-
-  // --- Diagram Interaction Handlers ---
-
-  const handleElementClick = useCallback(
-    (path: string, isConnection: boolean) => {
-      // If in connect mode, this click is the target
-      if (connectMode && connectSource && path && !isConnection) {
-        const newCode = addConnection(d2Code, connectSource, path, "");
-        setD2Code(newCode);
-        setConnectMode(false);
-        setConnectSource(null);
-        setSelectedElement(null);
-        return;
-      }
-
-      // Deselect if clicked on empty space or same element
-      if (!path || (selectedElement?.path === path)) {
-        setSelectedElement(null);
-        setConnectMode(false);
-        setConnectSource(null);
-        return;
-      }
-
-      // Select the element
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        // Find the connection label from D2 code
-        let label = "";
-        if (conn) {
-          const lines = d2Code.split("\n");
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.includes("->") && trimmed.includes(conn.from) && trimmed.includes(conn.to)) {
-              const labelMatch = trimmed.match(/:\s*(.+?)(?:\s*\{|$)/);
-              if (labelMatch) label = labelMatch[1].trim();
-              break;
-            }
-          }
-        }
-        setSelectedElement({
-          path,
-          isConnection: true,
-          connectionFrom: conn?.from,
-          connectionTo: conn?.to,
-          label,
-        });
-      } else {
-        const label = findElementLabel(d2Code, path);
-        setSelectedElement({
-          path,
-          isConnection: false,
-          label: label || path.split(".").pop() || path,
-        });
-      }
-    },
-    [d2Code, connectMode, connectSource, selectedElement]
-  );
-
-  const handleUpdateLabel = useCallback(
-    (path: string, newLabel: string, isConnection: boolean) => {
-      let newCode: string | null = null;
-
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        if (conn) {
-          newCode = updateConnectionLabel(d2Code, conn.from, conn.to, newLabel);
-        }
-      } else {
-        newCode = updateElementLabel(d2Code, path, newLabel);
-      }
-
-      if (newCode) {
-        setD2Code(newCode);
-        setSelectedElement((prev) => prev ? { ...prev, label: newLabel } : null);
-      }
-    },
-    [d2Code]
-  );
-
-  const handleDeleteElement = useCallback(
-    (path: string, isConnection: boolean) => {
-      let newCode: string;
-
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        if (conn) {
-          newCode = deleteConnection(d2Code, conn.from, conn.to);
-        } else {
-          return;
-        }
-      } else {
-        newCode = deleteElement(d2Code, path);
-      }
-
-      setD2Code(newCode);
-      setSelectedElement(null);
-    },
-    [d2Code]
-  );
-
-  const handleStartConnect = useCallback(() => {
-    if (selectedElement && !selectedElement.isConnection) {
-      setConnectSource(selectedElement.path);
-      setConnectMode(true);
-    }
-  }, [selectedElement]);
-
-  const handleCancelConnect = useCallback(() => {
-    setConnectMode(false);
-    setConnectSource(null);
-  }, []);
-
-  const handleDeselect = useCallback(() => {
-    setSelectedElement(null);
-    setConnectMode(false);
-    setConnectSource(null);
-  }, []);
-
-  const handleMoveNode = useCallback(
-    (nodePath: string, targetContainerPath: string) => {
-      const newCode = moveNodeToContainer(d2Code, nodePath, targetContainerPath);
-      if (newCode) {
-        setD2Code(newCode);
-        setSelectedElement(null);
-      }
-    },
-    [d2Code]
-  );
-
-  const handleNewDiagram = useCallback(() => {
-    abortRef.current?.abort();
-    if (doneTimerRef.current) {
-      clearTimeout(doneTimerRef.current);
-      doneTimerRef.current = null;
-    }
-    setD2Code("");
-    setChatMessages([]);
-    setIsGenerating(false);
-    setRefinementStatus(null);
-    setClarifyQuestions(null);
-    setClarifyPrompt("");
-    setIsClarifying(false);
-    setSelectedElement(null);
-    setConnectMode(false);
-    setConnectSource(null);
-    setGenerationError(null);
-  }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950">
-      {/* Header */}
-      <header className="flex items-center px-6 py-2.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <button
-          onClick={handleNewDiagram}
-          className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-          title="Start new diagram"
-        >
-          <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-          </svg>
-          <h1 className="text-base font-bold text-gray-900 dark:text-white">DiagramAgent</h1>
-        </button>
+    <div className="flex h-dvh flex-col">
+      <TopBar
+        title={agent.title}
+        onTitleChange={agent.setTitle}
+        status={status}
+        theme={theme.preference}
+        onCycleTheme={theme.cycle}
+        sidebarOpen={layout.sidebarOpen}
+        onToggleSidebar={() => setLayout((l) => ({ ...l, sidebarOpen: !l.sidebarOpen }))}
+        inspectorOpen={inspectorVisible}
+        onToggleInspector={() => setInspectorVisible((v) => !v)}
+        onNew={requestNew}
+        controls={controls}
+        account={<AccountMenu auth={session.auth} onSignIn={() => setDeviceOpen(true)} onSignOut={() => void session.signOut()} onRefresh={() => void session.refresh()} />}
+      />
 
-        {/* Controls */}
-        <div className="ml-auto flex items-center gap-4">
-          {/* Auto-refine toggle */}
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <span className="text-xs text-gray-500 dark:text-gray-400">Vision Refine</span>
-            <button
-              onClick={() => setAutoRefine((v) => !v)}
-              disabled={isGenerating}
-              className={`relative w-8 h-4.5 rounded-full transition-colors ${
-                autoRefine
-                  ? "bg-blue-600"
-                  : "bg-gray-300 dark:bg-gray-600"
-              } ${isGenerating ? "opacity-50 cursor-not-allowed" : ""}`}
+      <main className="relative flex min-h-0 flex-1">
+        {layout.sidebarOpen && (
+          <>
+            <section
+              aria-label="Conversation"
+              className="flex min-h-0 shrink-0 flex-col bg-zinc-50/70 dark:bg-zinc-950"
+              style={{ width: sidebarWidth }}
             >
-              <span
-                className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform ${
-                  autoRefine ? "translate-x-3.5" : ""
-                }`}
-              />
-            </button>
-          </label>
+              {showGate ? (
+                <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3.5 pb-4">
+                  <SignInGate
+                    auth={session.auth}
+                    error={session.authError}
+                    loading={session.loading}
+                    onSignIn={() => setDeviceOpen(true)}
+                    onRetry={() => void session.refresh()}
+                  />
+                </div>
+              ) : (
+                <ConversationPanel
+                  ref={composerRef}
+                  items={agent.items}
+                  busy={agent.busy}
+                  clarify={agent.clarify}
+                  models={choice.models}
+                  hasDiagram={Boolean(doc.model?.nodes.length) || Boolean(agent.code.trim())}
+                  disabled={session.loading && !session.auth}
+                  onSend={agent.send}
+                  onStop={agent.stop}
+                  onRetry={agent.retryRun}
+                  onSubmitClarify={agent.submitClarify}
+                  onSkipClarify={agent.skipClarify}
+                />
+              )}
+            </section>
+            <ResizeHandle label="Resize conversation panel" onResize={resizeSidebar} />
+          </>
+        )}
 
-          {/* Iterations input */}
-          {autoRefine && (
-            <div className="flex items-center gap-1.5">
-              <label className="text-xs text-gray-500 dark:text-gray-400">Iterations:</label>
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={maxIterations}
-                onChange={(e) => setMaxIterations(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
-                disabled={isGenerating}
-                className="w-12 px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        <section aria-label="Diagram" className="relative min-w-0 flex-1">
+          <DiagramCanvas
+            canvas={
+              canvasModel ? (
+                <ModelCanvas
+                  model={canvasModel}
+                  readOnly={running || !doc.model}
+                  dimmed={running && !previewing}
+                  fitKey={fitKey}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                  onApply={applyEdit}
+                  connectFrom={connectFrom}
+                  onConnect={onConnect}
+                  onRequestRename={(id) => setRenameRequest({ id, nonce: Date.now() })}
+                />
+              ) : null
+            }
+            exportModel={running ? null : doc.model}
+            title={agent.title}
+            streaming={running}
+            busy={running}
+            quality={showLive ? render.quality : modelQuality.quality}
+            qualityLoading={showLive ? render.loading : modelQuality.loading}
+            reviewScore={latestRun?.status === "done" ? latestRun.reviewScore : undefined}
+            renderError={showLive ? render.error : null}
+            renderErrorKind={showLive ? render.errorKind : null}
+            onRetryRender={render.retry}
+            onFixError={agent.fixRenderError}
+            onShowCode={() => openInspector("code")}
+            onShowQuality={() => openInspector("quality")}
+            toolbar={
+              doc.model && !running ? (
+                <CanvasToolbar
+                  model={doc.model}
+                  selection={selection}
+                  readOnly={running}
+                  canUndo={doc.canUndo}
+                  canRedo={doc.canRedo}
+                  onUndo={doc.undo}
+                  onRedo={doc.redo}
+                  onApply={applyEdit}
+                  onSelectionChange={setSelection}
+                  onStartConnect={setConnectFrom}
+                  onTidyUp={tidyUp}
+                />
+              ) : null
+            }
+            status={
+              doc.status === "migrating" ? (
+                <span className="text-xs text-zinc-500">Opening your saved diagram…</span>
+              ) : doc.error ? (
+                <button type="button" onClick={doc.dismissError} className="text-xs text-rose-600 hover:underline dark:text-rose-300">
+                  {doc.error} (dismiss)
+                </button>
+              ) : null
+            }
+            overlay={
+              <ElementEditor
+                model={doc.model}
+                selection={selection}
+                readOnly={running}
+                connectFrom={connectFrom}
+                renameRequest={renameRequest}
+                onApply={applyEdit}
+                onStartConnect={setConnectFrom}
+                onCancelConnect={() => setConnectFrom(null)}
+                onDeselect={deselect}
+              />
+            }
+          />
+        </section>
+
+        {inspectorVisible && (
+          <>
+            {!inspectorFloating && <ResizeHandle label="Resize inspector" onResize={resizeInspector} />}
+            <div
+              className={
+                inspectorFloating
+                  ? "absolute inset-y-0 right-0 z-20 animate-slide-up border-l border-zinc-200 shadow-2xl shadow-zinc-900/20 dark:border-zinc-800"
+                  : "min-h-0 shrink-0"
+              }
+              style={{ width: inspectorFloating ? Math.min(inspectorWidth, viewport - 24) : inspectorWidth }}
+            >
+              <Inspector
+                tab={tab}
+                onTabChange={setTab}
+                onClose={() => setInspectorVisible(false)}
+                d2={doc.d2 || agent.code}
+                mermaid={doc.model ? modelToMermaid(doc.model) : ""}
+                streamingCode={running ? agent.code : null}
+                theme={theme.resolved}
+                quality={showLive ? render.quality : modelQuality.quality}
+                qualityLoading={showLive ? render.loading : modelQuality.loading}
+                run={latestRun}
+                models={choice.models}
+                reviewEnabled={agent.settings.review}
+                canApplyReview={agent.busy === "idle" && Boolean(doc.model)}
+                onApplyReview={applyReview}
+                onImportD2={importD2}
+                importDisabled={running}
               />
             </div>
-          )}
-
-          {/* Model picker */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500 dark:text-gray-400">Model:</label>
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              className="px-2 py-1 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              disabled={isGenerating}
-            >
-              {models.length > 0
-                ? models.map((m) => (
-                    <option key={m.id} value={m.id} title={m.description}>
-                      {m.label}
-                    </option>
-                  ))
-                : <option value={selectedModel}>{selectedModel}</option>
-              }
-            </select>
-          </div>
-        </div>
-      </header>
-
-      {/* Refinement Status Bar */}
-      {refinementStatus && (
-        <div className="px-6 py-1.5 bg-blue-50 dark:bg-blue-950/50 border-b border-blue-200 dark:border-blue-800 shrink-0">
-          <div className="flex items-center gap-3">
-            {refinementStatus.phase !== "done" && (
-              <div className="w-3.5 h-3.5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin shrink-0" />
-            )}
-            {refinementStatus.phase === "done" && (
-              <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-            <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
-              {refinementStatus.phase === "generating" && `Generating diagram (iteration ${refinementStatus.iteration}/${refinementStatus.maxIterations})...`}
-              {refinementStatus.phase === "rendering" && `Rendering SVG for assessment (iteration ${refinementStatus.iteration})...`}
-              {refinementStatus.phase === "assessing" && (
-                refinementStatus.score != null
-                  ? `Assessment: ${refinementStatus.score}/10 — ${refinementStatus.score >= 7 ? "passed" : "needs refinement"}`
-                  : `Assessing diagram with vision model (iteration ${refinementStatus.iteration})...`
-              )}
-              {refinementStatus.phase === "refining" && `Refining diagram based on feedback (iteration ${refinementStatus.iteration})...`}
-              {refinementStatus.phase === "done" && `Verified — score: ${refinementStatus.score}/10`}
-            </span>
-            {refinementStatus.issues && refinementStatus.issues.length > 0 && refinementStatus.phase !== "done" && (
-              <span className="text-xs text-blue-500 dark:text-blue-400 truncate max-w-md" title={refinementStatus.issues.join("; ")}>
-                {refinementStatus.issues[0]}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Main Content: 3-column layout */}
-      <div className="flex flex-1 min-h-0">
-        {/* Chat Panel */}
-        {chatCollapsed ? (
-          <button
-            onClick={() => setChatCollapsed(false)}
-            title="Show chat"
-            className="w-8 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        ) : (
-          <div className="w-1/4 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col min-w-[280px] relative">
-            <button
-              onClick={() => setChatCollapsed(true)}
-              title="Hide chat"
-              className="absolute top-2 right-2 z-10 w-6 h-6 rounded hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <ChatPanel
-              messages={generationError
-                ? [...chatMessages, { role: "assistant" as const, content: `⚠️ ${generationError}` }]
-                : chatMessages
-              }
-              onSend={handleSend}
-              onNewDiagram={handleNewDiagram}
-              isGenerating={isGenerating}
-              isClarifying={isClarifying}
-              inlinePanel={
-                clarifyQuestions ? (
-                  <ClarifyPanel
-                    questions={clarifyQuestions}
-                    onSubmit={handleClarifySubmit}
-                    onSkip={handleClarifySkip}
-                    isSubmitting={isGenerating}
-                  />
-                ) : undefined
-              }
-            />
-          </div>
+          </>
         )}
+      </main>
 
-        {/* Code Editor */}
-        {codeCollapsed ? (
-          <button
-            onClick={() => setCodeCollapsed(false)}
-            title="Show code"
-            className="w-8 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        ) : (
-          <div className="w-[30%] border-r border-gray-200 dark:border-gray-800 relative">
-            <button
-              onClick={() => setCodeCollapsed(true)}
-              title="Hide code"
-              className="absolute top-2 right-2 z-10 w-6 h-6 rounded bg-white/80 dark:bg-gray-900/80 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400"
+      <Dialog
+        open={pendingFixes !== null}
+        onClose={() => setPendingFixes(null)}
+        title="Apply the suggested fixes?"
+        description="Fixing layout problems re-arranges the diagram, so positions you set by hand will change. You can undo this afterwards."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingFixes(null)}>
+              Keep my layout
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const fixes = pendingFixes;
+                setPendingFixes(null);
+                if (fixes) agent.applyReview(fixes);
+              }}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <CodeEditor code={d2Code} onChange={setD2Code} readOnly={isGenerating} />
-          </div>
-        )}
+              Apply fixes
+            </Button>
+          </>
+        }
+      />
 
-        {/* Diagram Preview */}
-        <div className="flex-1 relative">
-          <D2Renderer
-            code={d2Code}
-            isStreaming={isGenerating}
-            onElementClick={handleElementClick}
-            onMoveNode={handleMoveNode}
-            selectedPath={selectedElement?.path}
-          />
-          <ElementEditor
-            selected={selectedElement}
-            connectMode={connectMode}
-            onUpdateLabel={handleUpdateLabel}
-            onDelete={handleDeleteElement}
-            onStartConnect={handleStartConnect}
-            onCancelConnect={handleCancelConnect}
-            onDeselect={handleDeselect}
-          />
-        </div>
-      </div>
+      <DeviceFlowDialog open={deviceOpen} onClose={() => setDeviceOpen(false)} onSignedIn={() => void session.refresh()} />
+
+      <Dialog
+        open={confirmNew}
+        onClose={() => setConfirmNew(false)}
+        title="Start a new diagram?"
+        description={agent.busy !== "idle" ? "This stops the current generation and clears the diagram and conversation." : "This clears the current diagram and conversation."}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmNew(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setConfirmNew(false);
+                deselect();
+                agent.reset();
+                doc.clear();
+              }}
+            >
+              Clear and start over
+            </Button>
+          </>
+        }
+      />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <ToastProvider>
+      <Workspace />
+    </ToastProvider>
   );
 }

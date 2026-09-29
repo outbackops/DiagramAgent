@@ -271,16 +271,16 @@ export function getIconsByCategory(category: IconEntry["category"]): Record<stri
 }
 
 // Process D2 code: replace `icon: <key>` with `icon: <url>`
-// Handles both dot notation (Node.icon: key) and block notation (icon: key)
-// Skips values that are already URLs
+// Handles dot notation (Node.icon: key), block lines (icon: key) and inline
+// blocks ({ icon: key; label: X }). URLs are left alone because the key
+// pattern cannot contain ":".
 export function resolveIconsInD2Code(d2Code: string): string {
   return d2Code.replace(
-    /icon:\s*([a-zA-Z0-9_-]+)\s*$/gm,
-    (match, key) => {
-      // Skip if this looks like it's already a URL
-      if (key.startsWith("http")) return match;
+    /(^|[\s{;.])icon:[ \t]*(?:"([a-zA-Z0-9_-]+)"|'([a-zA-Z0-9_-]+)'|([a-zA-Z0-9_-]+))(?=[ \t]*(?:#.*)?(?:$|[;}]))/gm,
+    (match, prefix: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, bare: string | undefined) => {
+      const key = doubleQuoted ?? singleQuoted ?? bare ?? "";
       const url = resolveIconUrl(key);
-      return url ? `icon: ${url}` : match;
+      return url ? `${prefix}icon: ${url}` : match;
     }
   );
 }
