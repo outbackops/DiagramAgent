@@ -137,7 +137,7 @@ Options:
   --format d2|composition     Default composition
   --no-review                 Skip vision reviewer
   --out DIR                   Default eval-output
-  --update-fixtures           Write passing cases to src/test/fixtures/diagrams
+  --update-fixtures           Write passing cases to src/test/fixtures/diagrams (--format d2 only)
   --no-fail                   Always exit 0
 `);
 }

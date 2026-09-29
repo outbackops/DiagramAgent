@@ -145,7 +145,9 @@ Zones don't nest. `group`, `boundary`, `vnet`, `vpc`, `subnet`, `cluster`, `name
 
 ## References
 
-References may use full model ids, local ids, `flow.step`, flow labels, or unique titles. Prefer stable ids and `flow.step` for edits. If a connector targets a flow, the engine attaches to the facing step: incoming connectors enter the first step; outgoing connectors leave the last step.
+References may use full model ids, local ids, `flow.step`, flow letters (`"A"`), or unique titles. Prefer stable ids and `flow.step` for edits. If a title matches more than one item, the first is used and a warning says so. A connector that names a whole flow attaches to the step facing the other end: the first step when the other end sits to its left, the last step when it sits to its right, and the nearer end for items in the same column. Name a step (`flow.step`) to attach anywhere else.
+
+Unknown fields are ignored with a warning, with a suggestion for likely typos (`"conectors"` → did you mean `"connectors"`?). Nothing is dropped silently: every repair the normaliser makes (trimmed text, dropped items beyond a limit, unresolved references) is listed in the warnings.
 
 ## What the engine does automatically
 
@@ -272,12 +274,18 @@ It also:
 
 ## Rendering it
 
-CLI:
+CLI (run from this repository):
 
 ```bash
-npm run compose -- src/test/fixtures/compositions/knowledge-assistant.json -o knowledge-assistant.svg
-npm run compose -- src/test/fixtures/compositions/knowledge-assistant.json -o knowledge-assistant.png --width 1600
+npm run compose -- spec.json -o diagram.svg                # icons are embedded in the SVG
+npm run compose -- spec.json -o diagram.png --width 1600   # exact page width; otherwise the engine picks one
+npm run compose -- spec.json --json                        # machine-readable report: page, warnings, layout, quality
+cat spec.json | npm run compose -- --stdin -o diagram.svg  # read the spec from stdin
 ```
+
+- `--strict` exits with code 2 when the normaliser had to repair the spec or a quality check failed, so an agent can loop until its spec is clean.
+- Exit codes: 0 success; 1 unusable spec, bad arguments or a critical quality failure; 2 repairs or failed checks under `--strict`.
+- In PowerShell, quote the separator so npm passes the options on: `npm run compose '--' spec.json -o diagram.svg`. Or run the script directly: `npx tsx scripts/compose.ts spec.json -o diagram.svg`.
 
 To paste into the app, open the Code tab and use Import; it accepts a composition spec JSON as well as D2.
 

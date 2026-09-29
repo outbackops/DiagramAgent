@@ -1,7 +1,7 @@
 ---
 title: Composed architecture diagrams — Milestone 2
 date: 2026-09-29
-status: active
+status: completed
 origin: docs/brainstorms/2026-09-29-composed-architecture-diagrams-requirements.md
 ---
 
