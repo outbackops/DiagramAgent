@@ -82,6 +82,55 @@ export type Arrowhead =
   | "cf-one-required"
   | "cf-many-required";
 
+/** Semantic colour families of the composed theme (src/lib/compose/theme.ts). */
+export type Tone = "blue" | "purple" | "green" | "orange" | "red" | "teal" | "gray";
+
+export const TONES: readonly Tone[] = ["blue", "purple", "green", "orange", "red", "teal", "gray"];
+
+/**
+ * What a node is in a composed diagram (src/lib/compose). Absent on free-form
+ * graph diagrams, and on nodes added by hand, which render as plain cards.
+ */
+export type NodeRole = "header" | "footer" | "column" | "banner" | "card" | "grid" | "lane" | "step";
+
+export const NODE_ROLES: readonly NodeRole[] = ["header", "footer", "column", "banner", "card", "grid", "lane", "step"];
+
+/** Which legends a column shows in its title row. */
+export type LegendKind = "lines" | "usedBy";
+
+/** Text and decorations of a composed node beyond its label (the label is always the title). */
+export interface NodeContent {
+  /** header: subtitle · lane: code subtitle (trigger, route) · banner: detail text · footer: body text. */
+  subtitle?: string;
+  /** card, step: body lines. */
+  lines?: string[];
+  /** card: muted footnotes pinned to the bottom · lane: notes under the steps. */
+  notes?: string[];
+  /** header: badge title · column: its number · lane: its letter. */
+  badge?: string;
+  /** header: badge detail line · footer: status detail. */
+  badgeDetail?: string;
+  /** lane: pill after the title · footer: status label. */
+  tag?: string;
+  /** lane: chips under the steps. */
+  chips?: string[];
+  /** lane: text before the chips, e.g. "Emits:". */
+  chipsLabel?: string;
+  /** card: letters of the flows that use this service. */
+  usedBy?: string[];
+  /** column: width hint. */
+  size?: "narrow" | "normal" | "wide";
+  /** grid: number of card columns. */
+  columns?: number;
+  /** column: legends shown in the title row. */
+  legend?: LegendKind[];
+  /** lane: steps stacked top to bottom instead of left to right. */
+  vertical?: boolean;
+}
+
+/** Connector intent in composed diagrams: a primary flow, a dependency call, or an arrow between lane steps. */
+export type EdgeKind = "flow" | "call" | "step";
+
 /** Layout hints carried through D2 export so a Tidy up reproduces the author's intent. */
 export interface LayoutHints {
   direction?: "up" | "down" | "left" | "right";
@@ -115,6 +164,12 @@ export interface DiagramNode {
   layout?: LayoutHints;
   tooltip?: string;
   link?: string;
+  /** Composed diagrams: what this node is. */
+  role?: NodeRole;
+  /** Composed diagrams: colour family. */
+  tone?: Tone;
+  /** Composed diagrams: text beyond the title. */
+  content?: NodeContent;
 }
 
 export interface DiagramEdge {
@@ -129,6 +184,13 @@ export interface DiagramEdge {
   style: EdgeStyle;
   /** Absolute polyline from the `from` border to the `to` border; empty means it needs routing. */
   route: Point[];
+  /** Composed diagrams: connector intent (drives how the theme draws it). */
+  kind?: EdgeKind;
+  tone?: Tone;
+  /** Draw as a smooth S-curve between the route's first and last points instead of a polyline. */
+  curve?: boolean;
+  /** Centre of the label, when the layout placed it deliberately (e.g. above a dashed call). */
+  labelAt?: Point;
 }
 
 export interface DiagramModel {
@@ -143,6 +205,12 @@ export interface DiagramModel {
    * layout; "Apply suggested fixes" warns before re-laying out such a diagram.
    */
   handArranged?: boolean;
+  /**
+   * Set on diagrams laid out by the composition engine (src/lib/compose):
+   * they render with the composed theme, AI edits go through the composition
+   * spec, and Tidy up recomposes.
+   */
+  composed?: boolean;
 }
 
 export const MODEL_VERSION = 1 as const;

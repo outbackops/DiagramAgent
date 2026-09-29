@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
           { prompt: body.prompt, existingCode: body.existingCode, history: body.history },
           { ...ctx, signal: abort.signal },
           (chunk) => send({ content: chunk }),
+          { format: body.format },
         );
         send({ done: true, model: ctx.selection, usage: result.usage });
       } catch (err) {

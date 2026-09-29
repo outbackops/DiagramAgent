@@ -6,7 +6,9 @@ import process from "node:process";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 import type { KeywordExpectation } from "@/lib/quality/keywords";
 import type { LlmCredentials, LlmUsage } from "@/lib/llm/types";
-import type { PipelineEvent, PipelineResult } from "@/lib/pipeline/refine-loop";
+import type { PipelineEvent, PipelineResult, PipelineSteps } from "@/lib/pipeline/refine-loop";
+import type { DiagramModel } from "@/lib/model/types";
+import type { NormalizedSpec } from "@/lib/compose/spec";
 
 process.env.DIAGRAM_AGENT_COPILOT_HOME ??= path.join(os.homedir(), ".diagram-agent", "copilot-eval");
 
@@ -30,6 +32,7 @@ interface CliOptions {
   out: string;
   updateFixtures: boolean;
   fail: boolean;
+  format: "d2" | "composition";
 }
 
 interface UsageSummary {
@@ -80,6 +83,7 @@ function parseArgs(argv: string[]): CliOptions {
     out: "eval-output",
     updateFixtures: false,
     fail: true,
+    format: "composition",
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -95,6 +99,11 @@ function parseArgs(argv: string[]): CliOptions {
     else if (arg === "--reviewer") options.reviewer = next();
     else if (arg === "--refinements") options.refinements = Number(next());
     else if (arg === "--concurrency") options.concurrency = Number(next());
+    else if (arg === "--format") {
+      const value = next();
+      if (value !== "d2" && value !== "composition") throw new Error("--format must be d2 or composition");
+      options.format = value;
+    }
     else if (arg === "--no-review") options.review = false;
     else if (arg === "--out") options.out = next();
     else if (arg === "--update-fixtures") options.updateFixtures = true;
@@ -123,6 +132,7 @@ Options:
   --reviewer provider:model@effort
   --refinements N             Default 1
   --concurrency N             Default 2
+  --format d2|composition     Default composition
   --no-review                 Skip vision reviewer
   --out DIR                   Default eval-output
   --update-fixtures           Write passing cases to src/test/fixtures/diagrams
@@ -197,12 +207,13 @@ function printTable(results: EvalSummary[]) {
   }
 }
 
-function summaryMarkdown(results: EvalSummary[], model: string, reviewer: string | null): string {
+function summaryMarkdown(results: EvalSummary[], model: string, reviewer: string | null, format: "d2" | "composition"): string {
   const lines = [
     "# Diagram Eval Summary",
     "",
     `- Model: ${model}`,
     `- Reviewer: ${reviewer ?? "disabled"}`,
+    `- Format: ${format}`,
     `- Generated: ${new Date().toISOString()}`,
     "",
     "| Case | Render | Quality | Review | Outcome | Refinements | Keywords | Nodes | Wall time | Missing keywords |",
@@ -235,6 +246,22 @@ async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T, index
   return results;
 }
 
+interface ComposeModule {
+  composeText(code: string): { model: DiagramModel; spec: NormalizedSpec; warnings: string[] };
+}
+
+interface CompositionQualityModule {
+  scoreComposition(model: DiagramModel, options: { warnings: string[] }): QualityReport;
+}
+
+function isComposeModule(value: unknown): value is ComposeModule {
+  return typeof value === "object" && value !== null && typeof (value as { composeText?: unknown }).composeText === "function";
+}
+
+function isCompositionQualityModule(value: unknown): value is CompositionQualityModule {
+  return typeof value === "object" && value !== null && typeof (value as { scoreComposition?: unknown }).scoreComposition === "function";
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const [
@@ -242,6 +269,7 @@ async function main() {
     { parseSelectionString, formatSelection },
     { runPlan, runGenerate, runAssess },
     { runDiagramPipeline, RenderUnavailableError },
+    { COMPOSITION_LANGUAGE },
     { compileD2, D2BusyError },
     { modelFromCompiled },
     { renderModelSvg },
@@ -253,6 +281,7 @@ async function main() {
     import("@/lib/llm/selection"),
     import("@/lib/pipeline/server"),
     import("@/lib/pipeline/refine-loop"),
+    import("@/lib/compose/prompt"),
     import("@/lib/d2-render"),
     import("@/lib/model/from-d2"),
     import("@/lib/model/render-svg"),
@@ -296,41 +325,57 @@ async function main() {
     const start = performance.now();
 
     try {
-      const result: PipelineResult = await runDiagramPipeline(
-        {
-          plan: async (prompt, analysis, signal) => {
-            const planResult = await runPlan(prompt, analysis, { selection, credentials, signal });
-            addUsage(usage, "plan", planResult.usage);
-            return planResult.plan;
-          },
-          generate: async (input, signal) => {
-            const generateResult = await runGenerate(input, { selection, credentials, signal });
-            addUsage(usage, "generate", generateResult.usage);
-            return generateResult.code;
-          },
-          render: async (code) => {
-            try {
-              // Same picture as the app: compile for layout, then the model renderer.
-              const { diagram } = await compileD2(code);
-              const { model } = modelFromCompiled(diagram, { code });
-              return { svg: renderModelSvg(model), quality: scoreDiagram(code, diagram) };
-            } catch (err) {
-              // A full render queue isn't a D2 problem; don't spend a fix round on it.
-              if (err instanceof D2BusyError) throw new RenderUnavailableError(err.message);
-              throw err;
-            }
-          },
-          assess: reviewerSelection
-            ? async (input, signal) => {
-                const assessmentResult = await runAssess(
-                  { svg: input.svg, prompt: input.prompt, d2Code: input.code },
-                  { selection: reviewerSelection, credentials, signal },
-                );
-                addUsage(usage, "assess", assessmentResult.usage);
-                return assessmentResult.assessment;
+      const pipelineSteps: PipelineSteps = {
+        language: options.format === "composition" ? COMPOSITION_LANGUAGE : undefined,
+        plan:
+          options.format === "d2"
+            ? async (prompt, analysis, signal) => {
+                const planResult = await runPlan(prompt, analysis, { selection, credentials, signal });
+                addUsage(usage, "plan", planResult.usage);
+                return planResult.plan;
               }
             : undefined,
+        generate: async (input, signal) => {
+          const generateResult = await runGenerate(input, { selection, credentials, signal }, undefined, { format: options.format });
+          addUsage(usage, "generate", generateResult.usage);
+          return generateResult.code;
         },
+        render: async (code) => {
+          if (options.format === "composition") {
+            const composeModulePath = "@/lib/compose";
+            const qualityModulePath = "@/lib/compose/quality";
+            const [composeModule, qualityModule] = await Promise.all([import(composeModulePath), import(qualityModulePath)]);
+            if (!isComposeModule(composeModule) || !isCompositionQualityModule(qualityModule)) {
+              throw new Error("Composition modules did not expose composeText and scoreComposition");
+            }
+            const { model, warnings } = composeModule.composeText(code);
+            return { svg: renderModelSvg(model, { padding: 0 }), quality: qualityModule.scoreComposition(model, { warnings }) };
+          }
+          try {
+            // Same picture as the app: compile for layout, then the model renderer.
+            const { diagram } = await compileD2(code);
+            const { model } = modelFromCompiled(diagram, { code });
+            return { svg: renderModelSvg(model), quality: scoreDiagram(code, diagram) };
+          } catch (err) {
+            // A full render queue isn't a D2 problem; don't spend a fix round on it.
+            if (err instanceof D2BusyError) throw new RenderUnavailableError(err.message);
+            throw err;
+          }
+        },
+        assess: reviewerSelection
+          ? async (input, signal) => {
+              const assessmentResult = await runAssess(
+                { svg: input.svg, prompt: input.prompt, d2Code: input.code, format: options.format },
+                { selection: reviewerSelection, credentials, signal },
+              );
+              addUsage(usage, "assess", assessmentResult.usage);
+              return assessmentResult.assessment;
+            }
+          : undefined,
+      };
+
+      const result: PipelineResult = await runDiagramPipeline(
+        pipelineSteps,
         {
           prompt: testCase.prompt,
           analysis: null,
@@ -359,7 +404,7 @@ async function main() {
       if (nodes < testCase.expect.minNodes) passReasons.push(`nodes ${nodes} < ${testCase.expect.minNodes}`);
       if (reviewerSelection && (reviewScore === null || reviewScore < 7)) passReasons.push(`review score ${reviewScore ?? 0} < 7`);
 
-      writeFileSync(path.join(caseDir, "diagram.d2"), result.code, "utf8");
+      writeFileSync(path.join(caseDir, options.format === "composition" ? "diagram.json" : "diagram.d2"), result.code, "utf8");
       if (result.svg) {
         writeFileSync(path.join(caseDir, "diagram.svg"), result.svg, "utf8");
         try {
@@ -404,7 +449,7 @@ async function main() {
       if (options.updateFixtures && summary.passed) {
         const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "diagrams");
         mkdirSync(fixtureDir, { recursive: true });
-        writeFileSync(path.join(fixtureDir, `${testCase.id}.d2`), result.code, "utf8");
+        writeFileSync(path.join(fixtureDir, `${testCase.id}.${options.format === "composition" ? "json" : "d2"}`), result.code, "utf8");
         writeJson(path.join(fixtureDir, `${testCase.id}.meta.json`), {
           id: testCase.id,
           title: testCase.title,
@@ -452,11 +497,11 @@ async function main() {
     }
   };
 
-  console.log(`Running ${selected.length} case(s) with ${modelLabel}; reviewer=${reviewerLabel ?? "disabled"}; concurrency=${options.concurrency}`);
+  console.log(`Running ${selected.length} case(s) with ${modelLabel}; reviewer=${reviewerLabel ?? "disabled"}; format=${options.format}; concurrency=${options.concurrency}`);
   console.log(`Output: ${runDir}`);
   const results = await mapLimit(selected, options.concurrency, runCase);
-  writeJson(path.join(runDir, "summary.json"), { model: modelLabel, reviewer: reviewerLabel, results });
-  writeFileSync(path.join(runDir, "summary.md"), summaryMarkdown(results, modelLabel, reviewerLabel), "utf8");
+  writeJson(path.join(runDir, "summary.json"), { model: modelLabel, reviewer: reviewerLabel, format: options.format, results });
+  writeFileSync(path.join(runDir, "summary.md"), summaryMarkdown(results, modelLabel, reviewerLabel, options.format), "utf8");
   printTable(results);
 
   process.exit(options.fail && results.some((result) => !result.passed) ? 1 : 0);

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       throw new LlmError("bad_request", `${ctx.selection.model} cannot review images. Choose a vision-capable reviewer model.`);
     }
     const result = await runAssess(
-      { svg: body.svg, prompt: body.prompt, d2Code: body.d2Code },
+      { svg: body.svg, prompt: body.prompt, d2Code: body.d2Code, format: body.format },
       { ...ctx, signal: request.signal },
     );
     return NextResponse.json({ assessment: result.assessment, model: ctx.selection, usage: result.usage });

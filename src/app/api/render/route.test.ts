@@ -114,6 +114,28 @@ describe("POST /api/render", () => {
     expect(compiled.connections[0].route.length).toBeGreaterThan(1);
   });
 
+  it("uses the composition scorer for composed model requests", async () => {
+    const model = {
+      version: 1,
+      composed: true,
+      nodes: [
+        { id: "header", parent: null, label: "Composed", shape: "rectangle", box: { x: 0, y: 0, w: 1000, h: 104 }, style: {}, container: false, role: "header" },
+        { id: "col", parent: null, label: "Column", shape: "rectangle", box: { x: 40, y: 140, w: 420, h: 520 }, style: {}, container: true, role: "column" },
+        { id: "col.a", parent: "col", label: "A", shape: "rectangle", box: { x: 70, y: 220, w: 160, h: 90 }, style: {}, container: false, role: "card" },
+        { id: "col.b", parent: "col", label: "B", shape: "rectangle", box: { x: 260, y: 220, w: 160, h: 90 }, style: {}, container: false, role: "card" },
+        { id: "col.c", parent: "col", label: "C", shape: "rectangle", box: { x: 70, y: 340, w: 160, h: 90 }, style: {}, container: false, role: "card" },
+        { id: "col.d", parent: "col", label: "D", shape: "rectangle", box: { x: 260, y: 340, w: 160, h: 90 }, style: {}, container: false, role: "card" },
+      ],
+      edges: [],
+    };
+    const res = await POST(makeJsonRequest({ model }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.svg).toContain('data-id="col.a"');
+    expect(body.quality.checks.map((item: { id: string }) => item.id)).toContain("text_fit");
+    expect(quality.scoreDiagram).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid model", async () => {
     const res = await POST(makeJsonRequest({ model: { version: 1, nodes: [{ id: "x" }], edges: [] } }));
     expect(res.status).toBe(400);

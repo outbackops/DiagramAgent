@@ -1,0 +1,29 @@
+{
+  "title": "Team Wiki",
+  "subtitle": "A small internal web app with a managed database",
+  "columns": [
+    {
+      "id": "people",
+      "title": "People",
+      "size": "narrow",
+      "items": [
+        { "type": "card", "id": "staff", "title": "Staff", "lines": ["Browser, single sign-on"], "tone": "blue" }
+      ]
+    },
+    {
+      "id": "app",
+      "title": "Application",
+      "size": "normal",
+      "items": [
+        { "type": "card", "id": "frontdoor", "title": "Front Door", "lines": ["TLS, WAF rules"], "tone": "blue", "icon": "azure-front-door" },
+        { "type": "card", "id": "web", "title": "App Service", "lines": ["Node.js 20", "2 instances"], "tone": "blue", "icon": "azure-app-service" },
+        { "type": "card", "id": "db", "title": "PostgreSQL", "lines": ["Flexible server", "Point-in-time restore"], "tone": "teal" }
+      ]
+    }
+  ],
+  "connectors": [
+    { "from": "staff", "to": "frontdoor" },
+    { "from": "frontdoor", "to": "web" },
+    { "from": "web", "to": "db", "kind": "call", "label": "SQL" }
+  ]
+}

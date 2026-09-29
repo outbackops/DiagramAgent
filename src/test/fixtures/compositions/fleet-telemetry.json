@@ -1,0 +1,84 @@
+{
+  "title": "Fleet Telemetry Platform",
+  "subtitle": "Sensor data from field devices to dashboards and on-call alerts on AWS",
+  "badge": { "title": "AWS · Serverless", "detail": "eu-west-1 · 40k devices" },
+  "columns": [
+    {
+      "id": "field",
+      "title": "Field",
+      "size": "narrow",
+      "items": [
+        { "type": "card", "id": "sensors", "title": "Vehicle sensors", "lines": ["GPS, temperature, vibration", "MQTT every 10 s"], "note": "X.509 per device", "tone": "blue" },
+        { "type": "card", "id": "depots", "title": "Depot gateways", "lines": ["Batch upload over LTE", "Store-and-forward"], "note": "Offline up to 72 h", "tone": "gray" }
+      ]
+    },
+    {
+      "id": "ingest",
+      "title": "Ingestion and processing",
+      "size": "wide",
+      "items": [
+        {
+          "type": "flow",
+          "id": "telemetry",
+          "title": "Telemetry",
+          "subtitle": "topic: fleet/+/telemetry",
+          "tone": "blue",
+          "steps": [
+            { "id": "connect", "title": "Connect", "lines": ["IoT Core", "mutual TLS"] },
+            { "id": "route", "title": "Route", "lines": ["rules engine"] },
+            { "id": "buffer", "title": "Buffer", "lines": ["Kinesis stream", "7-day retention"], "icon": "aws-kinesis" },
+            { "id": "enrich", "title": "Enrich", "lines": ["Lambda", "vehicle metadata"], "icon": "aws-lambda" },
+            { "id": "persist", "title": "Persist", "lines": ["time series", "+ raw archive"] }
+          ],
+          "notes": ["Out-of-order readings are re-sequenced by device timestamp"]
+        },
+        {
+          "type": "flow",
+          "id": "alerts",
+          "title": "Threshold alerts",
+          "subtitle": "every reading · p95 < 5 s",
+          "tone": "red",
+          "tag": "Paging",
+          "steps": [
+            { "id": "detect", "title": "Detect", "lines": ["rules per vehicle"] },
+            { "id": "dedupe", "title": "Deduplicate", "lines": ["10-minute window"] },
+            { "id": "notify", "title": "Notify", "lines": ["SNS → pager"], "icon": "aws-sns" }
+          ],
+          "notes": ["Cold-chain breaches page immediately; other alerts batch hourly"]
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "title": "Storage and analytics",
+      "size": "normal",
+      "items": [
+        { "type": "card", "id": "timestream", "title": "Timestream", "lines": ["Hot store: 30 days", "Magnetic store: 2 years"], "note": "Encrypted with KMS", "tone": "teal" },
+        { "type": "card", "id": "lake", "title": "S3 data lake", "lines": ["Raw Parquet by day", "Athena for ad-hoc queries"], "note": "Lifecycle to Glacier after 1 year", "tone": "teal", "icon": "aws-s3" },
+        { "type": "card", "id": "dashboards", "title": "Fleet dashboards", "lines": ["Live map, SLA trends"], "note": "Row-level security by region", "tone": "purple" }
+      ]
+    },
+    {
+      "id": "ops",
+      "title": "Operations",
+      "size": "narrow",
+      "items": [
+        { "type": "card", "id": "oncall", "title": "On-call engineers", "lines": ["Pager rotation", "Runbooks per alert"], "tone": "orange" },
+        { "type": "card", "id": "monitoring", "title": "CloudWatch", "lines": ["Pipeline lag and errors", "Dead-letter depth"], "note": "Alarms page the same rotation", "tone": "gray", "icon": "aws-cloudwatch" }
+      ]
+    }
+  ],
+  "connectors": [
+    { "from": "sensors", "to": "telemetry", "kind": "flow" },
+    { "from": "depots", "to": "telemetry", "kind": "flow" },
+    { "from": "persist", "to": "timestream", "kind": "flow" },
+    { "from": "enrich", "to": "lake", "kind": "call", "label": "Archive raw batch" },
+    { "from": "alerts", "to": "oncall", "kind": "flow" },
+    { "from": "dashboards", "to": "timestream", "kind": "call", "label": "Query" }
+  ],
+  "footer": {
+    "text": "Every reading queryable within 5 seconds · cold-chain breaches paged in under a minute",
+    "status": "Current state",
+    "statusDetail": "Production since Q2"
+  }
+}

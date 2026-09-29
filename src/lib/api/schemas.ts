@@ -19,6 +19,8 @@ const turn = z.object({
   content: z.string().max(20_000),
 });
 
+const diagramFormat = z.enum(["d2", "composition"]).optional().default("d2");
+
 /** Anything JSON-ish, capped by serialized size. */
 const boundedJson = z.unknown().refine((v) => v === undefined || JSON.stringify(v).length <= 100_000, "Payload too large");
 
@@ -38,6 +40,7 @@ export const GenerateBody = z.object({
   existingCode: z.string().max(200_000, "Diagram code is too large").optional().default(""),
   history: z.array(turn).max(40).optional().default([]),
   model: z.unknown().optional(),
+  format: diagramFormat,
 });
 
 export const AssessBody = z.object({
@@ -45,6 +48,7 @@ export const AssessBody = z.object({
   prompt: prompt(80_000),
   d2Code: z.string().max(200_000).optional().default(""),
   model: z.unknown().optional(),
+  format: diagramFormat,
 });
 
 export function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {

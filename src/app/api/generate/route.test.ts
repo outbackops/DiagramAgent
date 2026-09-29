@@ -54,6 +54,26 @@ describe("POST /api/generate", () => {
     expect(call.prompt).toContain("Modify the above D2 diagram");
   });
 
+
+  it("uses the composer system prompt and spec edit prompt for composition", async () => {
+    llm.chunks = ['{"title":"x","columns":[]}'];
+    await readSseEvents(
+      await POST(
+        makeJsonRequest({
+          prompt: "add a return flow",
+          existingCode: '{"title":"x","columns":[]}',
+          format: "composition",
+        }),
+      ),
+    );
+    const call = llm.lastCall();
+    expect(call.system).toContain("CompositionSpec");
+    expect(call.system).toContain("Order Platform");
+    expect(call.history?.at(-1)).toEqual({ role: "assistant", content: '{"title":"x","columns":[]}' });
+    expect(call.prompt).toContain("Modify the diagram spec above");
+    expect(call.prompt).toContain("COMPLETE updated spec JSON only");
+  });
+
   it("reports failures inside the stream after it started", async () => {
     llm.chunks = ["partial"];
     llm.error = new LlmError("quota", "Monthly premium request quota exhausted");

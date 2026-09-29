@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { getProvider } from "@/lib/llm";
 import { LlmError } from "@/lib/llm/errors";
 import type { ChatTurn, LlmCredentials, LlmUsage, ModelSelection } from "@/lib/llm/types";
@@ -12,6 +14,12 @@ import {
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { svgToPng } from "@/lib/svg-raster";
 import { buildGenerationConversation, cleanD2Output } from "./d2-text";
+import {
+  buildComposerSystemPrompt,
+  cleanSpecOutput,
+  composeEditPrompt,
+  COMPOSED_ASSESSMENT_ADDENDUM,
+} from "@/lib/compose/prompt";
 import { ASSESSMENT_SYSTEM_PROMPT, CLARIFY_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT } from "./prompts";
 
 /**
@@ -96,18 +104,43 @@ export interface GenerateInput {
   history?: ChatTurn[];
 }
 
+type DiagramFormat = "d2" | "composition";
+
+function readVendoredIconKeys(): string[] | undefined {
+  try {
+    const manifestPath = path.join(process.cwd(), "public", "icons", "manifest.json");
+    if (!existsSync(manifestPath)) return undefined;
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const keys = Object.keys(manifest);
+    return keys.length > 0 ? keys : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildCompositionConversation(input: GenerateInput): { prompt: string; history: ChatTurn[] } {
+  const history = (input.history ?? []).filter((turn) => turn.content.trim().length > 0);
+  if (!input.existingCode?.trim()) return { prompt: input.prompt, history };
+  return {
+    prompt: composeEditPrompt(input.prompt),
+    history: [...history, { role: "assistant", content: input.existingCode }],
+  };
+}
+
 export async function runGenerate(
   input: GenerateInput,
   ctx: StepContext,
   onDelta: (chunk: string) => void = () => {},
+  options: { format?: DiagramFormat } = {},
 ): Promise<{ code: string; raw: string; usage?: LlmUsage }> {
-  const conversation = buildGenerationConversation(input);
+  const format = options.format ?? "d2";
+  const conversation = format === "composition" ? buildCompositionConversation(input) : buildGenerationConversation(input);
   const result = await getProvider(ctx.selection.provider).stream(
     {
       selection: ctx.selection,
       credentials: ctx.credentials,
       signal: ctx.signal,
-      system: buildSystemPrompt(),
+      system: format === "composition" ? buildComposerSystemPrompt(readVendoredIconKeys()) : buildSystemPrompt(),
       prompt: conversation.prompt,
       history: conversation.history,
       temperature: 0.3,
@@ -115,13 +148,13 @@ export async function runGenerate(
     },
     onDelta,
   );
-  return { code: cleanD2Output(result.text), raw: result.text, usage: result.usage };
+  return { code: format === "composition" ? cleanSpecOutput(result.text) : cleanD2Output(result.text), raw: result.text, usage: result.usage };
 }
 
 export type AssessmentResult = Assessment & { raw?: string; parse_error?: string };
 
 export async function runAssess(
-  input: { svg: string; prompt: string; d2Code?: string },
+  input: { svg: string; prompt: string; d2Code?: string; format?: DiagramFormat },
   ctx: StepContext,
 ): Promise<{ assessment: AssessmentResult; usage?: LlmUsage }> {
   let png: Buffer;
@@ -135,8 +168,15 @@ export async function runAssess(
     selection: ctx.selection,
     credentials: ctx.credentials,
     signal: ctx.signal,
-    system: ASSESSMENT_SYSTEM_PROMPT,
-    prompt: `Original prompt: "${input.prompt}"\n\nCurrent D2 code:\n\`\`\`\n${input.d2Code ?? ""}\n\`\`\`\n\nAssess the rendered diagram image attached. Focus on structural accuracy and layout quality relative to the original request.`,
+    system: `${ASSESSMENT_SYSTEM_PROMPT}${input.format === "composition" ? COMPOSED_ASSESSMENT_ADDENDUM : ""}`,
+    prompt: `Original prompt: "${input.prompt}"
+
+Current ${input.format === "composition" ? "diagram spec (JSON)" : "D2 code"}:
+\`\`\`
+${input.d2Code ?? ""}
+\`\`\`
+
+Assess the rendered diagram image attached. Focus on structural accuracy and layout quality relative to the original request.`,
     images: [{ mimeType: "image/png", base64: png.toString("base64") }],
     maxOutputTokens: 4000,
     temperature: 0.2,
