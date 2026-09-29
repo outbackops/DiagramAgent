@@ -242,7 +242,9 @@ async function main() {
     { parseSelectionString, formatSelection },
     { runPlan, runGenerate, runAssess },
     { runDiagramPipeline, RenderUnavailableError },
-    { renderD2, D2BusyError },
+    { compileD2, D2BusyError },
+    { modelFromCompiled },
+    { renderModelSvg },
     { scoreDiagram, hasCriticalFailure },
     { svgToPng },
     { calculateKeywordCoverage },
@@ -252,6 +254,8 @@ async function main() {
     import("@/lib/pipeline/server"),
     import("@/lib/pipeline/refine-loop"),
     import("@/lib/d2-render"),
+    import("@/lib/model/from-d2"),
+    import("@/lib/model/render-svg"),
     import("@/lib/quality/diagram-quality"),
     import("@/lib/svg-raster"),
     import("@/lib/quality/keywords"),
@@ -306,8 +310,10 @@ async function main() {
           },
           render: async (code) => {
             try {
-              const rendered = await renderD2(code);
-              return { svg: rendered.svg, quality: scoreDiagram(code, rendered.diagram) };
+              // Same picture as the app: compile for layout, then the model renderer.
+              const { diagram } = await compileD2(code);
+              const { model } = modelFromCompiled(diagram, { code });
+              return { svg: renderModelSvg(model), quality: scoreDiagram(code, diagram) };
             } catch (err) {
               // A full render queue isn't a D2 problem; don't spend a fix round on it.
               if (err instanceof D2BusyError) throw new RenderUnavailableError(err.message);

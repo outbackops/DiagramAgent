@@ -2,9 +2,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { d2ToDrawio } from "@/lib/d2-to-drawio";
-import { renderD2 } from "@/lib/d2-render";
-import { d2ToVsdx } from "@/lib/d2-to-vsdx";
+import { compileD2 } from "@/lib/d2-render";
+import { modelFromCompiled } from "@/lib/model/from-d2";
+import { modelToCompiled } from "@/lib/model/quality";
+import { renderModelSvg } from "@/lib/model/render-svg";
+import { modelToD2 } from "@/lib/model/to-d2";
+import { modelToDrawio } from "@/lib/model/to-drawio";
+import { modelToVsdx } from "@/lib/model/to-vsdx";
 import { hasCriticalFailure, scoreDiagram } from "@/lib/quality/diagram-quality";
 import { calculateKeywordCoverage, type KeywordExpectation } from "@/lib/quality/keywords";
 
@@ -40,19 +44,28 @@ describe("golden diagram fixtures", () => {
         const code = readFileSync(path.join(fixturesDir, `${id}.d2`), "utf8");
         const meta = JSON.parse(readFileSync(path.join(fixturesDir, `${id}.meta.json`), "utf8")) as FixtureMeta;
 
-        const { svg, diagram } = await renderD2(code);
-        expect(svg.length).toBeGreaterThan(100);
+        const { diagram } = await compileD2(code);
+        const { model, warnings } = modelFromCompiled(diagram, { code });
+        expect(warnings).toEqual([]);
+
+        const svg = renderModelSvg(model);
+        for (const node of model.nodes) expect(svg).toContain(`data-id="${node.id.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`);
 
         const quality = scoreDiagram(code, diagram);
         expect(quality.score).toBeGreaterThanOrEqual(Math.max(75, meta.qualityScore - 5));
         expect(hasCriticalFailure(quality)).toBe(false);
-
-        const keywordCoverage = calculateKeywordCoverage(code, meta.keywords);
-        expect(keywordCoverage.ratio).toBeGreaterThanOrEqual(0.8);
         expect(quality.metrics.nodes).toBeGreaterThanOrEqual(meta.minNodes);
 
-        await expect(d2ToDrawio(code, meta.title)).resolves.toContain("<mxfile");
-        const vsdx = await d2ToVsdx(code);
+        // What the canvas shows scores the same as the compiled layout it came from.
+        const exported = modelToD2(model);
+        const modelQuality = scoreDiagram(exported, modelToCompiled(model));
+        expect(Math.abs(modelQuality.score - quality.score)).toBeLessThanOrEqual(2);
+
+        expect(calculateKeywordCoverage(code, meta.keywords).ratio).toBeGreaterThanOrEqual(0.8);
+        expect(calculateKeywordCoverage(exported, meta.keywords).ratio).toBeGreaterThanOrEqual(0.8);
+
+        await expect(modelToDrawio(model, { title: meta.title })).resolves.toContain("<mxfile");
+        const vsdx = await modelToVsdx(model);
         expect(Buffer.isBuffer(vsdx)).toBe(true);
         expect(vsdx.subarray(0, 2).toString("utf8")).toBe("PK");
       },

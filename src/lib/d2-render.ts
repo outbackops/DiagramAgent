@@ -1,5 +1,5 @@
 import { resolveIconsInD2Code } from "@/lib/icon-registry";
-import { orthogonalizeConnections, type Rect } from "@/lib/svg-orthogonal";
+import { countObstacleHits, isOrthogonalRoute, orthogonalizeConnections, routeOrthogonal, type Point, type Rect } from "@/lib/svg-orthogonal";
 import { errorMessage } from "@/lib/error-message";
 
 /**
@@ -10,21 +10,58 @@ import { errorMessage } from "@/lib/error-message";
 export interface CompiledShape {
   id: string;
   type: string;
+  classes?: string[];
   pos: { x: number; y: number };
   width: number;
   height: number;
+  opacity?: number;
+  strokeDash?: number;
+  strokeWidth?: number;
+  borderRadius?: number;
+  fill?: string;
+  stroke?: string;
+  animated?: boolean;
+  shadow?: boolean;
+  "3d"?: boolean;
+  multiple?: boolean;
+  "double-border"?: boolean;
+  tooltip?: string;
+  link?: string;
   label: string;
   icon: unknown;
+  iconPosition?: string;
+  fontSize?: number;
+  color?: string;
+  italic?: boolean;
+  bold?: boolean;
+  underline?: boolean;
+  labelWidth?: number;
+  labelHeight?: number;
+  labelPosition?: string;
   level: number;
 }
 
 export interface CompiledConnection {
   id: string;
   src: string;
+  srcArrow?: string;
   dst: string;
+  dstArrow?: string;
+  opacity?: number;
   label: string;
+  stroke?: string;
   strokeDash: number;
-  route: Array<{ x: number; y: number }>;
+  strokeWidth?: number;
+  borderRadius?: number;
+  fontSize?: number;
+  color?: string;
+  italic?: boolean;
+  bold?: boolean;
+  labelWidth?: number;
+  labelHeight?: number;
+  labelPosition?: string;
+  labelPercentage?: number;
+  route: Point[];
 }
 
 export interface CompiledDiagram {
@@ -34,6 +71,10 @@ export interface CompiledDiagram {
 
 export interface RenderResult {
   svg: string;
+  diagram: CompiledDiagram;
+}
+
+export interface CompileResult {
   diagram: CompiledDiagram;
 }
 
@@ -149,6 +190,39 @@ function leafObstacles(diagram: CompiledDiagram): Rect[] {
   return diagram.shapes
     .filter((s) => !ids.some((other) => other.startsWith(`${s.id}.`)))
     .map((s) => ({ x: s.pos.x, y: s.pos.y, w: s.width, h: s.height }));
+}
+
+function fixCompiledRoutes(diagram: CompiledDiagram): CompiledDiagram {
+  const obstacles = leafObstacles(diagram);
+  const connections = diagram.connections.map((c) => {
+    if (c.route.length < 2) return c;
+    if (isOrthogonalRoute(c.route) && countObstacleHits(c.route, obstacles) === 0) return c;
+    const start = c.route[0];
+    const end = c.route[c.route.length - 1];
+    const foreign = obstacles.filter(
+      (o) =>
+        !(start.x >= o.x - 2 && start.x <= o.x + o.w + 2 && start.y >= o.y - 2 && start.y <= o.y + o.h + 2) &&
+        !(end.x >= o.x - 2 && end.x <= o.x + o.w + 2 && end.y >= o.y - 2 && end.y <= o.y + o.h + 2),
+    );
+    return { ...c, route: routeOrthogonal(start, end, foreign) };
+  });
+  return { ...diagram, connections };
+}
+
+export async function compileD2(code: string, options: { signal?: AbortSignal } = {}): Promise<CompileResult> {
+  return exclusive(async () => {
+    const d2 = await getD2();
+    try {
+      const compiled = await step(d2, d2.compile(resolveIconsInD2Code(code), { layout: "elk", sketch: false, pad: 40 }), "layout");
+      if (!compiled || typeof compiled !== "object" || !("diagram" in compiled)) {
+        throw new D2RenderError("D2 returned no diagram");
+      }
+      return { diagram: fixCompiledRoutes(toCompiledDiagram(compiled.diagram)) };
+    } catch (err) {
+      if (err instanceof D2RenderError) throw err;
+      throw new D2RenderError(formatD2Error(err));
+    }
+  }, options.signal);
 }
 
 export async function renderD2(code: string, options: { signal?: AbortSignal } = {}): Promise<RenderResult> {

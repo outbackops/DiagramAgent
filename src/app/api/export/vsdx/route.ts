@@ -1,17 +1,14 @@
 import { NextRequest } from "next/server";
 import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
+import { modelFromBody, sanitizeFilename } from "@/lib/api/model-input";
 import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
-import { d2ToDrawio } from "@/lib/d2-to-drawio";
 import { LlmError, isLlmError } from "@/lib/llm/errors";
+import { modelToDrawio } from "@/lib/model/to-drawio";
 
 /**
- * Export a diagram as a draw.io/diagrams.net XML file (.drawio).
- *
- * Creates native editable mxGraph shapes from D2 source code — NOT an
- * embedded image. The resulting file opens in draw.io with fully
- * selectable, movable, and connectable shapes that can be further
- * exported to Visio (.vsdx) from draw.io's File → Export menu.
+ * Export a diagram as a draw.io/diagrams.net file (.drawio) with native,
+ * editable shapes at the positions shown on the canvas.
  */
 export async function POST(request: NextRequest) {
   const blocked = guardApiRequest(request);
@@ -20,41 +17,21 @@ export async function POST(request: NextRequest) {
     return jsonError(new LlmError("unauthenticated", "Sign in with GitHub to use DiagramAgent."));
   }
   try {
-    const body = await readJsonBody(request, 1_000_000);
-    const d2Code = body?.d2Code;
-    const title = body?.title;
-
-    if (!d2Code || typeof d2Code !== "string") {
-      return new Response(JSON.stringify({ error: "D2 code is required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const diagramTitle = typeof title === "string" && title ? title : "Architecture Diagram";
-
-    // Convert D2 code to native draw.io XML with editable shapes and embedded icons
-    const drawioXml = await d2ToDrawio(d2Code, diagramTitle);
-
-    const buffer = Buffer.from(drawioXml, "utf-8");
-
+    const body = await readJsonBody(request, 4_000_000);
+    const input = await modelFromBody(body, request.signal);
+    if ("response" in input) return input.response;
+    const title = typeof body?.title === "string" && body.title ? body.title : "Architecture Diagram";
+    const buffer = Buffer.from(await modelToDrawio(input.model, { title }), "utf-8");
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/xml",
-        "Content-Disposition": `attachment; filename="${sanitizeFilename(diagramTitle)}.drawio"`,
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(title)}.drawio"`,
         "Content-Length": String(buffer.length),
       },
     });
   } catch (error) {
     if (isLlmError(error)) return jsonError(error);
     console.error("Draw.io export error:", error);
-    return new Response(
-      JSON.stringify({ error: errorMessage(error) || "Failed to export" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return Response.json({ error: errorMessage(error) || "Failed to export" }, { status: 500 });
   }
-}
-
-function sanitizeFilename(str: string): string {
-  return str.replace(/[^a-zA-Z0-9_\- ]/g, "").substring(0, 100) || "diagram";
 }

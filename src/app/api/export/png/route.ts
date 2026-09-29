@@ -3,6 +3,9 @@ import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
 import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
 import { LlmError } from "@/lib/llm/errors";
+import { renderModelSvg } from "@/lib/model/render-svg";
+import { routeModelEdges } from "@/lib/model/route";
+import { validateModel } from "@/lib/model/validate";
 import { svgToPng } from "@/lib/svg-raster";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +26,14 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return jsonError(err, "PNG export error");
   }
-  const svg = body?.svg;
+  let svg = body?.svg;
+  if (body?.model !== undefined) {
+    const result = validateModel(body.model);
+    if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
+    svg = renderModelSvg(routeModelEdges(result.model));
+  }
   if (typeof svg !== "string" || !svg) {
-    return NextResponse.json({ error: "SVG content is required" }, { status: 400 });
+    return NextResponse.json({ error: "A diagram is required" }, { status: 400 });
   }
   if (svg.length > MAX_SVG_LENGTH) {
     return NextResponse.json({ error: "SVG is too large" }, { status: 413 });

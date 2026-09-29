@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-const fake = vi.hoisted(() => ({ instances: 0, hang: false, terminated: 0 }));
+const fake = vi.hoisted(() => ({ instances: 0, hang: false, terminated: 0, rendered: 0 }));
 
 // Mimics @terrastruct/d2's wrapper: ONE pending resolver shared by all calls,
 // so overlapping calls orphan earlier promises and cross results.
@@ -23,6 +23,7 @@ vi.mock("@terrastruct/d2", () => ({
       return this.send({ diagram: { code, shapes: [], connections: [] }, renderOptions: {} }, 5);
     }
     render(diagram: { code: string }) {
+      fake.rendered++;
       return this.send(`<svg data-code="${diagram.code.trim()}"></svg>`, 5);
     }
   },
@@ -30,7 +31,7 @@ vi.mock("@terrastruct/d2", () => ({
 
 vi.mock("@/lib/icon-registry", () => ({ resolveIconsInD2Code: (s: string) => s }));
 
-import { D2RenderError, renderD2 } from "./d2-render";
+import { compileD2, D2RenderError, renderD2 } from "./d2-render";
 
 describe("renderD2 against the D2 wrapper's single-request limitation", () => {
   beforeEach(() => {
@@ -81,5 +82,13 @@ describe("renderD2 against the D2 wrapper's single-request limitation", () => {
     controller.abort();
     await expect(first).rejects.toBeInstanceOf(D2RenderError);
     await expect(second).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("compileD2 shares the serialised compile queue without rendering SVG", async () => {
+    const renderedBefore = fake.rendered;
+    const codes = ["one", "two", "three"];
+    const results = await Promise.all(codes.map((code) => compileD2(code)));
+    results.forEach((r) => expect(r.diagram).toEqual({ shapes: [], connections: [] }));
+    expect(fake.rendered).toBe(renderedBefore);
   });
 });

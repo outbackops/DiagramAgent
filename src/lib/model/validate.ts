@@ -1,0 +1,259 @@
+import type { Arrowhead, Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle, Point, Size } from "./types";
+
+/**
+ * Strict validation for models that arrive from outside (browser storage, API
+ * requests). Unknown fields are dropped, sizes are bounded, and anything
+ * malformed is rejected, so renderers and exporters can trust the result.
+ */
+
+export const MODEL_LIMITS = {
+  nodes: 2000,
+  edges: 4000,
+  routePoints: 400,
+  idLength: 500,
+  labelLength: 1000,
+  iconLength: 300_000,
+  coordinate: 1_000_000,
+};
+
+const ARROWHEADS: readonly Arrowhead[] = [
+  "none",
+  "arrow",
+  "triangle",
+  "diamond",
+  "filled-diamond",
+  "circle",
+  "filled-circle",
+  "box",
+  "filled-box",
+  "line",
+  "cross",
+  "cf-one",
+  "cf-many",
+  "cf-one-required",
+  "cf-many-required",
+];
+const DIRECTIONS = ["up", "down", "left", "right"] as const;
+
+export type ValidationResult = { ok: true; model: DiagramModel } | { ok: false; error: string };
+
+class Invalid extends Error {}
+
+const fail = (message: string): never => {
+  throw new Invalid(message);
+};
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function num(v: unknown, where: string, { min = -MODEL_LIMITS.coordinate, max = MODEL_LIMITS.coordinate } = {}): number {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) fail(`${where} must be a finite number`);
+  return v as number;
+}
+
+function optNum(v: unknown, where: string, range?: { min?: number; max?: number }): number | undefined {
+  return v === undefined ? undefined : num(v, where, range);
+}
+
+function str(v: unknown, where: string, max: number): string {
+  if (typeof v !== "string") fail(`${where} must be a string`);
+  if ((v as string).length > max) fail(`${where} is too long`);
+  return v as string;
+}
+
+function optStr(v: unknown, where: string, max: number): string | undefined {
+  return v === undefined ? undefined : str(v, where, max);
+}
+
+function optBool(v: unknown, where: string): boolean | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "boolean") fail(`${where} must be a boolean`);
+  return v as boolean;
+}
+
+function box(v: unknown, where: string): Box {
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const b = v as Record<string, unknown>;
+  return {
+    x: num(b.x, `${where}.x`),
+    y: num(b.y, `${where}.y`),
+    w: num(b.w, `${where}.w`, { min: 0 }),
+    h: num(b.h, `${where}.h`, { min: 0 }),
+  };
+}
+
+function size(v: unknown, where: string): Size | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const s = v as Record<string, unknown>;
+  return { w: num(s.w, `${where}.w`, { min: 0 }), h: num(s.h, `${where}.h`, { min: 0 }) };
+}
+
+function point(v: unknown, where: string): Point {
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const p = v as Record<string, unknown>;
+  return { x: num(p.x, `${where}.x`), y: num(p.y, `${where}.y`) };
+}
+
+function compact<T extends object>(obj: T): T {
+  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
+}
+
+function nodeStyle(v: unknown, where: string): NodeStyle {
+  if (v === undefined) return {};
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const s = v as Record<string, unknown>;
+  return compact({
+    fill: optStr(s.fill, `${where}.fill`, 64),
+    stroke: optStr(s.stroke, `${where}.stroke`, 64),
+    strokeWidth: optNum(s.strokeWidth, `${where}.strokeWidth`, { min: 0, max: 100 }),
+    strokeDash: optNum(s.strokeDash, `${where}.strokeDash`, { min: 0, max: 100 }),
+    borderRadius: optNum(s.borderRadius, `${where}.borderRadius`, { min: 0, max: 1000 }),
+    opacity: optNum(s.opacity, `${where}.opacity`, { min: 0, max: 1 }),
+    shadow: optBool(s.shadow, `${where}.shadow`),
+    multiple: optBool(s.multiple, `${where}.multiple`),
+    doubleBorder: optBool(s.doubleBorder, `${where}.doubleBorder`),
+    fontSize: optNum(s.fontSize, `${where}.fontSize`, { min: 1, max: 400 }),
+    fontColor: optStr(s.fontColor, `${where}.fontColor`, 64),
+    bold: optBool(s.bold, `${where}.bold`),
+    italic: optBool(s.italic, `${where}.italic`),
+    underline: optBool(s.underline, `${where}.underline`),
+  });
+}
+
+function edgeStyle(v: unknown, where: string): EdgeStyle {
+  if (v === undefined) return {};
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const s = v as Record<string, unknown>;
+  return compact({
+    stroke: optStr(s.stroke, `${where}.stroke`, 64),
+    strokeWidth: optNum(s.strokeWidth, `${where}.strokeWidth`, { min: 0, max: 100 }),
+    strokeDash: optNum(s.strokeDash, `${where}.strokeDash`, { min: 0, max: 100 }),
+    opacity: optNum(s.opacity, `${where}.opacity`, { min: 0, max: 1 }),
+    borderRadius: optNum(s.borderRadius, `${where}.borderRadius`, { min: 0, max: 1000 }),
+    animated: optBool(s.animated, `${where}.animated`),
+    fontSize: optNum(s.fontSize, `${where}.fontSize`, { min: 1, max: 400 }),
+    fontColor: optStr(s.fontColor, `${where}.fontColor`, 64),
+    bold: optBool(s.bold, `${where}.bold`),
+    italic: optBool(s.italic, `${where}.italic`),
+  });
+}
+
+function layoutHints(v: unknown, where: string): LayoutHints | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const l = v as Record<string, unknown>;
+  if (l.direction !== undefined && !DIRECTIONS.includes(l.direction as (typeof DIRECTIONS)[number])) fail(`${where}.direction is invalid`);
+  return compact({
+    direction: l.direction as LayoutHints["direction"],
+    gridRows: optNum(l.gridRows, `${where}.gridRows`, { min: 1, max: 1000 }),
+    gridColumns: optNum(l.gridColumns, `${where}.gridColumns`, { min: 1, max: 1000 }),
+    gridGap: optNum(l.gridGap, `${where}.gridGap`, { min: 0, max: 10_000 }),
+  });
+}
+
+function arrowhead(v: unknown, where: string): Arrowhead {
+  if (typeof v !== "string" || !ARROWHEADS.includes(v as Arrowhead)) fail(`${where} is not a known arrowhead`);
+  return v as Arrowhead;
+}
+
+function stringList(v: unknown, where: string): string[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > 50) fail(`${where} must be a short list`);
+  return (v as unknown[]).map((item, i) => str(item, `${where}[${i}]`, 200));
+}
+
+function validateNode(v: unknown, i: number): DiagramNode {
+  const where = `nodes[${i}]`;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const n = v as Record<string, unknown>;
+  const parent = n.parent === null ? null : str(n.parent, `${where}.parent`, MODEL_LIMITS.idLength);
+  return compact({
+    id: str(n.id, `${where}.id`, MODEL_LIMITS.idLength),
+    parent,
+    label: str(n.label, `${where}.label`, MODEL_LIMITS.labelLength),
+    shape: str(n.shape, `${where}.shape`, 40),
+    icon: optStr(n.icon, `${where}.icon`, MODEL_LIMITS.iconLength),
+    box: box(n.box, `${where}.box`),
+    style: nodeStyle(n.style, `${where}.style`),
+    container: optBool(n.container, `${where}.container`) ?? false,
+    labelPosition: optStr(n.labelPosition, `${where}.labelPosition`, 40),
+    iconPosition: optStr(n.iconPosition, `${where}.iconPosition`, 40),
+    labelSize: size(n.labelSize, `${where}.labelSize`),
+    classes: stringList(n.classes, `${where}.classes`),
+    layout: layoutHints(n.layout, `${where}.layout`),
+    tooltip: optStr(n.tooltip, `${where}.tooltip`, MODEL_LIMITS.labelLength),
+    link: optStr(n.link, `${where}.link`, 2000),
+  }) as DiagramNode;
+}
+
+function validateEdge(v: unknown, i: number): DiagramEdge {
+  const where = `edges[${i}]`;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const e = v as Record<string, unknown>;
+  if (!Array.isArray(e.route) || e.route.length > MODEL_LIMITS.routePoints) fail(`${where}.route must be a list of at most ${MODEL_LIMITS.routePoints} points`);
+  return compact({
+    id: str(e.id, `${where}.id`, MODEL_LIMITS.idLength * 2 + 20),
+    from: str(e.from, `${where}.from`, MODEL_LIMITS.idLength),
+    to: str(e.to, `${where}.to`, MODEL_LIMITS.idLength),
+    label: optStr(e.label, `${where}.label`, MODEL_LIMITS.labelLength),
+    labelSize: size(e.labelSize, `${where}.labelSize`),
+    srcArrow: arrowhead(e.srcArrow ?? "none", `${where}.srcArrow`),
+    dstArrow: arrowhead(e.dstArrow ?? "triangle", `${where}.dstArrow`),
+    style: edgeStyle(e.style, `${where}.style`),
+    route: (e.route as unknown[]).map((p, j) => point(p, `${where}.route[${j}]`)),
+  }) as DiagramEdge;
+}
+
+export function validateModel(input: unknown): ValidationResult {
+  try {
+    if (!isObject(input)) fail("model must be an object");
+    const m = input as Record<string, unknown>;
+    if (m.version !== 1) fail("unsupported model version");
+    if (!Array.isArray(m.nodes) || m.nodes.length > MODEL_LIMITS.nodes) fail(`nodes must be a list of at most ${MODEL_LIMITS.nodes}`);
+    if (!Array.isArray(m.edges) || m.edges.length > MODEL_LIMITS.edges) fail(`edges must be a list of at most ${MODEL_LIMITS.edges}`);
+    const nodes = (m.nodes as unknown[]).map(validateNode);
+    const edges = (m.edges as unknown[]).map(validateEdge);
+
+    const ids = new Set<string>();
+    for (const n of nodes) {
+      if (ids.has(n.id)) fail(`duplicate node id "${n.id}"`);
+      ids.add(n.id);
+    }
+    const seen = new Set<string>();
+    for (const n of nodes) {
+      if (n.parent !== null && !seen.has(n.parent)) fail(`node "${n.id}" must come after its parent "${n.parent}"`);
+      seen.add(n.id);
+    }
+    const edgeIds = new Set<string>();
+    for (const e of edges) {
+      if (edgeIds.has(e.id)) fail(`duplicate edge id "${e.id}"`);
+      edgeIds.add(e.id);
+      if (!ids.has(e.from) || !ids.has(e.to)) fail(`edge "${e.id}" references a missing node`);
+    }
+
+    let classDefs: Record<string, string> | undefined;
+    if (m.classDefs !== undefined) {
+      if (!isObject(m.classDefs) || Object.keys(m.classDefs).length > 200) fail("classDefs must be a small map");
+      classDefs = Object.fromEntries(
+        Object.entries(m.classDefs as Record<string, unknown>).map(([k, body]) => [str(k, "classDefs key", 200), str(body, `classDefs.${k}`, 20_000)]),
+      );
+    }
+
+    const model: DiagramModel = compact({
+      version: 1 as const,
+      layout: layoutHints(m.layout, "layout"),
+      nodes,
+      edges,
+      classDefs,
+      handArranged: optBool(m.handArranged, "handArranged"),
+    });
+    return { ok: true, model };
+  } catch (err) {
+    if (err instanceof Invalid) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+export function isValidModel(input: unknown): input is DiagramModel {
+  return validateModel(input).ok;
+}
