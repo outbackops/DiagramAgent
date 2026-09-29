@@ -168,7 +168,7 @@ export const EDGE = {
   arrowWidth: 8,
   cornerRadius: 8,
   /** Horizontal spacing between parallel connector tracks in a gutter. */
-  trackGap: 8,
+  trackGap: 12,
 } as const;
 
 /** The default page width; the engine may widen it to keep the aspect ratio in range. */

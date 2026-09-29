@@ -79,6 +79,14 @@ prompt ──► clarify (optional) ──► plan ──► generate D2 (stream
 - **Chat edits keep your layout** — for an edit, the current model is exported to D2, the AI changes it, and the result is merged back by node id: existing items keep their positions, new ones are placed next to what they connect to, and groups grow to make room. New diagrams, *Tidy up* and *Apply suggested fixes* use a fresh full layout (fixes ask first if you've arranged things by hand). Everything is undoable.
 - **Code tab** — shows the D2 and Mermaid generated from the model (read-only), and *Import D2…* opens D2 from elsewhere. Diagrams saved by earlier versions are imported automatically.
 
+### Composed diagrams
+
+- **Composed diagrams** use a portable JSON spec for polished architecture pages: header, numbered columns, flow lanes, shared-service cards and a footer.
+- **Default style** is the composed reference-style layout for new diagrams; graph-style automatic D2 layout remains available in settings.
+- **Spec editing** lives in the Code tab: Import accepts a composition spec, and *Tidy up* recomposes from the current spec/model.
+- **Learn and validate** with the [composition guide](docs/composition-guide.md) and [JSON Schema](docs/composition.schema.json).
+- **CLI:** `npm run compose -- src/test/fixtures/compositions/knowledge-assistant.json -o knowledge-assistant.svg`.
+
 Model calls run in isolated, tool-less Copilot sessions (`mode: "empty"`, replaced system prompt, no filesystem or shell access) with their state kept outside your `~/.copilot`.
 
 ## Quality and testing

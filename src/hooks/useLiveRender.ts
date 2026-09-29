@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isD2SyntaxError } from "@/lib/client/api";
+import { composeText } from "@/lib/compose";
+import { completePartialJson } from "@/lib/compose/partial";
+import { scoreComposition } from "@/lib/compose/quality";
 import type { DiagramModel } from "@/lib/model/types";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 
@@ -26,9 +29,25 @@ export interface LiveRenderState extends RenderSnapshot {
 const EMPTY: RenderSnapshot = { svg: "", quality: null, model: null, error: null, errorKind: null, loading: false, renderedCode: "" };
 
 /**
- * Debounced server render of whatever code is on screen. While a model is
- * streaming, partial code rarely compiles, so errors are suppressed and the
- * last good render stays visible.
+ * Composition specs lay out in the browser. While one streams in, its
+ * unfinished JSON is closed off so the diagram builds up as it arrives.
+ */
+function composeSnapshot(code: string, streaming: boolean): RenderSnapshot | null {
+  const text = streaming ? completePartialJson(code) : code;
+  if (!text) return null;
+  try {
+    const { model, warnings } = composeText(text);
+    return { svg: "", quality: scoreComposition(model, { warnings }), model, error: null, errorKind: null, loading: false, renderedCode: code };
+  } catch (err) {
+    if (streaming) return null;
+    return { ...EMPTY, error: err instanceof Error ? err.message : String(err), errorKind: "syntax", renderedCode: code };
+  }
+}
+
+/**
+ * Debounced render of whatever code is on screen: D2 on the server,
+ * composition specs in the browser. While a model is streaming, partial code
+ * rarely renders, so errors are suppressed and the last good render stays.
  */
 export function useLiveRender(code: string, streaming: boolean): LiveRenderState {
   const [state, setState] = useState<RenderSnapshot>(EMPTY);
@@ -42,6 +61,13 @@ export function useLiveRender(code: string, streaming: boolean): LiveRenderState
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setState(EMPTY);
       return;
+    }
+    if (code.trimStart().startsWith("{")) {
+      const timer = setTimeout(() => {
+        const next = composeSnapshot(code, streaming);
+        if (next && id === requestId.current) setState(next);
+      }, streaming ? 400 : 120);
+      return () => clearTimeout(timer);
     }
     const controller = new AbortController();
     const timer = setTimeout(async () => {

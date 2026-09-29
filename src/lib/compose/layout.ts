@@ -43,6 +43,8 @@ export interface LayoutResult {
 export interface LayoutOptions {
   /** Keep this page width unless another is clearly better, so edits don't reflow the whole page. */
   preferWidth?: number;
+  /** Use exactly this page width (raised to the minimum the content needs). */
+  width?: number;
 }
 
 const PAGE_WIDTHS = [960, 1120, 1280, 1440, 1600, 1760, 1920, 2080, 2240, 2400];
@@ -57,13 +59,17 @@ const STRETCH_SHARE = 0.25;
 const STRETCH_MAX = 48;
 const GRID_CELL_MIN = 180;
 const VERTICAL_LANE_MIN = 220;
+/** A column whose content fills less than this share of the tallest stacks its grids. */
+const SPARSE_SHARE = 0.4;
 
 export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): LayoutResult {
   const ctx: ContentContext = { flowTones: flowTonesOf(spec) };
   const minimum = minimumPageWidth(spec);
   const tightest = Math.max(PAGE_WIDTHS[0], Math.ceil(minimum / 40) * 40);
   const preferred = options.preferWidth && options.preferWidth >= minimum && options.preferWidth <= 4000 ? Math.round(options.preferWidth) : undefined;
-  const widths = [...new Set([...PAGE_WIDTHS.filter((w) => w >= minimum), tightest, ...(preferred ? [preferred] : [])])].sort((a, b) => a - b);
+  const widths = options.width
+    ? [Math.max(Math.round(options.width), Math.ceil(minimum))]
+    : [...new Set([...PAGE_WIDTHS.filter((w) => w >= minimum), tightest, ...(preferred ? [preferred] : [])])].sort((a, b) => a - b);
 
   let best: { placed: Placed; score: number } | null = null;
   for (const width of widths) {
@@ -236,8 +242,8 @@ function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: 
   }
 }
 
-function gridRows(grid: NGrid, innerW: number): { cards: NCard[]; cellW: number }[] {
-  const cols = Math.max(1, Math.min(grid.columns, grid.items.length));
+function gridRows(grid: NGrid, innerW: number, columns = grid.columns): { cards: NCard[]; cellW: number }[] {
+  const cols = Math.max(1, Math.min(columns, grid.items.length));
   const rows: { cards: NCard[]; cellW: number }[] = [];
   for (let i = 0; i < grid.items.length; i += cols) {
     const cards = grid.items.slice(i, i + cols);
@@ -246,9 +252,9 @@ function gridRows(grid: NGrid, innerW: number): { cards: NCard[]; cellW: number 
   return rows;
 }
 
-function measureGrid(grid: NGrid, innerW: number, ctx: ContentContext): { measured: Measured; truncated: number } {
+function measureGrid(grid: NGrid, innerW: number, ctx: ContentContext, columns = grid.columns): { measured: Measured; truncated: number } {
   let truncated = 0;
-  const rows = gridRows(grid, innerW).map((row) => {
+  const rows = gridRows(grid, innerW, columns).map((row) => {
     const heights = row.cards.map((card) => {
       const block = cardBlock(cardContent(card), row.cellW, undefined, ctx);
       truncated += block.truncated;
@@ -356,7 +362,24 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext): Placed
 
   const panelTop = SPACE.headerHeight + SPACE.headerGap;
   const bodyTop = panelTop + SPACE.panelHead;
-  const bodyH = Math.max(120, ...plans.map((p) => p.contentH));
+  let bodyH = Math.max(120, ...plans.map((p) => p.contentH));
+
+  // A column that would stay mostly empty stacks its grids one card per row: the
+  // cards fill the height the way a designer would lay them out, instead of
+  // leaving a block of cards over blank space.
+  for (const plan of plans) {
+    if (plan.contentH >= bodyH * (1 - SPARSE_SHARE)) continue;
+    const innerW = plan.w - 2 * SPACE.panelPadX;
+    plan.items = plan.items.map((m) => {
+      if (m.item.type !== "grid" || m.item.columns < 2 || m.item.items.length < 2) return m;
+      const stacked = measureGrid(m.item, innerW, ctx, 1);
+      return stacked.truncated === 0 ? stacked.measured : m;
+    });
+    const contentH = plan.items.reduce((sum, m) => sum + m.h, 0) + plan.gaps.reduce((a, b) => a + b, 0);
+    if (contentH <= bodyH) plan.contentH = contentH;
+    else plan.items = plan.items.map((m, i) => (m.item.type === "grid" ? measureGrid(m.item as NGrid, innerW, ctx).measured : plan.items[i]));
+  }
+  bodyH = Math.max(120, ...plans.map((p) => p.contentH));
 
   // 2. Equal-height columns: widen gaps, then stretch cards, then align with connector partners.
   for (const plan of plans) stackItems(plan, bodyTop);
@@ -585,7 +608,7 @@ function makeNode(
 }
 
 /** Plain styles so exporters that don't know the composed theme still get its colours. */
-function styleFor(role: NodeRole, tone: Tone | undefined): NodeStyle {
+export function styleFor(role: NodeRole, tone: Tone | undefined): NodeStyle {
   const t = toneColors(tone);
   switch (role) {
     case "header":

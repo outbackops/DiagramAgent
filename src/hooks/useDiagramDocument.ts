@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
+import { composeText, modelSpecText, pageWidthOf, recompose } from "@/lib/compose";
 import { commit, createHistory, redo as redoHistory, undo as undoHistory, type History } from "@/lib/model/history";
 import { carryContainers, mergeStable } from "@/lib/model/merge";
 import { routeModelEdges } from "@/lib/model/route";
@@ -30,6 +31,11 @@ export type DocumentStatus = "loading" | "migrating" | "ready";
 /** After a chat edit merged into the layout, many new or regrouped items deserve a fresh layout (R16). */
 export function suggestsTidyUp(result: AcceptResult, layout: RunLayout): boolean {
   return layout === "stable" && result.added + result.regrouped >= LARGE_EDIT;
+}
+
+/** Composition specs are JSON objects; D2 never starts with "{". */
+export function looksLikeSpec(code: string): boolean {
+  return code.trimStart().startsWith("{");
 }
 
 type StoredModel = { kind: "none" } | { kind: "ok"; model: DiagramModel } | { kind: "unreadable"; raw: string };
@@ -179,21 +185,45 @@ export function useDiagramDocument() {
     return { added: imported.nodes.length, regrouped: 0, warnings };
   }, [replace]);
 
-  /** Re-runs the full automatic layout on the current diagram (R15). */
+  /** Re-lays out the current diagram (R15): composed diagrams are recomposed from their spec, graphs re-run D2's layout. */
   const tidyUp = useCallback(async () => {
     const started = generation.current;
     const current = historyRef.current.present;
     if (!current || current.nodes.length === 0) return;
+    if (current.composed) {
+      replace({ ...recompose(current).model, handArranged: false });
+      return;
+    }
     const { model: imported } = await importCode(modelToD2(current));
     if (generation.current !== started) throw new Error("The diagram changed while it was being tidied. Try again.");
     // D2 has no empty groups; keep the ones you made.
     replace({ ...carryContainers(current, imported), handArranged: false });
   }, [replace]);
 
-  /** Opens D2 from elsewhere as the current diagram (undoable). */
+  /**
+   * Lands a run's composition spec on the canvas. The layout is deterministic,
+   * so an edit keeps everything it didn't touch in place; the page width is
+   * kept too, so the page doesn't reflow.
+   */
+  const acceptRunSpec = useCallback(
+    (spec: string): AcceptResult => {
+      const current = historyRef.current.present;
+      const { model: composed, warnings } = composeText(spec, { preferWidth: pageWidthOf(current) });
+      replace({ ...composed, handArranged: false });
+      return { added: 0, regrouped: 0, warnings };
+    },
+    [replace],
+  );
+
+  /** Opens D2 or a composition spec (JSON) from elsewhere as the current diagram (undoable). */
   const importD2 = useCallback(
     async (code: string, signal?: AbortSignal): Promise<string[]> => {
       const started = generation.current;
+      if (looksLikeSpec(code)) {
+        const { model: composed, warnings } = composeText(code);
+        replace(composed);
+        return warnings;
+      }
       const { model: imported, warnings } = await importCode(code, signal);
       if (signal?.aborted) throw new DOMException("Import cancelled", "AbortError");
       if (generation.current !== started) throw new Error("The diagram changed while importing. Try again.");
@@ -220,10 +250,13 @@ export function useDiagramDocument() {
   }, []);
 
   const d2 = useMemo(() => (model && model.nodes.length > 0 ? modelToD2(model) : ""), [model]);
+  /** The composition spec of a composed diagram (what AI edits start from); "" otherwise. */
+  const specText = useMemo(() => (model?.composed && model.nodes.length > 0 ? modelSpecText(model) : ""), [model]);
 
   return {
     model,
     d2,
+    specText,
     status,
     error,
     dismissError: useCallback(() => setError(null), []),
@@ -234,6 +267,7 @@ export function useDiagramDocument() {
     apply,
     replace,
     acceptRunCode,
+    acceptRunSpec,
     tidyUp,
     importD2,
     clear,

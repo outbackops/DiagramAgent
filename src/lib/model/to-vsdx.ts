@@ -73,7 +73,15 @@ function shapeId(index: number): number {
   return index + 1;
 }
 
-function shapeXml(node: DiagramNode, id: number, page: PageSpace): string {
+function composedNodeLabel(node: DiagramNode): string {
+  const lines = [node.label];
+  if (node.content?.subtitle) lines.push(node.content.subtitle);
+  if (node.content?.lines) lines.push(...node.content.lines);
+  if (node.content?.notes) lines.push(...node.content.notes);
+  return lines.join("\n");
+}
+
+function shapeXml(node: DiagramNode, id: number, page: PageSpace, composed: boolean): string {
   const w = inch(node.box.w);
   const h = inch(node.box.h);
   const x = PAGE_MARGIN_IN + inch(node.box.x - page.minX);
@@ -90,7 +98,8 @@ function shapeXml(node: DiagramNode, id: number, page: PageSpace): string {
   const fontSize = ((node.style.fontSize ?? (node.container ? 12 : 11)) / 72).toFixed(4);
   const fontStyle = (node.style.bold ? 1 : 0) + (node.style.italic ? 2 : 0) + (node.style.underline ? 4 : 0);
 
-  return `<Shape ID="${id}" NameU="${esc(node.id)}" Type="Shape">\n  <Cell N="PinX" V="${fmt(pinX)}"/>\n  <Cell N="PinY" V="${fmt(pinY)}"/>\n  <Cell N="Width" V="${fmt(w)}"/>\n  <Cell N="Height" V="${fmt(h)}"/>\n  <Cell N="LocPinX" V="${fmt(w / 2)}"/>\n  <Cell N="LocPinY" V="${fmt(h / 2)}"/>\n  <Cell N="Angle" V="0"/>\n  <Cell N="FillForegnd" V="${esc(fill)}"/>\n  <Cell N="FillPattern" V="${fill === "none" ? "0" : "1"}"/>\n  <Cell N="LineColor" V="${esc(stroke)}"/>\n  <Cell N="LineWeight" V="${fmt(lineWeight)}"/>\n  <Cell N="LinePattern" V="${linePattern}"/>\n  <Cell N="Rounding" V="${fmt(rounding)}"/>\n  <Cell N="VerticalAlign" V="${verticalAlign}"/>\n  <Section N="Character"><Row IX="0"><Cell N="Font" V="0"/><Cell N="Color" V="${esc(font)}"/><Cell N="Size" V="${fontSize}"/><Cell N="Style" V="${fontStyle}"/></Row></Section>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="${fill === "none" ? "1" : "0"}"/><Cell N="NoLine" V="0"/>\n    <Row T="RelMoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="2"><Cell N="X" V="1"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="3"><Cell N="X" V="1"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n  </Section>\n  <Text>${esc(node.label)}</Text>\n</Shape>`;
+  const label = composed && node.role ? composedNodeLabel(node) : node.label;
+  return `<Shape ID="${id}" NameU="${esc(node.id)}" Type="Shape">\n  <Cell N="PinX" V="${fmt(pinX)}"/>\n  <Cell N="PinY" V="${fmt(pinY)}"/>\n  <Cell N="Width" V="${fmt(w)}"/>\n  <Cell N="Height" V="${fmt(h)}"/>\n  <Cell N="LocPinX" V="${fmt(w / 2)}"/>\n  <Cell N="LocPinY" V="${fmt(h / 2)}"/>\n  <Cell N="Angle" V="0"/>\n  <Cell N="FillForegnd" V="${esc(fill)}"/>\n  <Cell N="FillPattern" V="${fill === "none" ? "0" : "1"}"/>\n  <Cell N="LineColor" V="${esc(stroke)}"/>\n  <Cell N="LineWeight" V="${fmt(lineWeight)}"/>\n  <Cell N="LinePattern" V="${linePattern}"/>\n  <Cell N="Rounding" V="${fmt(rounding)}"/>\n  <Cell N="VerticalAlign" V="${verticalAlign}"/>\n  <Section N="Character"><Row IX="0"><Cell N="Font" V="0"/><Cell N="Color" V="${esc(font)}"/><Cell N="Size" V="${fontSize}"/><Cell N="Style" V="${fontStyle}"/></Row></Section>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="${fill === "none" ? "1" : "0"}"/><Cell N="NoLine" V="0"/>\n    <Row T="RelMoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="2"><Cell N="X" V="1"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="3"><Cell N="X" V="1"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n  </Section>\n  <Text>${esc(label)}</Text>\n</Shape>`;
 }
 
 function iconShapeXml(node: DiagramNode, id: number, page: PageSpace, dataUri: string): string {
@@ -146,7 +155,7 @@ export async function modelToVsdx(model: DiagramModel): Promise<Buffer> {
   const page = { minX: bounds.x, minY: bounds.y, pageH };
   const byId = new Map(model.nodes.map((node) => [node.id, node]));
   const nodeId = new Map(model.nodes.map((node, index) => [node.id, shapeId(index)]));
-  const shapes = model.nodes.map((node, index) => shapeXml(node, shapeId(index), page));
+  const shapes = model.nodes.map((node, index) => shapeXml(node, shapeId(index), page, model.composed === true));
   let nextShapeId = model.nodes.length + 1;
   const iconShapes = model.nodes.flatMap((node) => {
     const dataUri = node.icon ? iconMap.get(node.icon) : undefined;

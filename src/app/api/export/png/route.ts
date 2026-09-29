@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
   }
   const result = validateModel(body.model);
   if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
-  const svg = renderModelSvg(routeModelEdges(result.model, { fallbackOnly: true }));
+  // Composed diagrams are a finished page: export it edge to edge.
+  const svg = renderModelSvg(routeModelEdges(result.model, { fallbackOnly: true }), result.model.composed ? { padding: 0 } : {});
   if (svg.length > MAX_SVG_LENGTH) {
     return NextResponse.json({ error: "SVG is too large" }, { status: 413 });
   }

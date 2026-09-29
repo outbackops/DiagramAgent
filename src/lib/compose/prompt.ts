@@ -277,7 +277,9 @@ export function composeInitialPrompt(prompt: string, analysis?: unknown): string
 }
 
 export function composeEditPrompt(request: string): string {
-  return `Modify the diagram spec above based on this request: ${request}. Keep ids of unchanged items. Output the COMPLETE updated spec JSON only.`;
+  return `Modify the diagram spec above based on this request: ${request}
+
+Change only what the request needs. Keep the existing columns, their order, titles and ids, and keep ids of unchanged items. Put new items into the column where they belong (a new caller next to the other callers, a new shared service among the shared services, a new step inside its flow); add a column only when the request introduces a zone that fits in none of them. Output the COMPLETE updated spec JSON only.`;
 }
 
 export function specFixPrompt(message: string): string {

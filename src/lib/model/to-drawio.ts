@@ -220,6 +220,15 @@ function pointsXml(points: Point[]): string {
     .join("\n")}\n            </Array>`;
 }
 
+function composedNodeLabel(model: DiagramModel, node: DiagramNode): string {
+  if (!model.composed || !node.role) return node.label;
+  const lines = [node.label];
+  if (node.content?.subtitle) lines.push(node.content.subtitle);
+  if (node.content?.lines) lines.push(...node.content.lines);
+  if (node.content?.notes) lines.push(...node.content.notes);
+  return lines.join("<br>");
+}
+
 export async function modelToDrawio(model: DiagramModel, options: DrawioOptions = {}): Promise<string> {
   const iconMap = await buildIconMap(model, options.embedIcons ?? true);
   const nodeIds = new Map<string, string>();
@@ -234,7 +243,7 @@ export async function modelToDrawio(model: DiagramModel, options: DrawioOptions 
     const icon = node.icon ? iconMap.get(node.icon) : undefined;
     const style = buildNodeStyle(node);
     const cells = [
-      `        <mxCell id="${id}" value="${escapeXml(node.label)}" style="${escapeXml(style)}" vertex="1" parent="${parent}">\n          <mxGeometry x="${geometry.x}" y="${geometry.y}" width="${geometry.w}" height="${geometry.h}" as="geometry"/>\n        </mxCell>`,
+      `        <mxCell id="${id}" value="${escapeXml(composedNodeLabel(model, node))}" style="${escapeXml(style)}" vertex="1" parent="${parent}">\n          <mxGeometry x="${geometry.x}" y="${geometry.y}" width="${geometry.w}" height="${geometry.h}" as="geometry"/>\n        </mxCell>`,
     ];
     if (icon) cells.push(imageCellXml(`${id}-icon`, id, icon, node));
     return cells;

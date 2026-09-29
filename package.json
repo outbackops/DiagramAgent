@@ -10,7 +10,8 @@
     "test": "vitest",
     "eval:diagrams": "tsx scripts/eval-diagrams.ts",
     "vendor:icons": "tsx scripts/vendor-icons.ts",
-    "prebuild": "npm run vendor:icons"
+    "prebuild": "npm run vendor:icons",
+    "compose": "tsx scripts/compose.ts"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
