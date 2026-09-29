@@ -6,6 +6,7 @@ import {
   BOUNDARY_KINDS,
   MEANINGS,
   PLATFORMS,
+  PROPOSED_PREFIX,
   VIEWS,
   allItems,
   isBoundary,
@@ -62,11 +63,14 @@ export function normalizeArchSpec(raw: unknown): ArchNormalizeResult {
     if (orphans.length > 0) warnings.push(`Steps ${orphans.map((number) => `${sequence.id}.${number}`).join(", ")} aren't on any connection, so they have no badge on the diagram`);
   }
   const overlays = normalizeOverlays(raw, refs, ctx);
-  const assumptions = arrayOf(raw, ["assumptions", "assumed"])
-    .slice(0, ARCH_LIMITS.assumptions)
+  // The pipeline's disclosure lines (arch/disclose.ts) come on top of the model's own assumptions.
+  const rawAssumptions = arrayOf(raw, ["assumptions", "assumed"]);
+  const isDisclosure = (a: unknown) => typeof a === "string" && a.trim().startsWith(PROPOSED_PREFIX);
+  const own = rawAssumptions.filter((a) => !isDisclosure(a));
+  const assumptions = [...own.slice(0, ARCH_LIMITS.assumptions), ...rawAssumptions.filter(isDisclosure).slice(0, ARCH_LIMITS.disclosureLines)]
     .map((a) => text(a, ARCH_LIMITS.assumptionChars, warnings, "assumption"))
     .filter((a): a is string => Boolean(a));
-  if (arrayOf(raw, ["assumptions", "assumed"]).length > ARCH_LIMITS.assumptions) warnings.push(`Dropped assumptions beyond ${ARCH_LIMITS.assumptions}`);
+  if (own.length > ARCH_LIMITS.assumptions) warnings.push(`Dropped assumptions beyond ${ARCH_LIMITS.assumptions}`);
 
   const spec: NormalizedArchSpec = { version: 1, title, items: nested, connections, sequences, overlays, assumptions };
   const subtitle = text(valueOf(raw, ["subtitle", "description", "summary"]), ARCH_LIMITS.subtitleChars, warnings, "subtitle");

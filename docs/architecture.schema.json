@@ -17,7 +17,7 @@
     "connections": { "type": "array", "maxItems": 80, "items": { "$ref": "#/$defs/Connection" } },
     "sequences": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/Sequence" }, "description": "Numbered workflows; the first draws circle badges, the second squares." },
     "overlays": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/Overlay" }, "description": "Boundaries that span others, such as an Auto Scaling group across Availability Zones." },
-    "assumptions": { "type": "array", "maxItems": 6, "items": { "type": "string", "maxLength": 120 }, "description": "Proposed values the prompt didn't give (tiers, address ranges, counts)." }
+    "assumptions": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 }, "description": "Proposed values the prompt didn't give (tiers, address ranges, counts): at most 6 of your own. The app may add up to 2 lines starting \"Proposed, not in the request:\" that list facts the request didn't state." }
   },
   "$defs": {
     "Platform": { "enum": ["azure", "aws", "gcp", "kubernetes", "neutral"] },

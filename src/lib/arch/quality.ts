@@ -358,7 +358,8 @@ export function scoreArchitecture(model: DiagramModel, options: { warnings?: str
   return { score, grade: gradeOf(score), checks, metrics };
 }
 
-const normalize = (text: string | undefined): string => ` ${text ?? ""} `.toLowerCase().replace(/[×]/g, " x ").replace(/[^a-z0-9.+/#:-]+/g, " ").replace(/\s+/g, " ");
+// A "." or ":" before a space ends a sentence or a label ("Elastic Premium EP1."); inside a token it stays ("8.0", "10.0.0.0/16").
+const normalize = (text: string | undefined): string => ` ${text ?? ""} `.toLowerCase().replace(/[×]/g, " x ").replace(/[^a-z0-9.+/#:-]+/g, " ").replace(/[.:](?= )/g, " ").replace(/\s+/g, " ");
 const normalizeLoose = (text: string | undefined): string => ` ${text ?? ""} `.toLowerCase().replace(/[×]/g, " x ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
 
 /** Whether an alias starts a word of the text, so "producer" matches "Event producers" and "postgres" matches "PostgreSQL". */
@@ -480,8 +481,17 @@ function addressRange(text: string): [number, number] | null {
   return [first, first + size - 1];
 }
 
+/**
+ * The address spaces texts declare. A default route (0.0.0.0/0) or anything wider than a /8
+ * names every address rather than an address space, so it grounds nothing.
+ */
 function declaredRanges(texts: readonly string[]): Array<[number, number]> {
-  return texts.flatMap((text) => [...text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}\b/g)].map((m) => addressRange(m[0])).filter((r): r is [number, number] => r !== null));
+  return texts.flatMap((text) =>
+    [...text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\/(\d{1,2})\b/g)]
+      .filter((m) => Number(m[1]) >= 8)
+      .map((m) => addressRange(m[0]))
+      .filter((r): r is [number, number] => r !== null),
+  );
 }
 
 /** A protocol-and-port or bare port fact ("SQL 3306", "port 8080", ":8080"). */
@@ -518,6 +528,35 @@ function factGrounded(fact: string, prompt: string, allowedFacts: readonly strin
     if (promptLoose.includes(` ${protocol} `) && ports.some((p) => factNorm.includes(p))) return true;
   }
   return false;
+}
+
+/**
+ * Product and protocol names that match the fact patterns (letters with digits, versions) but
+ * state nothing about the system, so they never count as invented facts.
+ */
+export const GENERIC_TECH_TERMS: readonly string[] = [
+  "S3", "EC2", "Route 53", "Route53", "Gen2", "ADLS Gen2", "K8s", "L4", "L7", "IPv4", "IPv6", "0.0.0.0/0", "S2S", "P2S",
+  "OAuth2", "OAuth 2.0", "OIDC", "HTTP/2", "HTTP2", "HTTP/1.1", "gRPC", "TLS 1.2", "TLS1.2", "TLS 1.3", "TLS1.3", "mTLS", "SHA256", "AES256",
+];
+
+/**
+ * The concrete facts in a spec (address ranges, ports, SKUs, counts, versions) that neither the
+ * sources (what the user said) nor the spec's assumptions back up, as the fewest facts that cover
+ * them: the widest address ranges come first, so the subnets inside a listed range need no entry.
+ */
+export function undisclosedFacts(spec: NormalizedArchSpec, sources: readonly string[]): string[] {
+  const prompt = sources.join("\n");
+  const ungrounded = extractFacts(spec)
+    .map((fact) => fact.text)
+    .filter((fact) => !factGrounded(fact, prompt, GENERIC_TECH_TERMS, spec.assumptions));
+  const width = (fact: string) => {
+    const range = addressRange(fact);
+    return range ? range[1] - range[0] : -1;
+  };
+  const ordered = [...new Map(ungrounded.map((fact) => [normalize(fact), fact])).values()].sort((a, b) => width(b) - width(a));
+  const listed: string[] = [];
+  for (const fact of ordered) if (!factGrounded(fact, prompt, GENERIC_TECH_TERMS, [...spec.assumptions, ...listed])) listed.push(fact);
+  return listed;
 }
 
 export function faithfulness(spec: NormalizedArchSpec, prompt: string, expect: FaithfulnessExpect): FaithfulnessReport {

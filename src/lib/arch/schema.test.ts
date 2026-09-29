@@ -51,7 +51,7 @@ describe("architecture schema", () => {
     expect(props(root).connections.maxItems).toBe(ARCH_LIMITS.connections);
     expect(props(root).sequences.maxItems).toBe(ARCH_LIMITS.sequences);
     expect(props(root).overlays.maxItems).toBe(ARCH_LIMITS.overlays);
-    expect(props(root).assumptions.maxItems).toBe(ARCH_LIMITS.assumptions);
+    expect(props(root).assumptions.maxItems).toBe(ARCH_LIMITS.assumptions + ARCH_LIMITS.disclosureLines);
     expect((props(root).assumptions.items as JsonRecord).maxLength).toBe(ARCH_LIMITS.assumptionChars);
     expect(props(defs.Component).name.maxLength).toBe(ARCH_LIMITS.nameChars);
     expect(props(defs.Component).detail.maxLength).toBe(ARCH_LIMITS.detailChars);

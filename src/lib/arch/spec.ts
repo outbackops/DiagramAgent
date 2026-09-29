@@ -197,7 +197,12 @@ export const ARCH_LIMITS = {
   overlays: 4,
   assumptions: 6,
   assumptionChars: 120,
+  /** Lines the pipeline adds on top of the model's assumptions, listing facts the request didn't state (arch/disclose.ts). */
+  disclosureLines: 2,
 } as const;
+
+/** Starts each assumption line the pipeline adds to list facts the request didn't state (arch/disclose.ts). */
+export const PROPOSED_PREFIX = "Proposed, not in the request: ";
 
 export const isBoundary = (item: NItem): item is NBoundary => item.type === "boundary";
 

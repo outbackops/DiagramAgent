@@ -359,4 +359,30 @@ describe("runDiagramPipeline", () => {
     expect(reviewCase.prompts[1]).toBe("CUSTOM REVIEW");
   });
 
+  it("finalizes every candidate before rendering, grounded in what the user said", async () => {
+    const finalize = vi.fn((code: string) => `${code}+disclosed`);
+    const language = { initialPrompt: () => "INITIAL", renderFixPrompt: () => "FIX", structuralFixPrompt: () => "FIX", reviewFixPrompt: () => "FIX", finalize };
+    const { steps } = makeSteps({ scores: [5, 8] });
+    steps.language = language;
+    const result = await runDiagramPipeline(steps, {
+      prompt: "add a cache",
+      existingCode: "{ spec }",
+      history: [{ role: "user", content: "a web app on P1v3" }, { role: "assistant", content: "done" }],
+      maxRefinements: 1,
+    });
+    // The model's plan and the fix prompts never count as grounding; the edited code and earlier requests do.
+    expect(finalize).toHaveBeenNthCalledWith(1, "v1", ["add a cache", "a web app on P1v3", "{ spec }"]);
+    expect(finalize).toHaveBeenNthCalledWith(2, "v2", ["add a cache", "a web app on P1v3", "{ spec }"]);
+    expect(steps.render).toHaveBeenCalledWith("v1+disclosed", undefined);
+    expect(result.code).toBe("v2+disclosed");
+  });
+
+  it("keeps a candidate as generated when finalizing it throws", async () => {
+    const language = { initialPrompt: () => "INITIAL", renderFixPrompt: () => "FIX", structuralFixPrompt: () => "FIX", reviewFixPrompt: () => "FIX", finalize: () => { throw new Error("boom"); } };
+    const { steps } = makeSteps({ scores: [8] });
+    steps.language = language;
+    const result = await runDiagramPipeline(steps, { prompt: "p", maxRefinements: 0 });
+    expect(result.code).toBe("v1");
+  });
+
 });

@@ -1,4 +1,6 @@
-import type { FaithfulnessExpect, FaithfulnessReport } from "@/lib/arch/quality";
+import { GENERIC_TECH_TERMS, type FaithfulnessExpect, type FaithfulnessReport } from "@/lib/arch/quality";
+
+export { GENERIC_TECH_TERMS };
 
 /**
  * Pure aggregation for the eval harness (scripts/eval-diagrams.ts): one record per generated
@@ -12,15 +14,6 @@ import type { FaithfulnessExpect, FaithfulnessReport } from "@/lib/arch/quality"
  */
 
 export const EVAL_THRESHOLDS = { quality: 75, judge: 7, keywordCoverage: 0.8 } as const;
-
-/**
- * Product and protocol names that match the fact patterns (letters with digits, versions) but
- * state nothing about the system, so they never count as invented facts.
- */
-export const GENERIC_TECH_TERMS: readonly string[] = [
-  "S3", "EC2", "Route 53", "Route53", "Gen2", "ADLS Gen2", "K8s", "L4", "L7", "IPv4", "IPv6", "0.0.0.0/0", "S2S", "P2S",
-  "OAuth2", "OAuth 2.0", "OIDC", "HTTP/2", "HTTP2", "HTTP/1.1", "gRPC", "TLS 1.2", "TLS1.2", "TLS 1.3", "TLS1.3", "mTLS", "SHA256", "AES256",
-];
 
 export type JudgeResult = { status: "scored"; score: number } | { status: "unreviewed"; reason: string } | { status: "off" };
 

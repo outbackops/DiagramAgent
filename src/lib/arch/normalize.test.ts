@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SpecError } from "@/lib/compose/spec";
 import { isArchSpecShape, normalizeArchSpec, normalizeArchSpecText } from "./normalize";
-import { allItems, isBoundary, type NBoundary, type NComponent } from "./spec";
+import { allItems, isBoundary, PROPOSED_PREFIX, type NBoundary, type NComponent } from "./spec";
 
 const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "architecture");
 const fixture = (name: string) => readFileSync(path.join(fixtureDir, `${name}.json`), "utf8");
@@ -178,6 +178,14 @@ describe("normalizeArchSpec", () => {
     expect(allItems(spec.items)).toHaveLength(70);
     expect(warnings).toContain("70 components exceed the 60-component envelope; the layout may be less tidy");
     expect(() => normalizeArchSpec({ title: "Huge", items: many(241) })).toThrow(SpecError);
+  });
+
+  it("keeps six assumptions of the model's own and up to two disclosure lines on top", () => {
+    const own = ["a", "b", "c", "d", "e", "f", "g"];
+    const lines = [1, 2, 3].map((n) => `${PROPOSED_PREFIX}fact ${n}`);
+    const { spec, warnings } = normalizeArchSpec({ title: "Assumed", items: [{ id: "a", name: "A" }], assumptions: [lines[0], ...own, ...lines.slice(1)] });
+    expect(spec.assumptions).toEqual([...own.slice(0, 6), ...lines.slice(0, 2)]);
+    expect(warnings).toContain("Dropped assumptions beyond 6");
   });
 
   it("rejects input it can't repair", () => {

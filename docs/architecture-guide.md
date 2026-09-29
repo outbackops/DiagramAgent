@@ -101,6 +101,8 @@ Use `overlays` when a boundary spans members that live in different containment 
 
 Never present invented facts as known. If the prompt does not provide CIDRs, regions, tiers, counts, protocols or redundancy, either omit them or propose defaults only for a new design. Every proposed default belongs in `assumptions`, including ports (8080), tiers or types ("Standard", "Premium"), counts, versions and model names, not only address ranges. Do not mix observed facts and guesses in a `detail` or `facts` string. The eval harness checks this: a concrete fact in a detail, facts line or label must come from the request or an assumption. An address inside a range an assumption declares counts as grounded, as does a port an assumption states.
 
+The app backs the policy up. Some facts in a generated spec aren't stated in the request, in an earlier request or in the spec being edited, and aren't listed in any assumption. The app adds them to `assumptions` in a line starting "Proposed, not in the request:". Up to two such lines sit on top of your own six, and they're recomputed on every edit.
+
 ## Views
 
 - `deployment`: concrete deployed resources, runtime boundaries, scale and managed services.

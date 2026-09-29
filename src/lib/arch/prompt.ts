@@ -1,4 +1,5 @@
 import { getIconKeySummary } from "@/lib/icon-registry";
+import { discloseProposedFacts } from "@/lib/arch/disclose";
 import type { ArchSpecInput } from "@/lib/arch/spec";
 import { BOUNDARY_KINDS, MEANINGS, PLATFORMS, VIEWS } from "@/lib/arch/spec";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
@@ -328,4 +329,5 @@ export const ARCHITECTURE_LANGUAGE: PipelineLanguage = {
   renderFixPrompt: archRenderFixPrompt,
   structuralFixPrompt: archStructuralFixPrompt,
   reviewFixPrompt: archReviewFixPrompt,
+  finalize: discloseProposedFacts,
 };

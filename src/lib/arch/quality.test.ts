@@ -161,6 +161,10 @@ describe("faithfulness", () => {
   it("grounds facts from assumptions", () => {
     const spec = baseSpec({ items: [{ type: "component", id: "web", name: "Web app", detail: "P1v3" }], connections: [], overlays: [], assumptions: ["P1v3 is the chosen app service tier."] });
     expect(faithfulness(spec, "Draw a web app.", {}).ungroundedFacts).toEqual([]);
+    // Also at the end of a sentence or before a colon.
+    const endOfSentence = { ...spec, assumptions: ["App Service plan P1v3."] };
+    expect(faithfulness(endOfSentence, "Draw a web app.", {}).ungroundedFacts).toEqual([]);
+    expect(faithfulness({ ...spec, assumptions: ["Tier P1v3: chosen for zone redundancy"] }, "Draw a web app.", {}).ungroundedFacts).toEqual([]);
   });
 
   it("grounds allowed facts", () => {
@@ -187,6 +191,9 @@ describe("faithfulness", () => {
     expect(faithfulness(spec, "Draw an app and its database.", {}).ungroundedFacts).toEqual([]);
     // A subnet outside every declared range is still an invented fact.
     expect(faithfulness({ ...spec, items: subnet("10.40.1.0/24") }, "Draw an app and its database.", {}).ungroundedFacts).toEqual(["10.40.1.0/24"]);
+    // A default route names every address, not an address space: it grounds no range.
+    const route = { ...spec, assumptions: ["MySQL on port 3306"] };
+    expect(faithfulness(route, "Draw an app and its database; egress 0.0.0.0/0 goes to the firewall.", { allowedFacts: ["0.0.0.0/0"] }).ungroundedFacts).toEqual(["10.30.0.0/16", "10.30.1.0/24"]);
   });
 
   it("counts a CIDR once, not its address again", () => {
