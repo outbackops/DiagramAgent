@@ -448,7 +448,7 @@ export function routeEdge(from: Box, to: Box, obstacles: Box[], options: RouteOp
  * (default 80) and running along another route costs half, so connectors drawn after a layout
  * pick channels instead of cutting through the lines already there.
  */
-export function routeEdgeAvoiding(from: Box, to: Box, obstacles: Box[], options: RouteOptions & { crossLines?: Array<[Point, Point]>; crossPenalty?: number } = {}): Point[] {
+export function routeEdgeAvoiding(from: Box, to: Box, obstacles: Box[], options: RouteOptions & { crossLines?: Array<[Point, Point]>; crossPenalty?: number; softObstacles?: Box[]; softPenalty?: number } = {}): Point[] {
   return routeEdgeInternal(from, to, obstacles, options);
 }
 

@@ -664,7 +664,8 @@ function rerouteBlocked(plan: Plan, geo: Geo, after: NConnection[]): void {
   for (const edge of geo.edges) {
     const ends = new Set([edge.conn.from, edge.conn.to, ...plan.ancestors(edge.conn.from), ...plan.ancestors(edge.conn.to)]);
     const hits = (box: Box) => edge.points.some((p, i) => i > 0 && segmentHits(edge.points[i - 1], p, box));
-    const blocked = leaves.some((l) => !ends.has(l.id) && hits(l.box)) || titles.some((t) => !ends.has(t.id) && hits(t.box));
+    // Its own boundaries' title text counts too: the router can usually enter beside it.
+    const blocked = leaves.some((l) => !ends.has(l.id) && hits(l.box)) || titles.some((t) => t.id !== edge.conn.from && t.id !== edge.conn.to && hits(t.box));
     if (blocked && !after.includes(edge.conn)) after.push(edge.conn);
     else if (!blocked) keep.push(edge);
   }
@@ -694,14 +695,34 @@ function routeAfter(plan: Plan, geo: Geo, conns: NConnection[]): void {
     const to = geo.boxes.get(conn.to);
     if (!from || !to) continue;
     const skip = new Set([conn.from, conn.to]);
-    const obstacles = [...leaves.filter((l) => !skip.has(l.id)).map((l) => l.box), ...titles.filter((t) => !skip.has(t.id) && !plan.within(conn.from, t.id) && !plan.within(conn.to, t.id)).map((t) => t.box)];
+    const own = (t: { id: string }) => plan.within(conn.from, t.id) || plan.within(conn.to, t.id);
+    const obstacles = [...leaves.filter((l) => !skip.has(l.id)).map((l) => l.box), ...titles.filter((t) => !skip.has(t.id) && !own(t)).map((t) => t.box)];
+    // The connector has to cross its own boundaries' borders, but not their title text if a nearby way in exists.
+    const soft = { softObstacles: titles.filter((t) => !skip.has(t.id) && own(t)).map((t) => t.box), softPenalty: 400 };
     const dx = to.x + to.w / 2 - (from.x + from.w / 2);
     const dy = to.y + to.h / 2 - (from.y + from.h / 2);
     const [fromSide, toSide] = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? (["right", "left"] as const) : (["left", "right"] as const)) : dy >= 0 ? (["bottom", "top"] as const) : (["top", "bottom"] as const);
     // Expansions are O(1) (the router rasterises obstacles once per search), so the budget can cover
     // the large grids of envelope-size diagrams; running out falls back to a route that ignores obstacles.
-    let points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, fromSide, toSide, maxExpansions: 40_000, crossLines: lines });
-    if (points.length < 2) points = routeEdgeAvoiding(from, to, obstacles, { margin: 12, maxExpansions: 25_000, crossLines: lines });
+    // Tried in order until a route stays clear of components (and, preferably, of its own titles):
+    // facing sides first, then any side; own titles as soft obstacles, then without them, since the
+    // extra cost can exhaust the search on dense pages and its fallback ignores obstacles.
+    const hitsAny = (route: Point[], boxes: Box[]) => boxes.some((box) => route.some((p, i) => i > 0 && segmentHits(route[i - 1], p, box)));
+    const attempts = [{ fromSide, toSide, ...soft }, { ...soft }, { fromSide, toSide }, {}];
+    let points: Point[] = [];
+    let fallback: Point[] = [];
+    for (const extra of attempts) {
+      const route = routeEdgeAvoiding(from, to, obstacles, { margin: 12, maxExpansions: 40_000, crossLines: lines, ...extra });
+      if (route.length < 2) continue;
+      if (fallback.length < 2) fallback = route;
+      if (hitsAny(route, obstacles)) continue;
+      if (!hitsAny(route, soft.softObstacles)) {
+        points = route;
+        break;
+      }
+      if (points.length < 2) points = route;
+    }
+    if (points.length < 2) points = fallback;
     points = dedupe(points);
     geo.edges.push({ conn, points });
     for (let i = 0; i + 1 < points.length; i++) lines.push([points[i], points[i + 1]]);
