@@ -281,3 +281,74 @@ describe("layoutSpec: boundaries and connector labels", () => {
     expect(Math.max(...edge.route.map((p) => p.y))).toBeGreaterThan(panel.y + panel.h);
   });
 });
+
+describe("layoutSpec: designed routes for every connector", () => {
+  const handoff = (): CompositionSpec => ({
+    title: "Orders",
+    columns: [
+      { id: "callers", title: "Callers", size: "narrow", items: [card("shop", "Shop")] },
+      {
+        id: "work",
+        title: "Workload",
+        size: "wide",
+        items: [
+          { type: "flow", id: "place", title: "Place order", steps: [{ id: "take", title: "Take" }, { id: "enqueue", title: "Enqueue" }, { id: "reply", title: "Reply" }] },
+          { type: "flow", id: "fulfil", title: "Fulfil", steps: [{ id: "poll", title: "Poll" }, { id: "pick", title: "Pick" }, { id: "ship", title: "Ship" }] },
+        ],
+      },
+      { id: "shared", title: "Shared", items: [card("bus", "Service Bus"), card("db", "Database")] },
+      { id: "ops", title: "Operations", items: [card("oncall", "On call"), card("audit", "Audit log")] },
+    ],
+    connectors: [
+      { from: "shop", to: "place", kind: "flow" },
+      { from: "place.enqueue", to: "fulfil.poll", kind: "flow", label: "via queue" },
+      { from: "fulfil.ship", to: "fulfil.pick", kind: "call", label: "retry" },
+      { from: "audit", to: "place.enqueue", kind: "call", label: "audit hook" },
+    ],
+  });
+
+  it("hands off between stacked lanes through their bands and the column margin", () => {
+    const { model } = composeSpec(handoff());
+    const edge = model.edges.find((e) => e.from === "work.place.enqueue" && e.to === "work.fulfil.poll")!;
+    const from = node(model, edge.from).box;
+    const to = node(model, edge.to).box;
+    const panel = node(model, "work").box;
+    expect(edge.route[0]).toEqual({ x: from.x + from.w / 2, y: from.y + from.h });
+    expect(edge.route[edge.route.length - 1]).toEqual({ x: to.x + to.w / 2, y: to.y + to.h });
+    const xs = edge.route.map((p) => p.x);
+    const lane = node(model, "work.place").box;
+    // Early steps take the left margin: the bracket runs outside the lanes but inside the panel.
+    expect(Math.min(...xs)).toBeLessThan(lane.x);
+    expect(Math.min(...xs)).toBeGreaterThan(panel.x);
+    expect(Math.max(...xs)).toBeLessThan(panel.x + panel.w);
+    for (let i = 0; i + 1 < edge.route.length; i++) expect(edge.route[i].x === edge.route[i + 1].x || edge.route[i].y === edge.route[i + 1].y).toBe(true);
+  });
+
+  it("connects two steps of one lane along its band", () => {
+    const { model } = composeSpec(handoff());
+    const edge = model.edges.find((e) => e.from === "work.fulfil.ship" && e.to === "work.fulfil.pick")!;
+    const lane = node(model, "work.fulfil").box;
+    expect(edge.route).toHaveLength(4);
+    expect(edge.route.every((p) => p.x >= lane.x && p.x <= lane.x + lane.w)).toBe(true);
+    expect(edge.route[1].y).toBeGreaterThan(node(model, "work.fulfil.ship").box.y + node(model, "work.fulfil.ship").box.h);
+  });
+
+  it("enters a blocked step from its band when the link crosses a column", () => {
+    const { model } = composeSpec(handoff());
+    const edge = model.edges.find((e) => e.from === "ops.audit")!;
+    const step = node(model, "work.place.enqueue").box;
+    expect(edge.route[edge.route.length - 1]).toEqual({ x: step.x + step.w / 2, y: step.y + step.h });
+  });
+
+  it("keeps labels off cards, steps and each other", () => {
+    const { model } = composeSpec(handoff());
+    const solid = model.nodes.filter((n) => n.role === "card" || n.role === "step").map((n) => n.box);
+    const labels = model.edges.filter((e) => e.label && e.labelAt).map((e) => {
+      const w = e.label!.length * 6;
+      return { x: e.labelAt!.x - w / 2, y: e.labelAt!.y - 7, w, h: 14 };
+    });
+    const hit = (a: Box, b: Box) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 1 && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 1;
+    for (const l of labels) for (const s of solid) expect(hit(l, s)).toBe(false);
+    for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) expect(hit(labels[i], labels[j])).toBe(false);
+  });
+});

@@ -51,6 +51,8 @@ export interface ContentBlock {
   icon?: Box;
   /** Text pieces that were cut short to fit. */
   truncated: number;
+  /** Words that had to be split across lines. */
+  broken: number;
 }
 
 export interface ContentNode {
@@ -65,7 +67,7 @@ export interface ContentContext {
   flowTones?: Record<string, Tone>;
 }
 
-const emptyBlock = (height: number): ContentBlock => ({ height, plates: [], runs: [], arrows: [], truncated: 0 });
+const emptyBlock = (height: number): ContentBlock => ({ height, plates: [], runs: [], arrows: [], truncated: 0, broken: 0 });
 
 /** Baseline of a line whose line box starts at `top`. */
 export function baselineOf(top: number, style: TextStyle): number {
@@ -88,22 +90,24 @@ function pushLines(
 }
 
 /** Wraps each paragraph (up to `perItem` lines) and caps the total at `maxTotal` lines. */
-function wrapAll(items: string[], width: number, style: TextStyle, perItem: number, maxTotal = Number.POSITIVE_INFINITY): { lines: string[]; truncated: number } {
+function wrapAll(items: string[], width: number, style: TextStyle, perItem: number, maxTotal = Number.POSITIVE_INFINITY): { lines: string[]; truncated: number; broken: number } {
   const lines: string[] = [];
   let truncated = 0;
+  let broken = 0;
   for (const item of items) {
     if (!item.trim()) continue;
     const wrapped = wrapText(item, width, style, perItem);
     if (wrapped.truncated) truncated++;
+    if (wrapped.broken) broken++;
     for (const line of wrapped.lines) {
       if (lines.length >= maxTotal) {
         truncated++;
-        return { lines, truncated };
+        return { lines, truncated, broken };
       }
       lines.push(line);
     }
   }
-  return { lines, truncated };
+  return { lines, truncated, broken };
 }
 
 function flowTone(ctx: ContentContext | undefined, letter: string): Tone {
@@ -149,6 +153,7 @@ export function cardBlock(node: ContentNode, width: number, height?: number, ctx
     }
   }
   if (title.truncated) block.truncated++;
+  if (title.broken) block.broken++;
   const titleH = Math.max(title.lines.length, 1) * titleLh;
   const rowH = Math.max(titleH, node.icon ? SPACE.cardIcon : 0);
   const top = SPACE.cardPadTop;
@@ -160,6 +165,7 @@ export function cardBlock(node: ContentNode, width: number, height?: number, ctx
   let y = top + rowH;
   const body = wrapAll(node.content?.lines ?? [], innerW, TYPE.cardLine, 2);
   block.truncated += body.truncated;
+  block.broken += body.broken;
   if (body.lines.length) {
     y += 8;
     y += pushLines(block, body.lines, padX, y, TYPE.cardLine, PAGE.body);
@@ -168,6 +174,7 @@ export function cardBlock(node: ContentNode, width: number, height?: number, ctx
   const chipsBelow = usedBy.length > 0 && !chipsBeside;
   const notes = wrapAll(node.content?.notes ?? [], innerW - (chipsBelow ? chipsW + 10 : 0), TYPE.cardNote, 2);
   block.truncated += notes.truncated;
+  block.broken += notes.broken;
   const noteLh = lineHeightOf(TYPE.cardNote);
   const footH = Math.max(notes.lines.length * noteLh, chipsBelow ? SPACE.usedBySize : 0);
   const natural = y + (footH ? 10 + footH : 0) + SPACE.cardPadBottom;
@@ -184,13 +191,26 @@ export function cardBlock(node: ContentNode, width: number, height?: number, ctx
 export function stepBlock(node: ContentNode, width: number, height?: number): ContentBlock {
   const block = emptyBlock(0);
   const innerW = width - 2 * SPACE.stepPadX;
-  const title = wrapText(node.label, innerW, TYPE.stepTitle, 2);
+  // In a crowded row, a title steps down a size or two before a word gets split.
+  let titleStyle: TextStyle = TYPE.stepTitle;
+  let title = wrapText(node.label, innerW, titleStyle, 2);
+  for (const size of [14, 13]) {
+    if (!title.broken) break;
+    const smaller: TextStyle = { ...TYPE.stepTitle, size, lineHeight: size + 5 };
+    const attempt = wrapText(node.label, innerW, smaller, 2);
+    if (!attempt.broken || size === 13) {
+      titleStyle = smaller;
+      title = attempt;
+    }
+  }
   if (title.truncated) block.truncated++;
+  if (title.broken) block.broken++;
   const details = wrapAll(node.content?.lines ?? [], innerW, TYPE.stepLine, 2, 3);
   block.truncated += details.truncated;
+  block.broken += details.broken;
 
   const iconH = node.icon ? SPACE.stepIcon + 6 : 0;
-  const titleH = Math.max(title.lines.length, 1) * lineHeightOf(TYPE.stepTitle);
+  const titleH = Math.max(title.lines.length, 1) * lineHeightOf(titleStyle);
   const detailsH = details.lines.length ? 4 + details.lines.length * lineHeightOf(TYPE.stepLine) : 0;
   const contentH = iconH + titleH + detailsH;
   const natural = Math.max(contentH + 2 * SPACE.stepPadY, SPACE.stepMinHeight);
@@ -203,7 +223,7 @@ export function stepBlock(node: ContentNode, width: number, height?: number): Co
     block.icon = { x: cx - SPACE.stepIcon / 2, y, w: SPACE.stepIcon, h: SPACE.stepIcon };
     y += iconH;
   }
-  y += pushLines(block, title.lines, cx, y, TYPE.stepTitle, PAGE.ink, "middle");
+  y += pushLines(block, title.lines, cx, y, titleStyle, PAGE.ink, "middle");
   if (details.lines.length) pushLines(block, details.lines, cx, y + 4, TYPE.stepLine, PAGE.soft, "middle");
   return block;
 }
@@ -214,8 +234,10 @@ export function bannerBlock(node: ContentNode, width: number, height?: number): 
   const innerW = width - 2 * SPACE.bannerPadX;
   const title = wrapText(node.label, innerW, TYPE.bannerTitle, 2);
   if (title.truncated) block.truncated++;
+  if (title.broken) block.broken++;
   const detail = wrapAll(node.content?.subtitle ? [node.content.subtitle] : [], innerW, TYPE.bannerText, 2);
   block.truncated += detail.truncated;
+  block.broken += detail.broken;
   const titleH = Math.max(title.lines.length, 1) * lineHeightOf(TYPE.bannerTitle);
   const detailH = detail.lines.length ? 2 + detail.lines.length * lineHeightOf(TYPE.bannerText) : 0;
   const contentH = titleH + detailH;
@@ -251,26 +273,35 @@ export function laneHeaderBlock(node: ContentNode, width: number): ContentBlock 
   const titleLh = lineHeightOf(TYPE.laneTitle);
   const tagText = tag ? fitLine(tag, width * 0.4, TYPE.tag) : null;
   const tagW = tagText ? measureText(tagText.text, TYPE.tag) + 20 : 0;
-  const title = fitLine(node.label, width - titleX - x0 - (tagW ? tagW + 12 : 0), TYPE.laneTitle);
+  const textW = width - titleX - x0;
+  // Long titles wrap to a second line (a narrow boundary names itself in full); the tag follows the last line.
+  let title = wrapText(node.label, textW - (tagW ? tagW + 12 : 0), TYPE.laneTitle, 2);
+  if (title.lines.length > 1) title = wrapText(node.label, textW, TYPE.laneTitle, 2);
   if (title.truncated) block.truncated++;
-  const titleTop = subtitle ? y0 - 2 : y0 + (SPACE.laneBadge - titleLh) / 2;
-  pushLines(block, [title.text], titleX, titleTop, TYPE.laneTitle, PAGE.ink);
+  if (title.broken) block.broken++;
+  const titleTop = subtitle || title.lines.length > 1 ? y0 - 2 : y0 + (SPACE.laneBadge - titleLh) / 2;
+  pushLines(block, title.lines, titleX, titleTop, TYPE.laneTitle, PAGE.ink);
+  let textBottom = titleTop + title.lines.length * titleLh;
 
   if (tagText) {
     if (tagText.truncated) block.truncated++;
-    const x = titleX + measureText(title.text, TYPE.laneTitle) + 12;
-    const y = titleTop + (titleLh - SPACE.tagHeight) / 2;
+    const last = title.lines[title.lines.length - 1] ?? "";
+    const fitsAfter = titleX + measureText(last, TYPE.laneTitle) + 12 + tagW <= width - x0;
+    const lineTop = fitsAfter ? textBottom - titleLh : textBottom;
+    const x = fitsAfter ? titleX + measureText(last, TYPE.laneTitle) + 12 : titleX;
+    const y = lineTop + (titleLh - SPACE.tagHeight) / 2;
     block.plates.push({ box: { x, y, w: tagW, h: SPACE.tagHeight }, rx: SPACE.tagHeight / 2, fill: tone.main });
     block.runs.push({ x: x + tagW / 2, y: y + SPACE.tagHeight / 2 + TYPE.tag.size * 0.36, text: tagText.text, style: TYPE.tag, color: PAGE.onTone, anchor: "middle" });
+    if (!fitsAfter) textBottom += titleLh;
   }
 
-  let bottom = y0 + SPACE.laneBadge;
+  let bottom = Math.max(y0 + SPACE.laneBadge, textBottom);
   if (subtitle) {
-    const sub = fitLine(subtitle, width - titleX - x0, TYPE.laneSubtitle);
+    const sub = wrapText(subtitle, textW, TYPE.laneSubtitle, 2);
     if (sub.truncated) block.truncated++;
-    const top = titleTop + titleLh;
-    pushLines(block, [sub.text], titleX, top, TYPE.laneSubtitle, PAGE.muted);
-    bottom = Math.max(bottom, top + lineHeightOf(TYPE.laneSubtitle));
+    if (sub.broken) block.broken++;
+    pushLines(block, sub.lines, titleX, textBottom, TYPE.laneSubtitle, PAGE.muted);
+    bottom = Math.max(bottom, textBottom + sub.lines.length * lineHeightOf(TYPE.laneSubtitle));
   }
   block.height = bottom + SPACE.laneHeadGap;
   return block;
@@ -337,6 +368,7 @@ export function laneFooterBlock(node: ContentNode, width: number): ContentBlock 
 
   const notes = wrapAll(node.content?.notes ?? [], innerW, TYPE.laneNote, 2, 4);
   block.truncated += notes.truncated;
+  block.broken += notes.broken;
   if (notes.lines.length) {
     if (y > 0) y += 10;
     y += pushLines(block, notes.lines, width / 2, y, TYPE.laneNote, PAGE.soft, "middle");
@@ -480,6 +512,7 @@ export function pageFooterBlock(node: ContentNode, width: number): ContentBlock 
   block.runs.push({ x: padX, y: 36, text: title.text, style: TYPE.footerTitle, color: PAGE.footerTitle, anchor: "start" });
   const text = node.content?.subtitle?.trim() ? wrapText(node.content.subtitle, leftW, TYPE.footerText, 3) : { lines: [], truncated: false };
   if (text.truncated) block.truncated++;
+  if (text.broken) block.broken++;
   const lh = lineHeightOf(TYPE.footerText);
   text.lines.forEach((line, i) => block.runs.push({ x: padX, y: 64 + i * lh, text: line, style: TYPE.footerText, color: PAGE.footerText, anchor: "start" }));
   if (s) block.runs.push({ x: width - padX, y: 36, text: s.text, style: TYPE.footerStatus, color: PAGE.footerStatus, anchor: "end" });

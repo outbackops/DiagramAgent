@@ -133,7 +133,7 @@ export default function Inspector({
               </p>
               <Button variant="secondary" size="xs" disabled={importDisabled} onClick={() => setImportOpen(true)} icon={<Upload className="size-3" />}>Import...</Button>
             </div>
-            <div className="min-h-0 flex-1"><CodeEditor code={displayedCode} onChange={() => {}} readOnly theme={theme} /></div>
+            <div className="min-h-0 flex-1"><CodeEditor code={displayedCode} onChange={() => {}} readOnly theme={theme} language={codeKind === "spec" ? "json" : codeKind === "d2" ? "d2" : "plaintext"} /></div>
             <ImportD2Dialog open={importOpen} onClose={() => setImportOpen(false)} onImport={onImportD2} />
           </div>
         )}

@@ -103,6 +103,8 @@ export interface WrapResult {
   lines: string[];
   /** True when text was dropped or ellipsised to respect `maxLines` or the width. */
   truncated: boolean;
+  /** True when a word wider than the line had to be split. */
+  broken?: boolean;
 }
 
 const BREAK_AFTER = new Set(["/", ".", "-", "_", ":", ",", ";", "?", "&", "=", ")", "]", "}"]);
@@ -140,12 +142,13 @@ export function ellipsize(text: string, maxWidth: number, style: TextStyle): str
 
 /**
  * Greedy word wrap to `maxWidth`. Explicit newlines are kept. Words wider
- * than a line are broken. Beyond `maxLines`, the last line is ellipsised and
- * `truncated` is set.
+ * than a line are split (`broken`); beyond `maxLines` the last line is
+ * ellipsised (`truncated`).
  */
 export function wrapText(text: string, maxWidth: number, style: TextStyle, maxLines = Number.POSITIVE_INFINITY): WrapResult {
   const width = Math.max(maxWidth, style.size * 2);
   const lines: string[] = [];
+  let broken = false;
   for (const paragraph of text.split(/\r?\n/)) {
     const words = paragraph.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
     let current = "";
@@ -157,16 +160,17 @@ export function wrapText(text: string, maxWidth: number, style: TextStyle, maxLi
       }
       if (current) lines.push(current);
       const pieces = breakWord(word, width, style);
+      if (pieces.length > 1) broken = true;
       lines.push(...pieces.slice(0, -1));
       current = pieces[pieces.length - 1] ?? "";
     }
     if (current) lines.push(current);
   }
-  if (lines.length <= maxLines) return { lines, truncated: false };
+  if (lines.length <= maxLines) return { lines, truncated: false, broken };
   const kept = lines.slice(0, Math.max(1, maxLines));
   const last = kept.length - 1;
   kept[last] = ellipsize(kept[last] + ELLIPSIS, width, style);
-  return { lines: kept, truncated: true };
+  return { lines: kept, truncated: true, broken };
 }
 
 /** One line that fits `maxWidth`, ellipsised if needed. */

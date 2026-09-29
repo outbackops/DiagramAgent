@@ -75,7 +75,7 @@ function EmptyState({ onPick, disabled }: { onPick: (prompt: string) => void; di
       <h2 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">What should we diagram?</h2>
       <p className="mt-1 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
         Describe a system in plain language. Name a cloud provider for provider-specific icons, or keep it generic for a vendor-neutral view. You can
-        refine the result by chatting, editing the D2 code, or clicking elements on the canvas.
+        refine the result by chatting, or by editing items on the canvas.
       </p>
       <p className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Start from an example</p>
       <div className="grid grid-cols-1 gap-2">

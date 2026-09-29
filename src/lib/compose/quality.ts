@@ -250,8 +250,9 @@ function contentRole(node: DiagramNode, byParent: Map<string | null, DiagramNode
   return role === "card" || role === "lane" ? undefined : role;
 }
 
-function textFitOffenders(model: DiagramModel, byParent: Map<string | null, DiagramNode[]>, ctx: ContentContext): string[] {
+function textFitOffenders(model: DiagramModel, byParent: Map<string | null, DiagramNode[]>, ctx: ContentContext): { offenders: string[]; broken: string[] } {
   const offenders: string[] = [];
+  const broken: string[] = [];
   for (const node of model.nodes) {
     const role = roleOf(node, byParent);
     if (!["card", "step", "banner", "lane", "zone", "column", "header", "footer"].includes(role)) continue;
@@ -259,12 +260,14 @@ function textFitOffenders(model: DiagramModel, byParent: Map<string | null, Diag
       const header = laneHeaderBlock(node, node.box.w);
       const footer = laneFooterBlock(node, node.box.w);
       if (header.truncated > 0 || footer.truncated > 0 || header.height + footer.height > node.box.h + 1) offenders.push(labelOf(node));
+      else if (header.broken + footer.broken > 0) broken.push(labelOf(node));
     } else {
       const block = nodeBlock(contentRole(node, byParent), node, { w: node.box.w, h: node.box.h }, ctx);
       if (block.truncated > 0 || block.height > node.box.h + 1) offenders.push(labelOf(node));
+      else if (block.broken > 0) broken.push(labelOf(node));
     }
   }
-  return offenders;
+  return { offenders, broken };
 }
 
 function lineCount(node: DiagramNode): number {
@@ -294,16 +297,18 @@ export function scoreComposition(model: DiagramModel, options: { warnings?: stri
     detail: `${cardsAndSteps.length} cards or steps; add at least ${Math.max(0, 4 - cardsAndSteps.length)} more meaningful component${4 - cardsAndSteps.length === 1 ? "" : "s"}.`,
   });
 
-  const fitOffenders = textFitOffenders(model, byParent, ctx);
+  const { offenders: fitOffenders, broken: brokenWords } = textFitOffenders(model, byParent, ctx);
   addCheck(checks, {
     id: "text_fit",
     label: "Text fits inside boxes",
     severity: "major",
-    status: fitOffenders.length === 0 ? "pass" : "fail",
+    status: fitOffenders.length > 0 ? "fail" : brokenWords.length > 0 ? "warn" : "pass",
     detail:
-      fitOffenders.length === 0
-        ? "All composed text fits current boxes"
-        : `Increase box height or shorten text for: ${fitOffenders.slice(0, 4).join(", ")}${fitOffenders.length > 4 ? ", …" : ""}.`,
+      fitOffenders.length > 0
+        ? `Increase box height or shorten text for: ${fitOffenders.slice(0, 4).join(", ")}${fitOffenders.length > 4 ? ", …" : ""}.`
+        : brokenWords.length > 0
+          ? `Words are split across lines in: ${brokenWords.slice(0, 4).join(", ")}${brokenWords.length > 4 ? ", …" : ""}; use shorter words or fewer steps in the row.`
+          : "All composed text fits current boxes",
   });
 
   const overlaps: string[] = [];

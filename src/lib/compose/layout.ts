@@ -31,6 +31,8 @@ export interface LayoutReport {
   aspectRatio: number;
   /** Text pieces the layout had to cut short. */
   truncated: number;
+  /** Words split across lines because they were wider than their box. */
+  broken: number;
   /** Connectors drawn as used-by chips instead of lines (they would have crossed a column). */
   chipped: number;
 }
@@ -61,13 +63,26 @@ const GRID_CELL_MIN = 180;
 const VERTICAL_LANE_MIN = 220;
 /** A column whose content fills less than this share of the tallest stacks its grids. */
 const SPARSE_SHARE = 0.4;
+/** Furthest an item slides down from its packed place to line up with its connector partner. */
+const MAX_ALIGN_SLIDE = 88;
+/** Header and footer gaps when a connector passes over or under the panels. */
+const PASS_GAP = 48;
+/** Layout cost of a word split across lines: enough to prefer a slightly wider page, not a huge one. */
+const BROKEN_WORD_COST = 0.35;
 
 export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): LayoutResult {
   const ctx: ContentContext = { flowTones: flowTonesOf(spec) };
   // Everything about connectors that doesn't depend on the page width is planned once.
   const index = indexSpec(spec);
   const { chips, lines } = planConnectors(spec, index);
-  const prepared: Prepared = { index, chips, lines, bandUse: bandUsage(lines, index), gutters: gutterWidths(spec, lines, index) };
+  const prepared: Prepared = {
+    index,
+    chips,
+    lines,
+    bandUse: bandUsage(lines, index),
+    gutters: gutterWidths(spec, lines, index),
+    passes: lines.some((l) => Math.abs((index.columnOf.get(l.from) ?? 0) - (index.columnOf.get(l.to) ?? 0)) > 1),
+  };
   const minimum = minimumPageWidth(spec, prepared.gutters);
   const tightest = Math.max(PAGE_WIDTHS[0], Math.ceil(minimum / 40) * 40);
   const preferred = options.preferWidth && options.preferWidth >= minimum && options.preferWidth <= 4000 ? Math.round(options.preferWidth) : undefined;
@@ -80,7 +95,7 @@ export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): L
     const placed = place(spec, width, ctx, prepared);
     const aspect = placed.width / placed.height;
     const outside = aspect < ASPECT_LOW ? ASPECT_LOW / aspect - 1 : aspect > ASPECT_HIGH ? aspect / ASPECT_HIGH - 1 : 0;
-    const score = outside * 10 + placed.truncated * 2 + Math.abs(width - PAGE_WIDTH) / PAGE_WIDTH - (width === preferred ? KEEP_WIDTH_BONUS : 0);
+    const score = outside * 10 + placed.truncated * 2 + placed.broken * BROKEN_WORD_COST + Math.abs(width - PAGE_WIDTH) / PAGE_WIDTH - (width === preferred ? KEEP_WIDTH_BONUS : 0);
     if (!best || score < best.score - 1e-9) best = { placed, score };
   }
   const placed = best!.placed;
@@ -92,6 +107,7 @@ export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): L
       height: placed.height,
       aspectRatio: Number((placed.width / placed.height).toFixed(2)),
       truncated: placed.truncated,
+      broken: placed.broken,
       chipped: placed.chipped,
     },
   };
@@ -190,17 +206,20 @@ const GUTTER_MAX = 170;
  */
 function gutterWidths(spec: NormalizedSpec, lines: NConnector[], index: SpecIndex): number[] {
   const widths = new Array<number>(Math.max(0, spec.columns.length - 1)).fill(SPACE.gutter);
+  const tracks = new Array<number>(widths.length).fill(0);
   for (const line of lines) {
-    if (!line.label) continue;
     const a = index.columnOf.get(line.from);
     const b = index.columnOf.get(line.to);
-    if (a === undefined || b === undefined || Math.abs(a - b) !== 1) continue;
+    if (a === undefined || b === undefined) continue;
+    for (const g of guttersUsed(a, b)) tracks[g]++;
+    if (!line.label || Math.abs(a - b) !== 1) continue;
     const inLane = (end: string, facesRight: boolean) => index.steps.has(resolveEnd(end, facesRight, index));
     if (inLane(line.from, b > a) || inLane(line.to, a > b)) continue;
     const g = Math.min(a, b);
     widths[g] = Math.max(widths[g], Math.min(GUTTER_MAX, Math.ceil(measureText(line.label, TYPE.edgeLabel)) + 28));
   }
-  return widths;
+  // Room for every parallel track, so dashed lines don't sit on top of each other.
+  return widths.map((w, g) => Math.max(w, Math.min(GUTTER_MAX, (tracks[g] + 1) * EDGE.trackGap)));
 }
 
 /** Splits `total` by weight while honouring each minimum. */
@@ -260,15 +279,22 @@ interface Measured {
   zone?: { headerH: number };
 }
 
-function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: Map<string, number>, columnId: string): { measured: Measured; truncated: number } {
+/** A measured item and what its text cost. */
+interface Sized {
+  measured: Measured;
+  truncated: number;
+  broken: number;
+}
+
+function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: Map<string, number>, columnId: string): Sized {
   switch (item.type) {
     case "card": {
       const block = cardBlock(cardContent(item), innerW, undefined, ctx);
-      return { measured: { item, natural: block.height, h: block.height, top: 0 }, truncated: block.truncated };
+      return { measured: { item, natural: block.height, h: block.height, top: 0 }, truncated: block.truncated, broken: block.broken };
     }
     case "banner": {
       const block = bannerBlock(bannerContent(item), innerW);
-      return { measured: { item, natural: block.height, h: block.height, top: 0 }, truncated: block.truncated };
+      return { measured: { item, natural: block.height, h: block.height, top: 0 }, truncated: block.truncated, broken: block.broken };
     }
     case "grid":
       return measureGrid(item, innerW, ctx);
@@ -280,7 +306,7 @@ function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: 
 }
 
 /** A boundary: a header like a lane's (no letter), its cards in a grid, notes at the bottom. */
-function measureZone(zone: NZone, innerW: number, ctx: ContentContext, columns = zone.columns): { measured: Measured; truncated: number } {
+function measureZone(zone: NZone, innerW: number, ctx: ContentContext, columns = zone.columns): Sized {
   const content = zoneContent(zone);
   const header = laneHeaderBlock(content, innerW);
   const footer = laneFooterBlock(content, innerW);
@@ -294,6 +320,7 @@ function measureZone(zone: NZone, innerW: number, ctx: ContentContext, columns =
   return {
     measured: { item: zone, natural: h, h, top: 0, grid: grid.measured.grid, zone: { headerH: header.height } },
     truncated: header.truncated + footer.truncated + grid.truncated,
+    broken: header.broken + footer.broken + grid.broken,
   };
 }
 
@@ -307,21 +334,23 @@ function gridRows(grid: NGrid, innerW: number, columns = grid.columns): { cards:
   return rows;
 }
 
-function measureGrid(grid: NGrid, innerW: number, ctx: ContentContext, columns = grid.columns): { measured: Measured; truncated: number } {
+function measureGrid(grid: NGrid, innerW: number, ctx: ContentContext, columns = grid.columns): Sized {
   let truncated = 0;
+  let broken = 0;
   const rows = gridRows(grid, innerW, columns).map((row) => {
     const heights = row.cards.map((card) => {
       const block = cardBlock(cardContent(card), row.cellW, undefined, ctx);
       truncated += block.truncated;
+      broken += block.broken;
       return block.height;
     });
     return { ...row, h: Math.max(...heights) };
   });
   const h = rows.reduce((sum, r) => sum + r.h, 0) + Math.max(0, rows.length - 1) * SPACE.gridGap;
-  return { measured: { item: grid, natural: h, h, top: 0, grid: rows }, truncated };
+  return { measured: { item: grid, natural: h, h, top: 0, grid: rows }, truncated, broken };
 }
 
-function measureFlow(flow: NFlow, innerW: number, band: number): { measured: Measured; truncated: number } {
+function measureFlow(flow: NFlow, innerW: number, band: number): Sized {
   const avail = innerW - 2 * SPACE.lanePadX;
   const k = flow.steps.length;
   const rowStepW = (avail - (k - 1) * SPACE.stepGap) / k;
@@ -330,11 +359,13 @@ function measureFlow(flow: NFlow, innerW: number, band: number): { measured: Mea
   const header = laneHeaderBlock(content, innerW);
   const footer = laneFooterBlock(content, innerW);
   let truncated = header.truncated + footer.truncated;
+  let broken = header.broken + footer.broken;
 
   const stepW = vertical ? avail : rowStepW;
   const naturals = flow.steps.map((step) => {
     const block = stepBlock(stepContent(step), stepW);
     truncated += block.truncated;
+    broken += block.broken;
     return block.height;
   });
   const stepHs = vertical ? naturals : naturals.map(() => Math.max(...naturals));
@@ -351,6 +382,7 @@ function measureFlow(flow: NFlow, innerW: number, band: number): { measured: Mea
       flow: { vertical, headerH: header.height, footerH: footer.height, hasFooter, stepW, stepHs, stepsH, band: bandH ? band : 0 },
     },
     truncated,
+    broken,
   };
 }
 
@@ -376,6 +408,7 @@ interface Placed {
   width: number;
   height: number;
   truncated: number;
+  broken: number;
   chipped: number;
 }
 
@@ -394,6 +427,8 @@ interface Prepared {
   lines: NConnector[];
   bandUse: Map<string, number>;
   gutters: number[];
+  /** Some connector crosses a whole column, over or under the panels. */
+  passes: boolean;
 }
 
 function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepared: Prepared): Placed {
@@ -405,6 +440,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
     spec.columns.map(minColumnWidth),
   );
   let truncated = 0;
+  let broken = 0;
 
   // 1. Natural sizes, top-packed.
   let x = SPACE.margin;
@@ -414,6 +450,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
     const items = column.items.map((item) => {
       const result = measureItem(withChips(item, column.id, chips), innerW, ctx, bandUse, column.id);
       truncated += result.truncated;
+      broken += result.broken;
       return result.measured;
     });
     const gaps = column.items.slice(1).map((item, j) => (linkedItems(lines, `${column.id}.${column.items[j].id}`, `${column.id}.${item.id}`) ? SPACE.linkedGap : SPACE.itemGap));
@@ -424,7 +461,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
     return plan;
   });
 
-  const panelTop = SPACE.headerHeight + SPACE.headerGap;
+  const panelTop = SPACE.headerHeight + (prepared.passes ? PASS_GAP : SPACE.headerGap);
   const bodyTop = panelTop + SPACE.panelHead;
   let bodyH = Math.max(120, ...plans.map((p) => p.contentH));
 
@@ -458,6 +495,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
   const slots = new Map<string, StepSlot>();
   const headerBlock = pageHeaderBlock(headerContent(spec), pageW);
   truncated += headerBlock.truncated;
+  broken += headerBlock.broken;
   nodes.push(makeNode(HEADER_ID, null, "header", spec.title, { x: 0, y: 0, w: pageW, h: SPACE.headerHeight }, undefined, headerContent(spec).content));
 
   const panelH = SPACE.panelHead + bodyH + SPACE.panelPadBottom;
@@ -469,6 +507,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
     const content = compact({ badge: String(i + 1), size: plan.column.size, legend });
     const titleBlock = columnTitleBlock({ label: plan.column.title, content }, plan.w, ctx);
     truncated += titleBlock.truncated;
+    broken += titleBlock.broken;
     nodes.push(makeNode(plan.column.id, null, "column", plan.column.title, { x: plan.x, y: panelTop, w: plan.w, h: panelH }, undefined, content, true));
     for (const measured of plan.items) emitItem(nodes, slots, plan, measured, withChips(measured.item, plan.column.id, chips));
   });
@@ -479,14 +518,16 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
     const w = pageW - 2 * SPACE.margin;
     const block = pageFooterBlock(content, w);
     truncated += block.truncated;
-    const y = bottom + SPACE.footerGap;
+    broken += block.broken;
+    const y = bottom + (prepared.passes ? PASS_GAP : SPACE.footerGap);
     nodes.push(makeNode(FOOTER_ID, null, "footer", content.label, { x: SPACE.margin, y, w, h: block.height }, undefined, content.content));
     bottom = y + block.height;
   }
 
-  // 4. Connectors.
-  const edges = [...stepEdges(spec, nodes), ...routeConnectors(lines, nodes, slots, plans, panelTop, panelTop + panelH, index)];
-  return { nodes, edges, width: pageW, height: bottom + SPACE.margin, truncated, chipped: chips.size };
+  // 4. Connectors, then their labels kept clear of cards and each other.
+  const routed = routeConnectors(lines, nodes, slots, plans, panelTop, panelTop + panelH, index, prepared.passes ? PASS_GAP : SPACE.headerGap);
+  const edges = placeLabels([...stepEdges(spec, nodes), ...routed], nodes, pageW);
+  return { nodes, edges, width: pageW, height: bottom + SPACE.margin, truncated, broken, chipped: chips.size };
 }
 
 function headerContent(spec: NormalizedSpec): ContentNode {
@@ -562,7 +603,8 @@ function equalise(plan: ColumnPlan, top: number, bodyH: number, anchors: Map<str
     let wanted = Math.max(m.top, floor);
     const anchor = anchors.get(`${plan.column.id}.${m.item.id}`);
     if (anchor !== undefined) wanted = Math.max(wanted, Math.min(anchor - m.h / 2, maxTop));
-    m.top = Math.min(wanted, maxTop);
+    // Slide towards the partner, but never open a hole the column reads as empty.
+    m.top = Math.min(wanted, maxTop, floor + MAX_ALIGN_SLIDE);
     floor = m.top + m.h + (gaps[i] ?? 0);
   }
 }
@@ -828,16 +870,40 @@ function bandUsage(lines: NConnector[], index: SpecIndex): Map<string, number> {
   for (const line of lines) {
     const a = index.columnOf.get(line.from);
     const b = index.columnOf.get(line.to);
-    if (a === undefined || b === undefined || a === b || Math.abs(a - b) > 1) continue;
+    if (a === undefined || b === undefined) continue;
+    const { fromRight, toRight } = facing(line, a, b, index);
     for (const [end, facesRight] of [
-      [line.from, b > a],
-      [line.to, a > b],
+      [line.from, fromRight],
+      [line.to, toRight],
     ] as const) {
       const info = index.steps.get(resolveEnd(end, facesRight, index));
       if (info && usesBand(line, info, facesRight)) use.set(info.lane, (use.get(info.lane) ?? 0) + 1);
     }
   }
   return use;
+}
+
+/**
+ * The sides a connector's ends face: towards each other across columns.
+ * Within one column both face the margin nearer to them: links between
+ * early steps in their rows take the left margin, the rest the right.
+ */
+function facing(line: NConnector, a: number, b: number, index: SpecIndex): { fromRight: boolean; toRight: boolean } {
+  if (a !== b) return { fromRight: b > a, toRight: a > b };
+  const place = (end: string) => {
+    const info = index.steps.get(end);
+    if (info) return info.count > 1 ? info.index / (info.count - 1) : 0.5;
+    return index.laneSteps.has(end) ? 0.5 : 1;
+  };
+  const right = (place(line.from) + place(line.to)) / 2 >= 0.5;
+  return { fromRight: right, toRight: right };
+}
+
+/** Gutters a connector runs through: the one between adjacent columns, or the one beside each end of a longer link. */
+function guttersUsed(a: number, b: number): number[] {
+  if (a === b) return [];
+  if (Math.abs(a - b) === 1) return [Math.min(a, b)];
+  return [b > a ? a : a - 1, b > a ? b - 1 : b];
 }
 
 function linesLegendColumn(plans: ColumnPlan[], lines: NConnector[]): number {
@@ -904,7 +970,8 @@ function makeEdge(from: string, to: string, kind: "flow" | "call" | "step", tone
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
-type Side = "left" | "right";
+/** How a connector end leaves its node: from its side, down through its lane's band, or down into the gap under its grid cell. */
+type Attach = "port" | "band" | "gap";
 
 interface PlannedLine {
   line: NConnector;
@@ -912,186 +979,202 @@ interface PlannedLine {
   to: DiagramNode;
   a: number;
   b: number;
-  fromBand: boolean;
-  toBand: boolean;
-  /** Grid cells whose facing side is behind another cell leave or enter through the gap below them. */
-  fromGap: boolean;
-  toGap: boolean;
+  fromRight: boolean;
+  toRight: boolean;
+  fromAttach: Attach;
+  toAttach: Attach;
 }
 
-function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<string, StepSlot>, plans: ColumnPlan[], panelTop: number, panelBottom: number, index: SpecIndex): DiagramEdge[] {
+interface Exit {
+  /** From the node outwards; the last point is where the route continues. */
+  points: Point[];
+  lane?: DiagramNode;
+}
+
+/**
+ * Routes every connector by intent, designer style:
+ * - between neighbouring columns: an S-curve for flows, otherwise an elbow
+ *   through the gutter (or one straight run when the ends are level);
+ * - across a column: along the gutters and over or under the panels;
+ * - within one column: a straight arrow between neighbours, otherwise a
+ *   bracket down the panel's right margin.
+ * Ends on lane steps with other steps in the way (or with a label) run
+ * through the lane's band under its steps; cards behind other grid cells
+ * leave through the gap below them.
+ */
+function routeConnectors(
+  lines: NConnector[],
+  nodes: DiagramNode[],
+  slots: Map<string, StepSlot>,
+  plans: ColumnPlan[],
+  panelTop: number,
+  panelBottom: number,
+  index: SpecIndex,
+  passGap: number,
+): DiagramEdge[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const sideCount = new Map<string, number>();
   const sideUse = new Map<string, number>();
   const bandTrack = new Map<string, number>();
   const gutterCount = new Map<number, number>();
   const gutterUse = new Map<number, number>();
-  const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+  const marginUse = new Map<string, number>();
+  const bump = <K>(map: Map<K, number>, key: K) => map.set(key, (map.get(key) ?? 0) + 1);
 
-  // Pass 1: resolve ends and count how many lines share each side and gutter, so ports and tracks spread evenly.
+  const behindCell = (node: DiagramNode, facesRight: boolean) => {
+    const role = node.parent ? byId.get(node.parent)?.role : undefined;
+    if (role !== "grid" && role !== "zone") return false;
+    const b = node.box;
+    return nodes.some((s) => s.parent === node.parent && s.id !== node.id && s.box.y < b.y + b.h && b.y < s.box.y + s.box.h && (facesRight ? s.box.x > b.x : s.box.x < b.x));
+  };
+  const attachOf = (line: NConnector, node: DiagramNode, facesRight: boolean): Attach => {
+    const slot = slots.get(node.id);
+    if (slot && !slot.vertical && usesBand(line, index.steps.get(node.id), facesRight)) return "band";
+    if (behindCell(node, facesRight)) return "gap";
+    return "port";
+  };
+
+  // Pass 1: resolve ends and count shared sides and gutters, so ports and tracks spread evenly.
   const planned: PlannedLine[] = [];
   for (const line of lines) {
     const a = index.columnOf.get(line.from);
     const b = index.columnOf.get(line.to);
     if (a === undefined || b === undefined) continue;
-    const from = byId.get(resolveEnd(line.from, b > a, index));
-    const to = byId.get(resolveEnd(line.to, a > b, index));
+    const { fromRight, toRight } = facing(line, a, b, index);
+    const from = byId.get(resolveEnd(line.from, fromRight, index));
+    const to = byId.get(resolveEnd(line.to, toRight, index));
     if (!from || !to || from.id === to.id) continue;
-    const inRow = (node: DiagramNode, facesRight: boolean) => {
-      const slot = slots.get(node.id);
-      return Boolean(slot && !slot.vertical && usesBand(line, index.steps.get(node.id), facesRight));
-    };
-    const behindCell = (node: DiagramNode, facesRight: boolean) => {
-      const role = node.parent ? byId.get(node.parent)?.role : undefined;
-      if (role !== "grid" && role !== "zone") return false;
-      const b = node.box;
-      return nodes.some((s) => s.parent === node.parent && s.id !== node.id && s.box.y < b.y + b.h && b.y < s.box.y + s.box.h && (facesRight ? s.box.x > b.x : s.box.x < b.x));
-    };
-    const cross = a !== b;
-    const plan: PlannedLine = {
-      line,
-      from,
-      to,
-      a,
-      b,
-      fromBand: cross && inRow(from, b > a),
-      toBand: cross && inRow(to, a > b),
-      fromGap: cross && behindCell(from, b > a),
-      toGap: cross && behindCell(to, a > b),
-    };
+    const plan: PlannedLine = { line, from, to, a, b, fromRight, toRight, fromAttach: attachOf(line, from, fromRight), toAttach: attachOf(line, to, toRight) };
     planned.push(plan);
-    if (a === b) continue;
-    const sa: Side = b > a ? "right" : "left";
-    const sb: Side = b > a ? "left" : "right";
-    if (!plan.fromBand && !plan.fromGap) bump(sideCount, `${from.id}|${sa}`);
-    if (!plan.toBand && !plan.toGap) bump(sideCount, `${to.id}|${sb}`);
-    if (Math.abs(a - b) === 1) gutterCount.set(Math.min(a, b), (gutterCount.get(Math.min(a, b)) ?? 0) + 1);
+    if (plan.fromAttach === "port") bump(sideCount, `${from.id}|${fromRight}`);
+    if (plan.toAttach === "port") bump(sideCount, `${to.id}|${toRight}`);
+    for (const g of guttersUsed(a, b)) bump(gutterCount, g);
   }
 
-  const port = (node: DiagramNode, side: Side): Point => {
-    const key = `${node.id}|${side}`;
+  const port = (node: DiagramNode, right: boolean): Point => {
+    const key = `${node.id}|${right}`;
     const count = sideCount.get(key) ?? 1;
     const i = sideUse.get(key) ?? 0;
     sideUse.set(key, i + 1);
     const box = node.box;
     const span = Math.min(box.h * 0.6, 24 * (count - 1));
     const y = count <= 1 ? box.y + box.h / 2 : box.y + box.h / 2 - span / 2 + (span * i) / (count - 1);
-    return { x: side === "right" ? box.x + box.w : box.x, y };
+    return { x: right ? box.x + box.w : box.x, y };
   };
 
-  /** Down from a step into its lane's call band, then along the band towards `side`. */
-  const band = (node: DiagramNode): { points: Point[]; trackY: number; lane: DiagramNode } => {
-    const slot = slots.get(node.id)!;
-    const lane = byId.get(slot.laneId)!;
-    const i = bandTrack.get(lane.id) ?? 0;
-    bandTrack.set(lane.id, i + 1);
+  const exit = (node: DiagramNode, attach: Attach, right: boolean): Exit => {
     const box = node.box;
-    const trackY = box.y + box.h + SPACE.callBand - 8 + i * SPACE.callTrackGap;
     const cx = box.x + box.w / 2;
-    return { points: [{ x: cx, y: box.y + box.h }, { x: cx, y: trackY }], trackY, lane };
+    if (attach === "band") {
+      const lane = byId.get(slots.get(node.id)!.laneId)!;
+      const i = bandTrack.get(lane.id) ?? 0;
+      bandTrack.set(lane.id, i + 1);
+      const trackY = box.y + box.h + SPACE.callBand - 8 + i * SPACE.callTrackGap;
+      return { points: [{ x: cx, y: box.y + box.h }, { x: cx, y: trackY }], lane };
+    }
+    if (attach === "gap") return { points: [{ x: cx, y: box.y + box.h }, { x: cx, y: box.y + box.h + SPACE.gridGap / 2 }] };
+    return { points: [port(node, right)] };
   };
 
   /** Centre of the gutter to the right of column `g`. */
   const gutterCentre = (g: number): number => plans[g].x + plans[g].w + plans[g].gutter / 2;
-
-  const gutterX = (a: number, b: number): number => {
-    const g = Math.min(a, b);
+  const gutterTrack = (g: number): number => {
     const count = gutterCount.get(g) ?? 1;
     const i = gutterUse.get(g) ?? 0;
     gutterUse.set(g, i + 1);
     return gutterCentre(g) + (i - (count - 1) / 2) * EDGE.trackGap;
   };
+  /** A label in the band, between the step and the lane edge the route heads for. */
+  const bandLabel = (out: Exit, right: boolean): Point => {
+    const lane = out.lane!;
+    const edgeX = right ? lane.box.x + lane.box.w : lane.box.x;
+    return { x: (out.points[0].x + edgeX) / 2, y: out.points[1].y - 10 };
+  };
 
   const edges: DiagramEdge[] = [];
-  for (const { line, from, to, a, b, fromBand, toBand, fromGap, toGap } of planned) {
+  for (const p of planned) {
+    const { line, from, to, a, b, fromRight, toRight, fromAttach, toAttach } = p;
     const tone = line.tone ?? (line.kind === "call" ? to.tone : from.tone) ?? from.tone;
-    if (a === b) {
-      edges.push(sameColumnEdge(line, from, to, plans[a], tone, edges));
-      continue;
-    }
-    const sa: Side = b > a ? "right" : "left";
-    const sb: Side = b > a ? "left" : "right";
+    const push = (route: Point[], labelAt: Point, curve = false) => {
+      const edge = makeEdge(from.id, to.id, line.kind, tone, curve ? route : simplify(route), edges, line.label);
+      if (curve) edge.curve = true;
+      edges.push(withLabelAt(edge, labelAt));
+    };
 
-    if (Math.abs(a - b) > 1) {
-      // Across a column: along the gutter, over (or under) the panels, and back.
-      // Whichever side is nearer to the two ends keeps the detour short.
-      const s = port(from, sa);
-      const e = port(to, sb);
-      const below = (s.y + e.y) / 2 > (panelTop + panelBottom) / 2;
-      const passY = below ? panelBottom + SPACE.footerGap / 2 : panelTop - SPACE.headerGap / 2;
-      const gx1 = sa === "right" ? gutterCentre(a) : gutterCentre(a - 1);
-      const gx2 = sb === "left" ? gutterCentre(b - 1) : gutterCentre(b);
-      const route = [s, { x: gx1, y: s.y }, { x: gx1, y: passY }, { x: gx2, y: passY }, { x: gx2, y: e.y }, e];
-      edges.push(withLabelAt(makeEdge(from.id, to.id, line.kind, tone, route, edges, line.label), { x: (gx1 + gx2) / 2, y: passY - 8 }));
-      continue;
-    }
-
-    if (line.kind === "flow" && !fromBand && !toBand && !fromGap && !toGap) {
-      const s = port(from, sa);
-      const e = port(to, sb);
-      const edge = makeEdge(from.id, to.id, "flow", tone, [s, e], edges, line.label);
-      edge.curve = true;
-      edges.push(withLabelAt(edge, { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 - 10 }));
-      continue;
-    }
-
-    // Orthogonal: out of the source (through its lane's call band when other steps
-    // are in the way), along the gutter between the columns, and into the target.
-    const points: Point[] = [];
-    let labelAt: Point | undefined;
-    let startY: number;
-    const gapBelow = (node: DiagramNode) => node.box.y + node.box.h + SPACE.gridGap / 2;
-    if (fromBand) {
-      const out = band(from);
-      points.push(...out.points);
-      startY = out.trackY;
-      const edgeX = sa === "right" ? out.lane.box.x + out.lane.box.w : out.lane.box.x;
-      labelAt = { x: (out.points[0].x + edgeX) / 2, y: out.trackY - 10 };
-    } else if (fromGap) {
-      const cx = from.box.x + from.box.w / 2;
-      startY = gapBelow(from);
-      points.push({ x: cx, y: from.box.y + from.box.h }, { x: cx, y: startY });
-    } else {
-      const s = port(from, sa);
-      points.push(s);
-      startY = s.y;
-    }
-    let tail: Point[];
-    let endY: number;
-    if (toBand) {
-      const into = band(to);
-      tail = [...into.points].reverse();
-      endY = into.trackY;
-      if (!labelAt) {
-        const edgeX = sb === "right" ? into.lane.box.x + into.lane.box.w : into.lane.box.x;
-        labelAt = { x: (into.points[0].x + edgeX) / 2, y: into.trackY - 10 };
+    if (a === b && fromAttach === "port" && toAttach === "port") {
+      const stacked = neighbourArrow(from, to, plans[a]);
+      if (stacked) {
+        push(stacked.route, stacked.labelAt);
+        continue;
       }
-    } else if (toGap) {
-      const cx = to.box.x + to.box.w / 2;
-      endY = gapBelow(to);
-      tail = [
-        { x: cx, y: endY },
-        { x: cx, y: to.box.y + to.box.h },
+    }
+    if (a === b && fromAttach === "band" && toAttach === "band" && slots.get(from.id)!.laneId === slots.get(to.id)!.laneId) {
+      // Two steps of one lane: along its band, under the steps between them.
+      const out = exit(from, "band", true);
+      const y = out.points[1].y;
+      const tx = to.box.x + to.box.w / 2;
+      push([out.points[0], { x: out.points[0].x, y }, { x: tx, y }, { x: tx, y: to.box.y + to.box.h }], { x: (out.points[0].x + tx) / 2, y: y - 10 });
+      continue;
+    }
+    if (Math.abs(a - b) === 1 && line.kind === "flow" && fromAttach === "port" && toAttach === "port") {
+      const s = port(from, fromRight);
+      const e = port(to, toRight);
+      push([s, e], { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 - 10 }, true);
+      continue;
+    }
+
+    const out = exit(from, fromAttach, fromRight);
+    const into = exit(to, toAttach, toRight);
+    const s = out.points[out.points.length - 1];
+    const e = into.points[into.points.length - 1];
+    const tail = [...into.points].reverse();
+    let middle: Point[];
+    let labelAt: Point;
+    if (a === b) {
+      // Within a column: a bracket down the panel's right margin.
+      const key = `${a}|${fromRight}`;
+      const i = marginUse.get(key) ?? 0;
+      marginUse.set(key, i + 1);
+      const offset = 7 + (i % 3) * 5;
+      const mx = fromRight ? plans[a].x + plans[a].w - SPACE.panelPadX + offset : plans[a].x + SPACE.panelPadX - offset;
+      middle = [
+        { x: mx, y: s.y },
+        { x: mx, y: e.y },
       ];
+      labelAt = { x: mx, y: (s.y + e.y) / 2 };
+    } else if (Math.abs(a - b) === 1) {
+      const g = Math.min(a, b);
+      if (toAttach === "port" && s.y >= to.box.y + 10 && s.y <= to.box.y + to.box.h - 10) {
+        // The target spans the source's level: one straight run.
+        middle = [];
+        tail.splice(0, tail.length, { x: e.x, y: s.y });
+        labelAt = { x: gutterCentre(g), y: s.y - 10 };
+      } else {
+        const gx = gutterTrack(g);
+        middle = [
+          { x: gx, y: s.y },
+          { x: gx, y: e.y },
+        ];
+        labelAt = Math.abs(e.y - s.y) >= 28 ? { x: gx, y: (s.y + e.y) / 2 } : { x: gutterCentre(g), y: Math.min(s.y, e.y) - 10 };
+      }
     } else {
-      const e = port(to, sb);
-      tail = [e];
-      endY = e.y;
+      // Across a column: along the gutters, over or under the panels, whichever is nearer.
+      const [g1, g2] = guttersUsed(a, b);
+      const below = (s.y + e.y) / 2 > (panelTop + panelBottom) / 2;
+      const passY = below ? panelBottom + passGap / 2 : panelTop - passGap / 2;
+      const gx1 = gutterTrack(g1);
+      const gx2 = gutterTrack(g2);
+      middle = [
+        { x: gx1, y: s.y },
+        { x: gx1, y: passY },
+        { x: gx2, y: passY },
+        { x: gx2, y: e.y },
+      ];
+      labelAt = { x: (gx1 + gx2) / 2, y: passY - 8 };
     }
-    const target = to.box;
-    const gutterMid = gutterCentre(Math.min(a, b));
-    if (!toBand && !toGap && startY >= target.y + 10 && startY <= target.y + target.h - 10) {
-      // The target spans the source's level: one straight run, no elbow; the label sits in the gutter.
-      points.push({ x: tail[0].x, y: startY });
-      labelAt ??= { x: gutterMid, y: startY - 10 };
-    } else {
-      const gx = gutterX(a, b);
-      points.push({ x: gx, y: startY }, { x: gx, y: endY }, ...tail);
-      // The gutter was widened for this label: stand it on the vertical run, or above a short one.
-      labelAt ??= Math.abs(endY - startY) >= 28 ? { x: gx, y: (startY + endY) / 2 } : { x: gutterMid, y: Math.min(startY, endY) - 10 };
-    }
-    const edge = makeEdge(from.id, to.id, line.kind, tone, simplify(points), edges, line.label);
-    edges.push(withLabelAt(edge, labelAt));
+    if (fromAttach === "band") labelAt = bandLabel(out, fromRight);
+    else if (toAttach === "band") labelAt = bandLabel(into, toRight);
+    push([...out.points, ...middle, ...tail], labelAt);
   }
   return edges;
 }
@@ -1101,35 +1184,72 @@ function withLabelAt(edge: DiagramEdge, at: Point): DiagramEdge {
   return edge;
 }
 
-/**
- * Two items of one column: a short straight arrow between neighbours (label
- * beside it), or a bracket down the panel's right margin around the items in
- * between. Anything nested deeper is left to the obstacle router.
- */
-function sameColumnEdge(line: NConnector, from: DiagramNode, to: DiagramNode, plan: ColumnPlan, tone: Tone | undefined, edges: DiagramEdge[]): DiagramEdge {
+/** Two neighbouring items of one column: a short straight arrow between them, labelled beside it. */
+function neighbourArrow(from: DiagramNode, to: DiagramNode, plan: ColumnPlan): { route: Point[]; labelAt: Point } | null {
   const order = plan.column.items.map((item) => `${plan.column.id}.${item.id}`);
   const ia = order.indexOf(from.id);
   const ib = order.indexOf(to.id);
-  if (ia < 0 || ib < 0) return makeEdge(from.id, to.id, line.kind, tone, [], edges, line.label);
+  if (ia < 0 || ib < 0 || Math.abs(ia - ib) !== 1) return null;
   const down = from.box.y < to.box.y;
   const fb = from.box;
   const tb = to.box;
-  if (Math.abs(ia - ib) === 1) {
-    const left = Math.max(fb.x, tb.x);
-    const right = Math.min(fb.x + fb.w, tb.x + tb.w);
-    const x = left < right ? (left + right) / 2 : fb.x + fb.w / 2;
-    const s = { x, y: down ? fb.y + fb.h : fb.y };
-    const e = { x, y: down ? tb.y : tb.y + tb.h };
-    const edge = makeEdge(from.id, to.id, line.kind, tone, [s, e], edges, line.label);
-    return withLabelAt(edge, { x: x + 10 + (edge.labelSize?.w ?? 0) / 2, y: (s.y + e.y) / 2 });
-  }
-  const bx = plan.x + plan.w - SPACE.panelPadX / 2;
-  const s = { x: fb.x + fb.w, y: fb.y + fb.h / 2 };
-  const e = { x: tb.x + tb.w, y: tb.y + tb.h / 2 };
-  const edge = makeEdge(from.id, to.id, line.kind, tone, [s, { x: bx, y: s.y }, { x: bx, y: e.y }, e], edges, line.label);
-  return withLabelAt(edge, { x: bx, y: (s.y + e.y) / 2 });
+  const left = Math.max(fb.x, tb.x);
+  const right = Math.min(fb.x + fb.w, tb.x + tb.w);
+  const x = left < right ? (left + right) / 2 : fb.x + fb.w / 2;
+  const s = { x, y: down ? fb.y + fb.h : fb.y };
+  const e = { x, y: down ? tb.y : tb.y + tb.h };
+  return { route: [s, e], labelAt: { x: x + 60, y: (s.y + e.y) / 2 } };
 }
 
+const LABEL_H = 18;
+
+function labelBox(edge: DiagramEdge, at: Point): Box {
+  const w = measureText(edge.label ?? "", TYPE.edgeLabel) + 8;
+  return { x: at.x - w / 2, y: at.y - LABEL_H / 2, w, h: LABEL_H };
+}
+
+function overlapArea(a: Box, b: Box): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * Keeps connector labels off cards, steps and each other: each label tries
+ * its preferred spot, then the midpoints of its route's segments (above a
+ * horizontal run, beside a vertical one), and takes the first clear one, or
+ * the least covered.
+ */
+function placeLabels(edges: DiagramEdge[], nodes: DiagramNode[], pageW: number): DiagramEdge[] {
+  const solid = nodes.filter((n) => n.role === "card" || n.role === "step" || n.role === "banner" || n.role === "header" || n.role === "footer" || (!n.role && !n.container)).map((n) => n.box);
+  const placed: Box[] = [];
+  return edges.map((edge) => {
+    if (!edge.label || !edge.labelAt || edge.route.length < 2) return edge;
+    const w = measureText(edge.label, TYPE.edgeLabel) + 8;
+    const candidates: Point[] = [edge.labelAt];
+    const segments = edge.route.slice(1).map((p, i) => [edge.route[i], p] as const).sort((x, y) => Math.hypot(y[1].x - y[0].x, y[1].y - y[0].y) - Math.hypot(x[1].x - x[0].x, x[1].y - x[0].y));
+    for (const [p, q] of segments) {
+      const mx = (p.x + q.x) / 2;
+      const my = (p.y + q.y) / 2;
+      if (Math.abs(p.y - q.y) < 0.5) candidates.push({ x: mx, y: my - 10 }, { x: mx, y: my + 12 });
+      else candidates.push({ x: mx - w / 2 - 6, y: my }, { x: mx + w / 2 + 6, y: my }, { x: mx, y: my });
+    }
+    let best = candidates[0];
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const c of candidates) {
+      const box = labelBox(edge, c);
+      if (box.x < 4 || box.x + box.w > pageW - 4) continue;
+      const cost = [...solid, ...placed].reduce((sum, o) => sum + overlapArea(box, o), 0);
+      if (cost < bestCost - 1e-6) {
+        best = c;
+        bestCost = cost;
+        if (cost === 0) break;
+      }
+    }
+    placed.push(labelBox(edge, best));
+    return best === edge.labelAt ? edge : { ...edge, labelAt: { x: round1(best.x), y: round1(best.y) } };
+  });
+}
 /** Drops repeated points and the middle points of straight runs. */
 function simplify(points: Point[]): Point[] {
   const out: Point[] = [];
