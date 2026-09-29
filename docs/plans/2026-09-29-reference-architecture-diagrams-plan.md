@@ -1,7 +1,7 @@
 ---
 title: "feat: Reference-architecture diagrams"
 type: feat
-status: active
+status: completed
 date: 2026-09-29
 origin: docs/brainstorms/2026-09-29-reference-architecture-diagrams-requirements.md
 ---
@@ -761,7 +761,7 @@ flowchart TB
 **Verification:**
 - The harness runs a two-case dry run with `--no-review`, and the summary shows faithfulness and spread columns.
 
-- [ ] **U12: Acceptance run, tuning loop and decisions**
+- [x] **U12: Acceptance run, tuning loop and decisions**
 
 **Goal:** Meet the success criteria, run the held-out set once at the end, decide the D2 picker question with evidence, and document the results.
 
@@ -794,6 +794,29 @@ flowchart TB
 
 **Verification:**
 - The success criteria from the origin document are met, or the gaps are documented. The results are in the README. The plan status is `completed`.
+
+**Outcome (2026-09-30):** the gaps are documented; the targets weren't met. The full tables are in the README under *Latest eval: Architecture diagrams*.
+
+- **Tuning.** Two tuning rounds plus the final changes:
+  - tier grids for parallel zones and regions (layout P10)
+  - a load balancer that spans zones drawn once
+  - facts the request didn't state disclosed on the diagram
+- **Tuned set.** Opus 5.5 went from 23% to 64% pass and a judge mean of 6.50 to 7.27. GPT-6 Sol went from 23% to 36% and 6.00 to 6.36. The targets were 90% and 8.
+- **Held-out set.** Run once: 33% for both generators, with judge means of 7.17 (Opus) and 6.55 (Sol).
+- **Faithfulness.** No final sample failed on an undisclosed fact. The remaining failures are missing flows, partly expectations that conflict with the drawing conventions.
+- **Checker fixes.** Building the disclosure found two grounding bugs, fixed before the final run:
+  - a default route counted as a declared address space
+  - facts at the end of a sentence weren't matched
+
+  Every row was rescored with the final checker.
+- **Graph decision.** Graph stays under the pre-registered rule:
+  - (a) Architecture wins on aspect (5/7) but not on crossings (1/7).
+  - (b) End to end, all three criteria pass: 8/11 blind pairings won, the mean judged score +0.82 higher, and 2 faithfulness failures against 5.
+- **Next steps:**
+  - a load balancer drawn spanning the public subnets of every zone
+  - fewer long connectors into shared services
+  - text that stays legible on large pages
+  - flow checks that follow a path through private endpoints
 
 ## System-Wide Impact
 
