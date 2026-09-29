@@ -52,10 +52,10 @@ describe("composed content edits", () => {
     expect(node(green, "mid.pay.auth").tone).toBe("green");
     expect(node(green, "mid.pay.charge").tone).toBe("orange");
     expect(node(green, "mid.pay.auth").style.stroke).toBe("#107c10");
-    const inside = green.edges.find((e) => e.kind === "step" && e.from === "mid.pay.auth")!;
-    expect(inside).toMatchObject({ to: "mid.pay.verify", tone: "green" });
-    const intoOrange = green.edges.find((e) => e.kind === "step" && e.from === "mid.pay.verify")!;
-    expect(intoOrange.tone).toBe("blue");
+    // Every arrow in the lane follows the lane's colour, as the engine draws it.
+    const arrows = green.edges.filter((e) => e.kind === "step" && e.from.startsWith("mid.pay."));
+    expect(arrows.map((e) => e.tone)).toEqual(["green", "green"]);
+    expect(recompose(green).model.edges.filter((e) => e.kind === "step").map((e) => e.tone)).toEqual(["green", "green"]);
     expect(canTone(node(model, "left"))).toBe(false);
     expect(setTone(model, "left", "red")).toBe(model);
   });

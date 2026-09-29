@@ -208,7 +208,7 @@ function nodeContent(v: unknown, where: string): NodeContent | undefined {
     tag: optStr(c.tag, `${where}.tag`, 60),
     chips: boundedStringList(c.chips, `${where}.chips`, 12, 60),
     chipsLabel: optStr(c.chipsLabel, `${where}.chipsLabel`, 60),
-    usedBy: boundedStringList(c.usedBy, `${where}.usedBy`, 12, 4),
+    usedBy: boundedStringList(c.usedBy, `${where}.usedBy`, 40, 4),
     size: optEnum(c.size, `${where}.size`, NODE_SIZES),
     columns: optInt(c.columns, `${where}.columns`, { min: 1, max: 4 }),
     legend: legendList(c.legend, `${where}.legend`),

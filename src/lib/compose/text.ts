@@ -109,47 +109,81 @@ export interface WrapResult {
 
 const BREAK_AFTER = new Set(["/", ".", "-", "_", ":", ",", ";", "?", "&", "=", ")", "]", "}"]);
 
+/**
+ * Running width of a string built up one character at a time, with exactly
+ * `measureText`'s arithmetic, so prefixes are measured in one linear pass.
+ */
+function widthScanner(style: TextStyle): (ch: string) => number {
+  const bold = style.weight >= 700 ? 1 : style.weight >= 600 ? 0.5 : 0;
+  const spacing = style.letterSpacing ?? 0;
+  let units = 0;
+  let count = 0;
+  return (ch) => {
+    const code = ch.codePointAt(0) ?? 0x20;
+    units += style.mono ? ((code >= 0x2e80 && code <= 0x9fff) || code >= 0x1f000 ? 1000 : MONO_ADVANCE) : advance(code, bold);
+    count++;
+    return (units / 1000) * style.size * (style.mono ? 1 : SANS_SLACK) + (count - 1) * spacing;
+  };
+}
+
+/** Most characters that could ever fit in `lines` lines of `width` (the narrowest glyph is ~0.19 em). */
+function visibleChars(width: number, style: TextStyle, lines: number): number {
+  const narrowest = style.mono ? MONO_ADVANCE / 1000 : 0.19;
+  return Math.ceil(width / Math.max(1, narrowest * style.size + (style.letterSpacing ?? 0))) * lines + 2;
+}
+
 /** Splits one over-long word into pieces that fit, preferring to break after punctuation. */
 function breakWord(word: string, maxWidth: number, style: TextStyle): string[] {
+  const chars = Array.from(word);
   const pieces: string[] = [];
-  let rest = word;
-  while (rest && measureText(rest, style) > maxWidth) {
-    const chars = Array.from(rest);
-    let fit = 0;
-    while (fit < chars.length && measureText(chars.slice(0, fit + 1).join(""), style) <= maxWidth) fit++;
-    fit = Math.max(1, fit);
+  let start = 0;
+  while (start < chars.length) {
+    const width = widthScanner(style);
+    let end = start;
+    while (end < chars.length && width(chars[end]) <= maxWidth) end++;
+    if (end === chars.length) {
+      pieces.push(chars.slice(start).join(""));
+      break;
+    }
+    const fit = Math.max(1, end - start);
     let cut = fit;
     for (let i = fit - 1; i >= Math.ceil(fit / 2); i--) {
-      if (BREAK_AFTER.has(chars[i])) {
+      if (BREAK_AFTER.has(chars[start + i])) {
         cut = i + 1;
         break;
       }
     }
-    pieces.push(chars.slice(0, cut).join(""));
-    rest = chars.slice(cut).join("");
+    pieces.push(chars.slice(start, start + cut).join(""));
+    start += cut;
   }
-  if (rest) pieces.push(rest);
   return pieces;
 }
 
 /** Trims `text` from the end until it fits with an ellipsis. */
 export function ellipsize(text: string, maxWidth: number, style: TextStyle): string {
-  if (measureText(text, style) <= maxWidth) return text;
-  const chars = Array.from(text.trimEnd());
-  while (chars.length > 0 && measureText(chars.join("").trimEnd() + ELLIPSIS, style) > maxWidth) chars.pop();
-  return chars.join("").trimEnd() + ELLIPSIS;
+  const chars = Array.from(text.trimEnd()).slice(0, visibleChars(maxWidth, style, 1));
+  if (measureText(chars.join(""), style) <= maxWidth && chars.length === Array.from(text.trimEnd()).length) return text;
+  const room = maxWidth - measureText(ELLIPSIS, style) - (style.letterSpacing ?? 0);
+  const width = widthScanner(style);
+  let fit = 0;
+  while (fit < chars.length && width(chars[fit]) <= room) fit++;
+  return chars.slice(0, fit).join("").trimEnd() + ELLIPSIS;
 }
 
 /**
  * Greedy word wrap to `maxWidth`. Explicit newlines are kept. Words wider
  * than a line are split (`broken`); beyond `maxLines` the last line is
- * ellipsised (`truncated`).
+ * ellipsised (`truncated`). Text that could never be shown is dropped
+ * before measuring, so very long input stays cheap.
  */
 export function wrapText(text: string, maxWidth: number, style: TextStyle, maxLines = Number.POSITIVE_INFINITY): WrapResult {
   const width = Math.max(maxWidth, style.size * 2);
+  const limit = Number.isFinite(maxLines) ? visibleChars(width, style, maxLines) : Number.POSITIVE_INFINITY;
+  const clipped = text.length > limit;
+  const source = clipped ? Array.from(text).slice(0, limit).join("") : text;
   const lines: string[] = [];
   let broken = false;
-  for (const paragraph of text.split(/\r?\n/)) {
+  for (const paragraph of source.split(/\r?\n/)) {
     const words = paragraph.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
     let current = "";
     for (const word of words) {
@@ -166,8 +200,8 @@ export function wrapText(text: string, maxWidth: number, style: TextStyle, maxLi
     }
     if (current) lines.push(current);
   }
-  if (lines.length <= maxLines) return { lines, truncated: false, broken };
-  const kept = lines.slice(0, Math.max(1, maxLines));
+  if (lines.length <= maxLines && !clipped) return { lines, truncated: false, broken };
+  const kept = lines.slice(0, Math.max(1, Math.min(maxLines, lines.length)));
   const last = kept.length - 1;
   kept[last] = ellipsize(kept[last] + ELLIPSIS, width, style);
   return { lines: kept, truncated: true, broken };

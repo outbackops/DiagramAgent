@@ -2,6 +2,7 @@ import {
   bannerBlock,
   cardBlock,
   columnTitleBlock,
+  flowTonesOfModel,
   laneFooterBlock,
   laneHeaderBlock,
   pageFooterBlock,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/compose/content";
 import { EDGE, FONT_MONO, FONT_SANS, PAGE, SPACE, TYPE, toneColors } from "@/lib/compose/theme";
 import { bottom, longestSegmentMidpoint, right } from "./geometry";
-import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point, Tone } from "./types";
+import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 import type { RenderModelSvgOptions } from "./render-svg";
 
 const DEFAULT_PADDING = 40;
@@ -94,14 +95,7 @@ function renderRole(out: string[], nodes: DiagramNode[], role: DiagramNode["role
 }
 
 function contentContext(model: DiagramModel): ContentContext {
-  const flowTones: Record<string, Tone> = {};
-  for (const node of model.nodes) {
-    if (node.role === "lane") {
-      const badge = node.content?.badge?.trim();
-      if (badge) flowTones[badge] = node.tone ?? "gray";
-    }
-  }
-  return { flowTones };
+  return { flowTones: flowTonesOfModel(model) };
 }
 
 function renderHeader(node: DiagramNode, pageWidth: number, gradientId: string): string {

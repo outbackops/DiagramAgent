@@ -176,7 +176,7 @@ export default function DiagramCanvas({
           <div role="alert" className="flex w-full max-w-lg animate-slide-up items-start gap-3 rounded-xl border border-rose-200 bg-white p-3 shadow-lg dark:border-rose-500/30 dark:bg-zinc-900">
             <AlertOctagon className="mt-0.5 size-4 shrink-0 text-rose-500" />
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">This D2 import doesn&apos;t render</p>
+              <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">This diagram doesn&apos;t render</p>
               <p className="mt-0.5 line-clamp-3 break-words font-mono text-[11px] text-rose-600 dark:text-rose-300">{renderError}</p>
               <div className="mt-2 flex gap-2">
                 <Button variant="primary" size="xs" icon={<Wand2 className="size-3" />} disabled={busy} onClick={() => onFixError(renderError ?? "")}>Fix with AI</Button>

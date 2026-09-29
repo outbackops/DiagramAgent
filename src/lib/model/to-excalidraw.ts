@@ -148,13 +148,18 @@ function rectForNode(node: DiagramNode, id: string, container: boolean): Rectang
 function linesForNode(node: DiagramNode): string[] {
   const lines = [node.label];
   if (!node.content) return lines;
-  if (node.role === "column" && node.content.badge) lines[0] = `${node.content.badge} · ${node.label}`;
-  if (node.role === "lane" && node.content.badge) lines[0] = `${node.content.badge}  ${node.label}`;
-  if (node.content.subtitle) lines.push(node.content.subtitle);
-  if (node.content.lines) lines.push(...node.content.lines);
-  if (node.content.notes) lines.push(...node.content.notes);
-  if (node.role === "footer" && node.content.tag) lines.push(node.content.tag);
-  if (node.role === "footer" && node.content.badgeDetail) lines.push(node.content.badgeDetail);
+  const c = node.content;
+  if (node.role === "column" && c.badge) lines[0] = `${c.badge} · ${node.label}`;
+  if (node.role === "lane" && c.badge) lines[0] = `${c.badge}  ${node.label}`;
+  if ((node.role === "lane" || node.role === "zone") && c.tag) lines[0] = `${lines[0]}  [${c.tag.toUpperCase()}]`;
+  if (node.role === "header" && c.badge) lines.push([c.badge, c.badgeDetail].filter(Boolean).join(" · ").toUpperCase());
+  if (c.subtitle) lines.push(c.subtitle);
+  if (c.lines) lines.push(...c.lines);
+  if (c.chips?.length) lines.push(`${c.chipsLabel ? `${c.chipsLabel} ` : ""}${c.chips.join(" · ")}`);
+  if (c.notes) lines.push(...c.notes);
+  if (c.usedBy?.length) lines.push(`used by ${c.usedBy.join(" · ")}`);
+  if (node.role === "footer" && c.tag) lines.push(c.tag);
+  if (node.role === "footer" && c.badgeDetail) lines.push(c.badgeDetail);
   return lines.filter((line) => line.length > 0);
 }
 

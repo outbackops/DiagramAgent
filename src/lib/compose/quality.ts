@@ -1,5 +1,5 @@
 import type { DiagramEdge, DiagramModel, DiagramNode, Point, Tone } from "@/lib/model/types";
-import { laneFooterBlock, laneHeaderBlock, nodeBlock, type ContentContext } from "./content";
+import { flowTonesOfModel, laneFooterBlock, laneHeaderBlock, nodeBlock, type ContentContext } from "./content";
 import type { CheckSeverity, CheckStatus, QualityCheck, QualityGrade, QualityMetrics, QualityReport } from "@/lib/quality/diagram-quality";
 
 /** Deterministic quality checks for composed diagrams, in the same QualityReport shape as the graph scorer. Client-safe (no server-only imports). */
@@ -39,14 +39,7 @@ function directChildren(model: DiagramModel): Map<string | null, DiagramNode[]> 
 }
 
 function flowTones(model: DiagramModel): Record<string, Tone> {
-  const tones: Record<string, Tone> = {};
-  for (const node of model.nodes) {
-    if (node.role === "lane") {
-      const badge = node.content?.badge?.trim();
-      if (badge) tones[badge] = node.tone ?? "gray";
-    }
-  }
-  return tones;
+  return flowTonesOfModel(model);
 }
 
 function labelOf(node: DiagramNode): string {
@@ -185,6 +178,7 @@ function edgeCrossings(edges: readonly DiagramEdge[]): number {
   let count = 0;
   for (let i = 0; i < prepared.length; i++) {
     for (let j = i + 1; j < prepared.length; j++) {
+      if (--budget < 0) return count;
       const a = prepared[i];
       const b = prepared[j];
       if (a.edge.from === b.edge.from || a.edge.from === b.edge.to || a.edge.to === b.edge.from || a.edge.to === b.edge.to) continue;
@@ -198,24 +192,30 @@ function edgeCrossings(edges: readonly DiagramEdge[]): number {
 }
 
 function edgesThroughNodes(model: DiagramModel, byParent: Map<string | null, DiagramNode[]>): DiagramEdge[] {
-  const blockers = model.nodes.filter((node) => {
-    const role = roleOf(node, byParent);
-    return role === "card" || role === "step" || role === "banner";
-  });
+  // Inset boxes once; every pair visited costs budget, so the work is bounded whatever the model size.
+  const blockers = model.nodes
+    .filter((node) => {
+      const role = roleOf(node, byParent);
+      return role === "card" || role === "step" || role === "banner";
+    })
+    .map((node) => ({ node, box: insetBox(node, 4) }))
+    .filter((entry): entry is { node: DiagramNode; box: Extent } => entry.box !== null);
   const hits: DiagramEdge[] = [];
   let budget = PAIR_BUDGET;
   for (const edge of connectorEdges(model)) {
     const points = edgePoints(edge);
     const edgeExtent = extentOfPoints(points);
     const segs = segments(points);
-    const hit = blockers.some((node) => {
-      if (isExemptEndpointNode(node, edge)) return false;
-      const box = insetBox(node, 4);
-      if (!box || !extentsOverlap(edgeExtent, box)) return false;
+    let hit = false;
+    for (const { node, box } of blockers) {
+      if (--budget < 0) break;
+      if (!extentsOverlap(edgeExtent, box) || isExemptEndpointNode(node, edge)) continue;
       budget -= segs.length;
-      if (budget < 0) return false;
-      return segs.some(([a, b]) => segmentCrossesBox(a, b, box));
-    });
+      if (segs.some(([a, b]) => segmentCrossesBox(a, b, box))) {
+        hit = true;
+        break;
+      }
+    }
     if (hit) hits.push(edge);
     if (budget < 0) break;
   }

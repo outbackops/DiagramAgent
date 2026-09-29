@@ -1,4 +1,3 @@
-import { routeModelEdges } from "@/lib/model/route";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, LegendKind, NodeContent, NodeRole, NodeStyle, Point, Tone } from "@/lib/model/types";
 import {
   bannerBlock,
@@ -99,7 +98,7 @@ export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): L
     if (!best || score < best.score - 1e-9) best = { placed, score };
   }
   const placed = best!.placed;
-  const model = routeModelEdges({ version: 1, composed: true, nodes: placed.nodes, edges: placed.edges });
+  const model: DiagramModel = { version: 1, composed: true, nodes: placed.nodes, edges: placed.edges };
   return {
     model,
     report: {
@@ -261,12 +260,9 @@ interface GridRow {
 interface FlowMeasure {
   vertical: boolean;
   headerH: number;
-  footerH: number;
-  hasFooter: boolean;
   stepW: number;
   stepHs: number[];
   stepsH: number;
-  band: number;
 }
 
 interface Measured {
@@ -379,7 +375,7 @@ function measureFlow(flow: NFlow, innerW: number, band: number): Sized {
       natural: h,
       h,
       top: 0,
-      flow: { vertical, headerH: header.height, footerH: footer.height, hasFooter, stepW, stepHs, stepsH, band: bandH ? band : 0 },
+      flow: { vertical, headerH: header.height, stepW, stepHs, stepsH },
     },
     truncated,
     broken,
@@ -525,8 +521,9 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepare
   }
 
   // 4. Connectors, then their labels kept clear of cards and each other.
-  const routed = routeConnectors(lines, nodes, slots, plans, panelTop, panelTop + panelH, index, prepared.passes ? PASS_GAP : SPACE.headerGap);
-  const edges = placeLabels([...stepEdges(spec, nodes), ...routed], nodes, pageW);
+  const arrows = stepEdges(spec, nodes);
+  const routed = routeConnectors(lines, nodes, slots, plans, panelTop, panelTop + panelH, index, prepared.passes ? PASS_GAP : SPACE.headerGap, arrows);
+  const edges = placeLabels([...arrows, ...routed], nodes, pageW);
   return { nodes, edges, width: pageW, height: bottom + SPACE.margin, truncated, broken, chipped: chips.size };
 }
 
@@ -743,7 +740,7 @@ export function styleFor(role: NodeRole, tone: Tone | undefined): NodeStyle {
     case "zone":
       return { fill: t.lane, stroke: t.main, strokeWidth: 1.5, strokeDash: 6, borderRadius: SPACE.laneRadius, fontColor: PAGE.ink, bold: true };
     case "banner":
-      return { fill: t.fill, stroke: t.main, strokeWidth: 1.5, borderRadius: SPACE.bannerRadius, fontColor: PAGE.ink, bold: true };
+      return { fill: t.lane, stroke: t.laneStroke, strokeWidth: 1.5, borderRadius: SPACE.bannerRadius, fontColor: PAGE.ink, bold: true };
     case "step":
       return { fill: t.fill, stroke: t.main, strokeWidth: 2, borderRadius: SPACE.stepRadius, fontColor: PAGE.ink, fontSize: TYPE.stepTitle.size, bold: true };
     default:
@@ -870,7 +867,7 @@ function bandUsage(lines: NConnector[], index: SpecIndex): Map<string, number> {
   for (const line of lines) {
     const a = index.columnOf.get(line.from);
     const b = index.columnOf.get(line.to);
-    if (a === undefined || b === undefined) continue;
+    if (a === undefined || b === undefined || repeatsStepArrow(line, index)) continue;
     const { fromRight, toRight } = facing(line, a, b, index);
     for (const [end, facesRight] of [
       [line.from, fromRight],
@@ -881,6 +878,13 @@ function bandUsage(lines: NConnector[], index: SpecIndex): Map<string, number> {
     }
   }
   return use;
+}
+
+/** A connector from a step to the next step of its lane: the lane's own arrow already draws it. */
+function repeatsStepArrow(line: NConnector, index: SpecIndex): boolean {
+  const from = index.steps.get(line.from);
+  const to = index.steps.get(line.to);
+  return Boolean(from && to && from.lane === to.lane && to.index === from.index + 1);
 }
 
 /**
@@ -1011,6 +1015,8 @@ function routeConnectors(
   panelBottom: number,
   index: SpecIndex,
   passGap: number,
+  /** The lanes' step arrows: connectors that repeat one only add its label, and ids never collide with them. */
+  arrows: DiagramEdge[],
 ): DiagramEdge[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const sideCount = new Map<string, number>();
@@ -1096,10 +1102,22 @@ function routeConnectors(
     const { line, from, to, a, b, fromRight, toRight, fromAttach, toAttach } = p;
     const tone = line.tone ?? (line.kind === "call" ? to.tone : from.tone) ?? from.tone;
     const push = (route: Point[], labelAt: Point, curve = false) => {
-      const edge = makeEdge(from.id, to.id, line.kind, tone, curve ? route : simplify(route), edges, line.label);
+      const edge = makeEdge(from.id, to.id, line.kind, tone, curve ? route : simplify(route), [...arrows, ...edges], line.label);
       if (curve) edge.curve = true;
       edges.push(withLabelAt(edge, labelAt));
     };
+
+    // The lane already draws this arrow between neighbouring steps: just give it the label.
+    const arrow = arrows.find((e) => e.from === from.id && e.to === to.id);
+    if (arrow) {
+      if (line.label && !arrow.label) {
+        const mid = arrow.route.length ? { x: (arrow.route[0].x + arrow.route[arrow.route.length - 1].x) / 2, y: (arrow.route[0].y + arrow.route[arrow.route.length - 1].y) / 2 - 10 } : { x: 0, y: 0 };
+        arrow.label = line.label;
+        arrow.labelSize = { w: Math.ceil(measureText(line.label, TYPE.edgeLabel)) + 8, h: 16 };
+        withLabelAt(arrow, mid);
+      }
+      continue;
+    }
 
     if (a === b && fromAttach === "port" && toAttach === "port") {
       const stacked = neighbourArrow(from, to, plans[a]);

@@ -416,7 +416,13 @@ function Workspace() {
                 onTabChange={setTab}
                 onClose={() => setInspectorVisible(false)}
                 d2={doc.d2 || (looksLikeSpec(agent.code) ? "" : agent.code)}
-                spec={doc.model?.composed ? doc.specText : looksLikeSpec(agent.code) ? agent.code : null}
+                spec={
+                  doc.model?.composed
+                    ? doc.specText
+                    : (!doc.model || (running && latestRun?.format === "composition")) && looksLikeSpec(agent.code)
+                      ? agent.code
+                      : null
+                }
                 mermaid={doc.model ? modelToMermaid(doc.model) : ""}
                 streamingCode={running ? agent.code : null}
                 theme={theme.resolved}

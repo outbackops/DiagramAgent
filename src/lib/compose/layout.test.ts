@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderModelSvg } from "@/lib/model/render-svg";
+import { validateModel } from "@/lib/model/validate";
 import type { Box, DiagramModel, DiagramNode } from "@/lib/model/types";
 import { composeSpec, recompose } from "./index";
 import { scoreComposition } from "./quality";
@@ -350,5 +351,59 @@ describe("layoutSpec: designed routes for every connector", () => {
     const hit = (a: Box, b: Box) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 1 && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 1;
     for (const l of labels) for (const s of solid) expect(hit(l, s)).toBe(false);
     for (let i = 0; i < labels.length; i++) for (let j = i + 1; j < labels.length; j++) expect(hit(labels[i], labels[j])).toBe(false);
+  });
+});
+
+describe("layoutSpec: specs at the limits", () => {
+  it("merges a connector that repeats a lane's step arrow into it, so edge ids stay unique", () => {
+    const { model } = composeSpec({
+      title: "Repeat",
+      columns: [
+        { id: "work", title: "Work", items: [{ type: "flow", id: "place", title: "Place", steps: [{ id: "take", title: "Take" }, { id: "send", title: "Send" }, { id: "done", title: "Done" }] }] },
+        { id: "data", title: "Data", items: [card("db", "Database")] },
+      ],
+      connectors: [
+        { from: "place.take", to: "place.send", kind: "flow", label: "then" },
+        { from: "place.send", to: "db", kind: "call" },
+      ],
+    });
+    const ids = model.edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const arrows = model.edges.filter((e) => e.from === "work.place.take" && e.to === "work.place.send");
+    expect(arrows).toHaveLength(1);
+    expect(arrows[0]).toMatchObject({ kind: "step", label: "then" });
+    expect(arrows[0].labelAt).toBeDefined();
+    expect(validateModel(model).ok).toBe(true);
+  });
+
+  it("always produces a model the validator accepts, even with every field at its limit", () => {
+    const long = "lorem ipsum ".repeat(30).trim();
+    const flows = (column: number) =>
+      Array.from({ length: 7 }, (_, i) => ({
+        type: "flow",
+        id: `f${column}${i}`,
+        title: long,
+        subtitle: long,
+        notes: [long, long, long],
+        chips: { label: long, items: Array.from({ length: 8 }, () => long) },
+        steps: [{ id: `s${column}${i}`, title: long, lines: [long, long, long] }],
+      }));
+    const { model } = composeSpec({
+      title: long,
+      subtitle: long,
+      badge: { title: long, detail: long },
+      columns: [
+        { id: "one", title: long, items: flows(1) },
+        { id: "two", title: long, items: flows(2) },
+        { id: "mid", title: long, items: [card("relay", long)] },
+        { id: "shared", title: long, items: [{ type: "card", id: "hub", title: long, lines: [long, long, long, long, long], notes: [long, long, long, long], usedBy: "ABCDEFGH".split("") }] },
+      ],
+      // Links to a card two or more columns away become used-by chips, so the hub is used by all 14 flows.
+      connectors: [1, 2].flatMap((column) => Array.from({ length: 7 }, (_, i) => ({ from: `f${column}${i}`, to: "hub", kind: "call" }))),
+      footer: { title: long, text: long, status: long, statusDetail: long },
+    });
+    expect(node(model, "shared.hub").content?.usedBy).toHaveLength(14);
+    const result = validateModel(model);
+    expect(result.ok ? "ok" : result.error).toBe("ok");
   });
 });

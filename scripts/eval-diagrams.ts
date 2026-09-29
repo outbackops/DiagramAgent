@@ -118,6 +118,8 @@ function parseArgs(argv: string[]): CliOptions {
 
   if (!Number.isFinite(options.refinements) || options.refinements < 0) throw new Error("--refinements must be >= 0");
   if (!Number.isFinite(options.concurrency) || options.concurrency < 1) throw new Error("--concurrency must be >= 1");
+  // The golden fixtures are D2 with metadata; composition fixtures are hand-checked specs (src/test/fixtures/compositions).
+  if (options.updateFixtures && options.format !== "d2") throw new Error("--update-fixtures only applies to --format d2");
   options.refinements = Math.floor(options.refinements);
   options.concurrency = Math.floor(options.concurrency);
   return options;
@@ -449,7 +451,7 @@ async function main() {
       if (options.updateFixtures && summary.passed) {
         const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "diagrams");
         mkdirSync(fixtureDir, { recursive: true });
-        writeFileSync(path.join(fixtureDir, `${testCase.id}.${options.format === "composition" ? "json" : "d2"}`), result.code, "utf8");
+        writeFileSync(path.join(fixtureDir, `${testCase.id}.d2`), result.code, "utf8");
         writeJson(path.join(fixtureDir, `${testCase.id}.meta.json`), {
           id: testCase.id,
           title: testCase.title,

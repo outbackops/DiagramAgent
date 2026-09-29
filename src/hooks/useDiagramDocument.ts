@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
 import { composeText, modelSpecText, pageWidthOf, recompose } from "@/lib/compose";
+import { looksLikeSpec } from "@/lib/compose/partial";
 import { commit, createHistory, redo as redoHistory, undo as undoHistory, type History } from "@/lib/model/history";
 import { carryContainers, mergeStable } from "@/lib/model/merge";
 import { routeModelEdges } from "@/lib/model/route";
@@ -33,10 +34,7 @@ export function suggestsTidyUp(result: AcceptResult, layout: RunLayout): boolean
   return layout === "stable" && result.added + result.regrouped >= LARGE_EDIT;
 }
 
-/** Composition specs are JSON objects; D2 never starts with "{". */
-export function looksLikeSpec(code: string): boolean {
-  return code.trimStart().startsWith("{");
-}
+export { looksLikeSpec };
 
 type StoredModel = { kind: "none" } | { kind: "ok"; model: DiagramModel } | { kind: "unreadable"; raw: string };
 
@@ -111,6 +109,16 @@ export function useDiagramDocument() {
     }
     const legacy = readLegacyCode();
     if (!legacy.trim()) {
+      setStatus("ready");
+      return;
+    }
+    // The last run's code can be a composition spec (a reload mid-run): compose it rather than import D2.
+    if (looksLikeSpec(legacy)) {
+      try {
+        setHistory(createHistory(composeText(legacy).model));
+      } catch {
+        // An unfinished spec: start empty rather than show an error for a draft.
+      }
       setStatus("ready");
       return;
     }

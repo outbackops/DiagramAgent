@@ -95,6 +95,21 @@ describe("composition schema", () => {
     expect(rootProps.connectors.maxItems).toBe(SPEC_LIMITS.connectors);
     expect(rootTitle.maxLength).toBe(SPEC_LIMITS.titleChars);
     expect(connectorProps.label.maxLength).toBe(SPEC_LIMITS.labelChars);
+
+    const cardProps = defs.Card.properties as Record<string, JsonRecord>;
+    const gridProps = defs.Grid.properties as Record<string, JsonRecord>;
+    const zoneProps = defs.Zone.properties as Record<string, JsonRecord>;
+    const stepProps = defs.Step.properties as Record<string, JsonRecord>;
+    expect(cardProps.lines.maxItems).toBe(SPEC_LIMITS.linesPerCard);
+    expect((cardProps.lines.items as JsonRecord).maxLength).toBe(SPEC_LIMITS.lineChars);
+    expect(cardProps.usedBy.maxItems).toBe(SPEC_LIMITS.chips);
+    expect(gridProps.items.maxItems).toBe(SPEC_LIMITS.gridItems);
+    expect(gridProps.columns.maximum).toBe(SPEC_LIMITS.gridColumns);
+    expect(zoneProps.items.maxItems).toBe(SPEC_LIMITS.zoneItems);
+    expect(zoneProps.columns.maximum).toBe(SPEC_LIMITS.gridColumns);
+    expect(stepProps.lines.maxItems).toBe(SPEC_LIMITS.linesPerStep);
+    expect(flowProps.notes.maxItems).toBe(SPEC_LIMITS.notesPerFlow);
+    expect(((flowProps.chips.properties as Record<string, JsonRecord>).items).maxItems).toBe(SPEC_LIMITS.chips);
   });
 
   it("fixtures only use properties declared by the schema", () => {

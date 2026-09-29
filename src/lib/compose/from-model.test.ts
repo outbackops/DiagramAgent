@@ -64,7 +64,8 @@ describe("modelToSpec", () => {
     expect(spec.columns[1].items[1]).toMatchObject({ type: "grid", columns: 3, items: [{ title: "Key Vault" }, { title: "Managed identity" }] });
     expect(spec.columns[1].items[2]).toMatchObject({ type: "flow", label: "A", steps: [{ title: "Validate" }, { title: "Issue token", tone: "teal", icon: "azure-active-directory" }] });
     expect(spec.connectors).toEqual([
-      { from: "web", to: "validate", kind: "flow", label: "starts", tone: "blue" },
+      // The web card is blue, so the connector's blue is its default and isn't pinned.
+      { from: "web", to: "validate", kind: "flow", label: "starts" },
       { from: "issue", to: "kv", kind: "call", label: "secret" },
     ]);
     expect(() => normalizeSpec(spec)).not.toThrow();
@@ -108,6 +109,32 @@ describe("modelToSpec", () => {
     ]);
     expect(spec.connectors).toEqual([{ from: "api", to: "logs", kind: "flow", label: "writes" }]);
     expect(() => normalizeSpec(spec)).not.toThrow();
+  });
+
+  it("keeps what a hand edit moved: cards and boxes dropped into lanes, items dragged out of columns", () => {
+    const model: DiagramModel = {
+      version: 1,
+      composed: true,
+      nodes: [
+        node("apps", null, "Apps", 0, 0, true, { role: "column" }),
+        node("data", null, "Data", 400, 0, true, { role: "column" }),
+        node("apps.login", "apps", "Login", 10, 60, true, { role: "lane", tone: "purple", content: { badge: "A" } }),
+        node("apps.login.validate", "apps.login", "Validate", 20, 100, false, { role: "step" }),
+        node("apps.login.audit", "apps.login", "Audit", 140, 100, false, { role: "card", tone: "orange" }),
+        node("apps.login.shared", "apps.login", "Shared", 20, 200, true, { role: "grid" }),
+        node("apps.login.shared.kv", "apps.login.shared", "Key Vault", 30, 220, false, { role: "card" }),
+        node("sync", null, "Sync", 420, 300, true, { role: "lane", content: { badge: "B" } }),
+        node("sync.pull", "sync", "Pull", 430, 340, false, { role: "step" }),
+      ],
+      edges: [],
+    };
+    const spec = modelToSpec(model);
+    expect(spec.columns[0].items).toEqual([
+      { type: "flow", id: "login", title: "Login", label: "A", tone: "purple", steps: [{ id: "validate", title: "Validate" }, { id: "audit", title: "Audit", tone: "orange" }] },
+      { type: "grid", id: "shared", items: [{ type: "card", id: "kv", title: "Key Vault" }] },
+    ]);
+    expect(spec.columns[1].items).toEqual([{ type: "flow", id: "sync", title: "Sync", label: "B", steps: [{ id: "pull", title: "Pull" }] }]);
+    expect(normalizeSpec(spec).spec.columns.map((column) => column.items.map((item) => item.type))).toEqual([["flow", "grid"], ["flow"]]);
   });
 
   it("reflects renamed, deleted and moved nodes and stays deterministic", () => {

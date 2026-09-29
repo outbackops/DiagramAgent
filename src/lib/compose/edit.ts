@@ -65,8 +65,10 @@ export function setTone(model: DiagramModel, id: string, tone: Tone): DiagramMod
     for (const n of model.nodes) if (n.parent === id && n.role === "step" && n.tone === previous) followers.add(n.id);
   }
   const nodes = model.nodes.map((n) => (followers.has(n.id) ? recolour(n) : n));
+  // Step arrows are drawn in their lane's colour, whatever colour the steps themselves have.
+  const laneSteps = node.role === "lane" ? new Set(model.nodes.filter((n) => n.parent === id).map((n) => n.id)) : followers;
   const edges = model.edges.map((e) =>
-    e.kind === "step" && followers.has(e.from) && followers.has(e.to) ? { ...e, tone, style: { ...e.style, stroke: toneColors(tone).main } } : e,
+    e.kind === "step" && laneSteps.has(e.from) && laneSteps.has(e.to) ? { ...e, tone, style: { ...e.style, stroke: toneColors(tone).main } } : e,
   );
   return { ...model, nodes, edges };
 }

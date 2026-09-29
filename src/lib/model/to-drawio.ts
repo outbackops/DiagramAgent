@@ -220,13 +220,15 @@ function pointsXml(points: Point[]): string {
     .join("\n")}\n            </Array>`;
 }
 
+/** draw.io reads labels as HTML (html=1): each part is HTML-escaped before joining with <br>. */
 function composedNodeLabel(model: DiagramModel, node: DiagramNode): string {
   if (!model.composed || !node.role) return node.label;
+  const html = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const lines = [node.label];
   if (node.content?.subtitle) lines.push(node.content.subtitle);
   if (node.content?.lines) lines.push(...node.content.lines);
   if (node.content?.notes) lines.push(...node.content.notes);
-  return lines.join("<br>");
+  return lines.map(html).join("<br>");
 }
 
 export async function modelToDrawio(model: DiagramModel, options: DrawioOptions = {}): Promise<string> {

@@ -73,6 +73,8 @@ export function parseSpecText(text: string): unknown {
       lastMessage = error instanceof Error ? error.message : String(error);
     }
   }
+  if (candidates.length === 0 && cleaned.includes("{")) throw new SpecError("The spec JSON is never closed; the output looks cut off. Output the complete spec object.");
+  if (candidates.length === 0 && /^\s*\[/.test(cleaned)) throw new SpecError("The spec must be a JSON object, but got an array.");
   throw new SpecError(`The spec is not valid JSON: ${lastMessage}`);
 }
 
@@ -88,6 +90,7 @@ export function normalizeSpec(raw: unknown): NormalizeResult {
   const warnings: string[] = [];
   if (!isRecord(raw)) throw new SpecError("The spec must be a JSON object");
 
+  checkFields(raw, FIELDS.root, "spec", warnings);
   const rawTitle = textField(raw, ["title"], SPEC_LIMITS.titleChars, warnings, "title");
   const rawColumns = columnInputs(raw, warnings);
   const hasItems = rawColumns.some((column) => arrayField(column, ["items", "cards"]).length > 0);
@@ -115,7 +118,7 @@ export function normalizeSpec(raw: unknown): NormalizeResult {
   normalizeUsedBy(spec, warnings);
   spec.connectors = normalizeConnectors(raw, spec, warnings);
   letterInReadingOrder(spec);
-  return { spec, warnings };
+  return { spec, warnings: [...new Set(warnings)] };
 }
 
 /**
@@ -176,14 +179,36 @@ function stripLineComments(text: string): string {
   return out;
 }
 
+/**
+ * Drops commas that sit right before a closing bracket (outside strings), in
+ * one pass: runs like ",,,]" and ", ]" inside string values are handled correctly.
+ */
 function removeTrailingCommas(text: string): string {
-  let current = text;
-  let next = current.replace(/,\s*([}\]])/g, "$1");
-  while (next !== current) {
-    current = next;
-    next = current.replace(/,\s*([}\]])/g, "$1");
+  const out: string[] = [];
+  let inString = false;
+  let escaped = false;
+  // Positions in `out` of commas seen since the last token that wasn't a comma or whitespace.
+  let pending: number[] = [];
+  for (const ch of text) {
+    if (inString) {
+      out.push(ch);
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      for (const i of pending) out[i] = "";
+      pending = [];
+    } else if (ch === ",") {
+      pending.push(out.length);
+    } else if (!/\s/.test(ch)) {
+      pending = [];
+      if (ch === '"') inString = true;
+    }
+    out.push(ch);
   }
-  return current;
+  return out.join("");
 }
 
 function jsonObjectCandidates(text: string): string[] {
@@ -230,8 +255,8 @@ function columnInputs(raw: JsonRecord, warnings: string[]): JsonRecord[] {
     const last = kept[kept.length - 1];
     const merged = [...arrayField(last, ["items", "cards"])];
     for (const extra of columns.slice(SPEC_LIMITS.columns)) merged.push(...arrayField(extra, ["items", "cards"]));
-    last.items = merged;
-    columns = kept;
+    // A copy, so the caller's spec is never changed (the same spec must always give the same diagram).
+    columns = [...kept.slice(0, -1), { ...last, items: merged }];
   }
   return columns;
 }
@@ -240,14 +265,16 @@ function normalizeColumns(columns: JsonRecord[], ids: Set<string>, warnings: str
   const out: NColumn[] = [];
   columns.forEach((column, index) => {
     const rawTitle = textField(column, ["title", "name", "label"], SPEC_LIMITS.titleChars, warnings, "column title") ?? `Column ${index + 1}`;
-    // The engine numbers columns itself ("1 · Title"); drop numbering the author added.
-    const title = rawTitle.replace(/^\s*(?:\d{1,2}|[ivx]{1,4})\s*[.):·\-–—]\s*/i, "").trim() || rawTitle;
+    // The engine numbers columns itself ("1 · Title"); drop numbering the author added
+    // ("1. Title", "II) Title", "3 - Title"), but not a word such as "X-Ray".
+    const title = rawTitle.replace(/^\s*(?:\d{1,2}|[ivx]{1,4})\s*(?:[.):·–—]|-(?=\s))\s*/i, "").trim() || rawTitle;
     const fallback = index === 0 ? "column" : `column-${index + 1}`;
     let id = uniqueId(valueOf(column, ["id"]) ?? title, fallback, ids);
     if (id === HEADER_ID || id === FOOTER_ID) {
       warnings.push(`Renamed reserved column id ${id}`);
       id = uniqueId(`${id}-column`, "column", ids);
     }
+    checkFields(column, FIELDS.column, "column", warnings);
     const rawItems = arrayField(column, ["items", "cards"]);
     const items: NItem[] = [];
     let flowIndex = flowCount(out);
@@ -275,11 +302,52 @@ function normalizeColumns(columns: JsonRecord[], ids: Set<string>, warnings: str
 function normalizeItem(raw: unknown, context: ItemContext, ids: Set<string>, warnings: string[]): NItem | undefined {
   const record = isRecord(raw) ? raw : { title: raw };
   const type = itemType(record);
-  if (type === "grid") return normalizeGrid(record, context, ids, warnings);
+  checkFields(record, FIELDS[type], type, warnings);
+  if (type === "grid") return normalizeGrid(record, ids, warnings);
   if (type === "zone") return normalizeZone(record, ids, warnings);
   if (type === "banner") return normalizeBanner(record, ids, warnings);
   if (type === "flow") return normalizeFlow(record, context, ids, warnings);
   return normalizeCard(record, ids, warnings);
+}
+
+/** Every field the normaliser reads, per kind of object, aliases included. */
+const FIELDS = {
+  root: ["version", "$schema", "title", "subtitle", "sub", "trigger", "badge", "columns", "sections", "zones", "connectors", "edges", "links", "connections", "footer", "items", "cards"],
+  column: ["id", "title", "name", "label", "size", "width", "items", "cards"],
+  card: ["type", "id", "title", "name", "label", "lines", "description", "details", "body", "tone", "color", "colour", "usedBy", "used_by", "notes", "note", "icon"],
+  grid: ["type", "id", "title", "name", "label", "columns", "items", "cards"],
+  banner: ["type", "id", "title", "name", "label", "text", "subtitle", "sub", "description", "details", "body", "tone", "color", "colour"],
+  zone: ["type", "id", "title", "name", "label", "subtitle", "sub", "text", "description", "tag", "tone", "color", "colour", "columns", "items", "cards", "notes"],
+  flow: ["type", "id", "label", "title", "name", "subtitle", "sub", "trigger", "tag", "tone", "color", "colour", "steps", "notes", "chips"],
+  step: ["id", "title", "name", "label", "lines", "description", "details", "body", "tone", "color", "colour", "icon"],
+  connector: ["from", "source", "to", "target", "kind", "type", "label", "title", "tone", "color", "colour"],
+  footer: ["title", "text", "subtitle", "body", "status", "tag", "statusDetail", "badgeDetail", "detail"],
+  badge: ["title", "label", "name", "detail", "text"],
+  chips: ["label", "title", "items"],
+} as const;
+
+/**
+ * Unknown fields are ignored, but say so: a typo such as "conectors" would
+ * otherwise silently lose everything under it. One warning per kind and field.
+ */
+function checkFields(record: JsonRecord, allowed: readonly string[], kind: string, warnings: string[]): void {
+  for (const key of Object.keys(record)) {
+    if (allowed.includes(key)) continue;
+    const guess = allowed.find((name) => editDistance(key.toLowerCase(), name.toLowerCase()) <= 2);
+    const message = `Ignored unknown ${kind} field "${key}"${guess ? ` (did you mean "${guess}"?)` : ""}`;
+    if (!warnings.includes(message)) warnings.push(message);
+  }
+}
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[b.length];
 }
 
 function normalizeCard(raw: JsonRecord, ids: Set<string>, warnings: string[], defaultTone: Tone = "blue"): NCard {
@@ -294,14 +362,15 @@ function normalizeCard(raw: JsonRecord, ids: Set<string>, warnings: string[], de
     usedBy: textArray(raw, ["usedBy", "used_by"], SPEC_LIMITS.chipChars, SPEC_LIMITS.chips, warnings, "usedBy"),
   };
   const notes = textArray(raw, ["notes"], SPEC_LIMITS.noteChars, SPEC_LIMITS.notesPerFlow, warnings, "card notes");
-  const note = textField(raw, ["note"], SPEC_LIMITS.noteChars, warnings, "card note") ?? (notes.length ? notes.join(" · ") : undefined);
+  // Several notes become one footnote, still within the note limit.
+  const note = textField(raw, ["note"], SPEC_LIMITS.noteChars, warnings, "card note") ?? (notes.length ? cleanText(notes.join(" · "), SPEC_LIMITS.noteChars, warnings, "card notes") : undefined);
   if (note) card.note = note;
   const icon = normalizeIcon(valueOf(raw, ["icon"]), warnings);
   if (icon) card.icon = icon;
   return card;
 }
 
-function normalizeGrid(raw: JsonRecord, context: ItemContext, ids: Set<string>, warnings: string[]): NGrid | undefined {
+function normalizeGrid(raw: JsonRecord, ids: Set<string>, warnings: string[]): NGrid | undefined {
   const title = textField(raw, ["title", "name", "label"], SPEC_LIMITS.titleChars, warnings, "grid title") ?? "grid";
   const items = arrayField(raw, ["items", "cards"]).slice(0, SPEC_LIMITS.gridItems);
   if (arrayField(raw, ["items", "cards"]).length > SPEC_LIMITS.gridItems) warnings.push(`Dropped grid cards beyond ${SPEC_LIMITS.gridItems}`);
@@ -386,6 +455,7 @@ function normalizeFlow(raw: JsonRecord, context: ItemContext, ids: Set<string>, 
 }
 
 function normalizeStep(raw: JsonRecord, tone: Tone, ids: Set<string>, warnings: string[]): NStep {
+  checkFields(raw, FIELDS.step, "step", warnings);
   const title = textField(raw, ["title", "name", "label"], SPEC_LIMITS.titleChars, warnings, "step title") ?? "Untitled";
   const step: NStep = {
     id: uniqueId(valueOf(raw, ["id"]) ?? title, "step", ids),
@@ -399,17 +469,23 @@ function normalizeStep(raw: JsonRecord, tone: Tone, ids: Set<string>, warnings: 
 }
 
 function assignFlowLabels(columns: NColumn[], warnings: string[]): void {
+  // Letters the author wrote are claimed first, so an unlabelled flow never takes
+  // one that a later flow (and the chips or references naming it) asked for.
   const used = new Set<string>();
+  const unlabelled: NFlow[] = [];
   for (const flow of allFlows(columns)) {
     const requested = flow.label.trim().toUpperCase().slice(0, 2);
     if (requested && !used.has(requested)) {
       flow.label = requested;
       used.add(requested);
-    } else {
-      if (requested) warnings.push(`Duplicate flow label ${requested}; assigned next free label`);
-      flow.label = nextFlowLabel(used);
-      used.add(flow.label);
+      continue;
     }
+    if (requested) warnings.push(`Duplicate flow label ${requested}; assigned next free label`);
+    unlabelled.push(flow);
+  }
+  for (const flow of unlabelled) {
+    flow.label = nextFlowLabel(used);
+    used.add(flow.label);
   }
 }
 
@@ -433,14 +509,15 @@ function normalizeConnectors(raw: JsonRecord, spec: NormalizedSpec, warnings: st
   const seen = new Set<string>();
   for (const value of rawConnectors.slice(0, SPEC_LIMITS.connectors)) {
     if (!isRecord(value)) continue;
+    checkFields(value, FIELDS.connector, "connector", warnings);
     const fromText = textField(value, ["from", "source"], SPEC_LIMITS.labelChars, warnings, "connector endpoint");
     const toText = textField(value, ["to", "target"], SPEC_LIMITS.labelChars, warnings, "connector endpoint");
     if (!fromText || !toText) {
       warnings.push("Dropped connector with missing endpoint");
       continue;
     }
-    const from = resolveRef(fromText, refs);
-    const to = resolveRef(toText, refs);
+    const from = resolveRef(fromText, refs, warnings);
+    const to = resolveRef(toText, refs, warnings);
     if (!from) {
       warnings.push(`Dropped connector with unresolved endpoint ${fromText}`);
       continue;
@@ -451,6 +528,10 @@ function normalizeConnectors(raw: JsonRecord, spec: NormalizedSpec, warnings: st
     }
     if (from.kind === "column" || to.kind === "column") {
       warnings.push("Dropped connector that targets a column");
+      continue;
+    }
+    if (from.kind === "grid" || to.kind === "grid") {
+      warnings.push(`Dropped connector to grid ${from.kind === "grid" ? fromText : toText}; connect to one of its cards`);
       continue;
     }
     if (from.id === to.id) {
@@ -475,7 +556,7 @@ function normalizeConnectors(raw: JsonRecord, spec: NormalizedSpec, warnings: st
   return connectors;
 }
 
-type RefTarget = { id: string; localId: string; title: string; kind: "column" | "item" | "step" | "flow" };
+type RefTarget = { id: string; localId: string; title: string; kind: "column" | "item" | "grid" | "step" | "flow" };
 type RefIndex = {
   byModel: Map<string, RefTarget>;
   byLocal: Map<string, RefTarget[]>;
@@ -497,7 +578,7 @@ function buildRefs(spec: NormalizedSpec): RefIndex {
   for (const column of spec.columns) {
     add({ id: column.id, localId: column.id, title: column.title, kind: "column" });
     for (const item of column.items) {
-      const itemTarget: RefTarget = { id: `${column.id}.${item.id}`, localId: item.id, title: item.type === "grid" ? item.id : item.title, kind: item.type === "flow" ? "flow" : "item" };
+      const itemTarget: RefTarget = { id: `${column.id}.${item.id}`, localId: item.id, title: item.type === "grid" ? item.id : item.title, kind: item.type === "flow" ? "flow" : item.type === "grid" ? "grid" : "item" };
       add(itemTarget);
       if (item.type === "flow") {
         flows.push({ flow: item, target: itemTarget });
@@ -510,7 +591,7 @@ function buildRefs(spec: NormalizedSpec): RefIndex {
   return { byModel, byLocal, byTitle, flows };
 }
 
-function resolveRef(ref: string, refs: RefIndex): RefTarget | undefined {
+function resolveRef(ref: string, refs: RefIndex, warnings: string[]): RefTarget | undefined {
   if (refs.byModel.has(ref)) return refs.byModel.get(ref);
   const direct = unique(refs.byLocal.get(ref));
   if (direct) return direct;
@@ -533,14 +614,27 @@ function resolveRef(ref: string, refs: RefIndex): RefTarget | undefined {
       }
     }
   }
+  // A bare flow letter ("A") names that flow, as the author lettered it; checked before titles,
+  // so a step titled "a" doesn't capture it. Lower-case letters only fall back after titles.
+  const exactLetter = refs.flows.find((entry) => entry.flow.label && entry.flow.label === ref.trim());
+  if (exactLetter) return exactLetter.target;
   const title = unique(refs.byTitle.get(ref.toLowerCase()));
   if (title) return title;
-  return unique(refs.byLocal.get(slugify(ref)));
+  const letter = refs.flows.find((entry) => entry.flow.label && equalsLoose(ref.trim(), entry.flow.label));
+  if (letter) return letter.target;
+  const bySlug = unique(refs.byLocal.get(slugify(ref)));
+  const sameTitle = refs.byTitle.get(ref.toLowerCase()) ?? [];
+  if (bySlug && sameTitle.length > 1) {
+    const message = `Ambiguous reference "${ref}" matches ${sameTitle.length} items; used ${bySlug.id} (use an id or flow.step)`;
+    if (!warnings.includes(message)) warnings.push(message);
+  }
+  return bySlug;
 }
 
 function normalizeBadge(raw: JsonRecord, warnings: string[]): NormalizedSpec["badge"] | undefined {
   const badge = valueOf(raw, ["badge"]);
   if (isRecord(badge)) {
+    checkFields(badge, FIELDS.badge, "badge", warnings);
     const title = textField(badge, ["title", "label", "name"], SPEC_LIMITS.labelChars, warnings, "badge title");
     if (!title) return undefined;
     const detail = textField(badge, ["detail", "text"], SPEC_LIMITS.labelChars, warnings, "badge detail");
@@ -553,6 +647,7 @@ function normalizeBadge(raw: JsonRecord, warnings: string[]): NormalizedSpec["ba
 function normalizeFooter(raw: JsonRecord, warnings: string[]): SpecFooter | undefined {
   const footer = valueOf(raw, ["footer"]);
   if (isRecord(footer)) {
+    checkFields(footer, FIELDS.footer, "footer", warnings);
     const text = textField(footer, ["text", "subtitle", "body"], SPEC_LIMITS.subtitleChars, warnings, "footer text") ?? "";
     const title = textField(footer, ["title"], SPEC_LIMITS.titleChars, warnings, "footer title") ?? "Outcome";
     const result: SpecFooter = { title, text };
@@ -569,6 +664,7 @@ function normalizeFooter(raw: JsonRecord, warnings: string[]): SpecFooter | unde
 function normalizeChips(raw: JsonRecord, warnings: string[]): NFlow["chips"] | undefined {
   const chips = valueOf(raw, ["chips"]);
   if (isRecord(chips)) {
+    checkFields(chips, FIELDS.chips, "chips", warnings);
     const items = textArray(chips, ["items"], SPEC_LIMITS.chipChars, SPEC_LIMITS.chips, warnings, "chips");
     if (!items.length) return undefined;
     const label = textField(chips, ["label", "title"], SPEC_LIMITS.chipChars, warnings, "chips label");

@@ -6,6 +6,7 @@ import { resolveAnswerSpecs } from "@/lib/clarify-utils";
 import { api, isD2SyntaxError } from "@/lib/client/api";
 import { composeText } from "@/lib/compose";
 import { cleanSpecOutput, COMPOSITION_LANGUAGE } from "@/lib/compose/prompt";
+import { looksLikeSpec } from "@/lib/compose/partial";
 import { scoreComposition } from "@/lib/compose/quality";
 import { SpecError } from "@/lib/compose/spec";
 import type { ChatTurn, ModelSelection } from "@/lib/llm/types";
@@ -232,7 +233,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
     return fromDocument ?? code;
   }, [code]);
   /** Edits are written in the diagram's own language; without a document, the last run's code decides. */
-  const currentFormat = useCallback((): DiagramFormat => documentRef.current?.currentFormat?.() ?? (code.trimStart().startsWith("{") ? "composition" : "d2"), [code]);
+  const currentFormat = useCallback((): DiagramFormat => documentRef.current?.currentFormat?.() ?? (looksLikeSpec(code) ? "composition" : "d2"), [code]);
   const newFormat: DiagramFormat = settings.style === "graph" ? "d2" : "composition";
 
   // One-time cleanup after hydration: migrate the old chat format and mark

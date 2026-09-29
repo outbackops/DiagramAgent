@@ -49,6 +49,15 @@ describe("model operations", () => {
     expect(model.nodes[0]?.box.x).toBe(0);
   });
 
+  it("drops a re-routed line's label position along with its route", () => {
+    const model = baseModel();
+    model.edges[0] = { ...model.edges[0], label: "calls", labelAt: { x: 200, y: 90 } };
+    const moved = moveItems(model, ["grp.a"], 0, 10);
+    expect(moved.edges[0]).toMatchObject({ route: [], label: "calls" });
+    expect(moved.edges[0].labelAt).toBeUndefined();
+    expect(moved.edges[1].route.length).toBeGreaterThan(0);
+  });
+
   it("a tiny leaf move changes only that leaf and ancestors", () => {
     const model: DiagramModel = {
       version: 1,

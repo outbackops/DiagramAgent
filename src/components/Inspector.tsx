@@ -3,6 +3,7 @@
 import { Check, Copy, Download, PanelRightClose, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { RunRecord } from "@/hooks/useDiagramAgent";
+import { looksLikeSpec } from "@/lib/compose/partial";
 import type { CatalogModel } from "@/lib/llm/types";
 import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
@@ -75,7 +76,7 @@ export default function Inspector({
   const hasSpec = spec !== null && spec !== undefined;
   // Graph diagrams have no spec; fall back to D2 without forgetting the choice.
   const codeKind: CodeKind = chosenKind === "spec" && !hasSpec ? "d2" : chosenKind;
-  const streamingSpec = streamingCode !== null && streamingCode.trimStart().startsWith("{");
+  const streamingSpec = streamingCode !== null && looksLikeSpec(streamingCode);
   const displayedCode = useMemo(() => {
     if (codeKind === "spec") return streamingSpec ? streamingCode! : (spec ?? "");
     if (codeKind === "d2") return streamingCode !== null && !streamingSpec ? streamingCode : d2;

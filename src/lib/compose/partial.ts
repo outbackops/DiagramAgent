@@ -1,4 +1,12 @@
 /**
+ * Whether text is a composition spec rather than D2: a JSON object, possibly
+ * inside a ```json fence (D2 never starts with "{" or uses JSON fences).
+ */
+export function looksLikeSpec(text: string): boolean {
+  return /^\s*(?:```(?:json)?\s*)?\{/i.test(text) || /```json/i.test(text);
+}
+
+/**
  * Closes a truncated JSON document — a spec still streaming in — so it
  * parses. The text is cut back to the last complete value (dropping a
  * half-written string, key or literal) and open arrays and objects are

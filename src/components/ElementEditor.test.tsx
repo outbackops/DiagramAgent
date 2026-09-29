@@ -80,3 +80,41 @@ describe("ElementEditor label drafts", () => {
     expect(document.activeElement).not.toBe(screen.getByLabelText("Label"));
   });
 });
+
+describe("ElementEditor composed details", () => {
+  const composed = (lines: string[]): DiagramModel => ({
+    version: 1,
+    composed: true,
+    nodes: [
+      { ...node("c", "Cache", 0), role: "card", content: { lines } },
+      { ...node("d", "Database", 200), role: "card", content: { lines: ["Primary store"] } },
+    ],
+    edges: [],
+  });
+  const details = () => screen.getByLabelText("Details, one per line") as HTMLTextAreaElement;
+
+  it("follows undo and redo while the field is untouched", () => {
+    const { props, rerender } = setup(["c"], { model: composed(["Hot keys"]) });
+    expect(details().value).toBe("Hot keys");
+    rerender(<ElementEditor {...props} model={composed(["Hot keys", "TTL 5 min"])} />);
+    expect(details().value).toBe("Hot keys\nTTL 5 min");
+  });
+
+  it("keeps an edit in progress when the saved text changes underneath", () => {
+    const { props, rerender } = setup(["c"], { model: composed(["Hot keys"]) });
+    fireEvent.change(details(), { target: { value: "Typing" } });
+    rerender(<ElementEditor {...props} model={composed(["Changed by AI"])} />);
+    expect(details().value).toBe("Typing");
+  });
+
+  it("saves what was typed when another item is selected before blur", () => {
+    const start = composed(["Hot keys"]);
+    const { onApply, props, rerender } = setup(["c"], { model: start });
+    fireEvent.change(details(), { target: { value: "Hot keys\nEvicts LRU" } });
+    rerender(<ElementEditor {...props} selection={["d"]} />);
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const [op] = onApply.mock.calls[0] as [(m: DiagramModel) => DiagramModel];
+    expect(op(start).nodes.find((n) => n.id === "c")?.content?.lines).toEqual(["Hot keys", "Evicts LRU"]);
+    expect(details().value).toBe("Primary store");
+  });
+});

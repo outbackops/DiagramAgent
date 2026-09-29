@@ -414,6 +414,15 @@ describe("model exports", () => {
     expect(lane).toBeDefined();
   });
 
+  it("escapes composed draw.io label text as HTML, so only the line breaks are markup", async () => {
+    const model = await composedFixtureModel();
+    const target = model.nodes.find((node) => node.role === "card")!;
+    target.label = "R&D <b>team</b>";
+    const xml = await modelToDrawio(model, { embedIcons: false });
+    const cell = parseCells(xml).find((candidate) => candidate.value.startsWith("R&amp;amp;D"));
+    expect(cell?.value.startsWith("R&amp;amp;D &amp;lt;b&amp;gt;team&amp;lt;/b&amp;gt;&lt;br&gt;")).toBe(true);
+  });
+
   it("exports composed VSDX text with detail lines and node style colours", async () => {
     const model = await composedFixtureModel();
     const buffer = await modelToVsdx(model);

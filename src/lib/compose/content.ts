@@ -69,6 +69,24 @@ export interface ContentContext {
 
 const emptyBlock = (height: number): ContentBlock => ({ height, plates: [], runs: [], arrows: [], truncated: 0, broken: 0 });
 
+/** Most flows a legend lists (and the most letters the engine assigns in practice). */
+export const MAX_LEGEND_FLOWS = 26;
+
+/** Flow letters are one or two capitals; other badge text is never treated as a flow. */
+export function isFlowLetter(badge: string): boolean {
+  return /^[A-Z]{1,2}$/.test(badge);
+}
+
+/** Tone of each flow letter in a model, for used-by chips and legends. */
+export function flowTonesOfModel(model: { nodes: readonly { role?: string; tone?: Tone; content?: NodeContent }[] }): Record<string, Tone> {
+  const tones: Record<string, Tone> = {};
+  for (const node of model.nodes) {
+    const badge = node.role === "lane" ? node.content?.badge?.trim() : undefined;
+    if (badge && isFlowLetter(badge) && Object.keys(tones).length < 40) tones[badge] = node.tone ?? "gray";
+  }
+  return tones;
+}
+
 /** Baseline of a line whose line box starts at `top`. */
 export function baselineOf(top: number, style: TextStyle): number {
   const lh = lineHeightOf(style);
@@ -425,7 +443,7 @@ function columnTitleVariant(
     right -= measureText(label, TYPE.legend);
   };
   if (variant.usedBy !== "none") {
-    const letters = Object.keys(ctx?.flowTones ?? {}).sort();
+    const letters = Object.keys(ctx?.flowTones ?? {}).filter(isFlowLetter).sort().slice(0, MAX_LEGEND_FLOWS);
     const size = 16;
     for (let i = letters.length - 1; i >= 0; i--) {
       const x = right - size;

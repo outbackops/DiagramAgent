@@ -141,17 +141,25 @@ describe("normalizeSpec", () => {
       columns: [
         {
           title: "Many",
-          items: [
-            ...Array.from({ length: 11 }, (_, i) => ({ title: `Card ${i}`, lines: [long, long, long, long, long, long], color: i === 0 ? "amber" : "unknown" })),
-            { type: "flow", title: "Too late", steps: Array.from({ length: 7 }, (_, i) => ({ title: `Step ${i}`, lines: [long, long, long, long] })) },
-          ],
+          items: Array.from({ length: 11 }, (_, i) => ({ title: `Card ${i}`, lines: [long, long, long, long, long, long], color: i === 0 ? "amber" : "unknown" })),
+        },
+        {
+          title: "Flows",
+          items: [{ type: "flow", title: "Too long", steps: Array.from({ length: 7 }, (_, i) => ({ title: `Step ${i}`, lines: [long, long, long, long] })) }],
         },
       ],
     });
     expect(spec.columns[0].items).toHaveLength(10);
     expect(spec.columns[0].items[0]).toMatchObject({ tone: "orange" });
-    expect(warnings.some((warning) => warning.includes("Dropped items beyond"))).toBe(true);
-    expect(warnings.some((warning) => warning.includes("Trimmed long card lines"))).toBe(true);
+    const flow = spec.columns[1].items[0];
+    if (flow.type !== "flow") throw new Error("expected a flow");
+    expect(flow.steps).toHaveLength(6);
+    expect(flow.steps.every((step) => step.lines.length === 3 && step.lines.every((line) => line.length <= 90))).toBe(true);
+    expect(warnings).toContain("Dropped items beyond 10 in column Many");
+    expect(warnings).toContain("Dropped steps beyond 6 in flow Too long");
+    expect(warnings).toContain("Dropped step lines beyond 3");
+    expect(warnings).toContain("Trimmed long card lines");
+    expect(new Set(warnings).size).toBe(warnings.length);
   });
 
   it("wraps top-level items, converts flows without steps and rejects empty specs", () => {
@@ -218,5 +226,84 @@ describe("normalizeSpec: zones, letters and scoped references", () => {
     });
     expect(warnings).toEqual([]);
     expect(spec.connectors).toEqual([{ from: "primary.pri.gateway", to: "dr.dr-request.gateway-2", kind: "call" }]);
+  });
+});
+
+describe("normalizeSpec: authoring mistakes", () => {
+  it("keeps the letters the author wrote for references, then letters in reading order", () => {
+    const { spec, warnings } = normalizeSpec({
+      title: "Letters",
+      columns: [
+        { title: "Flows", items: [{ type: "flow", title: "First", steps: [{ title: "a" }] }, { type: "flow", label: "A", title: "Second", steps: [{ title: "b" }] }] },
+        { title: "Services", items: [{ title: "Store", usedBy: ["A"] }] },
+      ],
+      connectors: [{ from: "A", to: "Store", label: "writes" }],
+    });
+    expect(warnings).toEqual([]);
+    const flows = spec.columns[0].items as Array<{ label: string; title: string }>;
+    expect(flows.map((f) => `${f.label}:${f.title}`)).toEqual(["A:First", "B:Second"]);
+    // "A" named the flow the author lettered A: Second, now lettered B.
+    expect((spec.columns[1].items[0] as { usedBy: string[] }).usedBy).toEqual(["B"]);
+    expect(spec.connectors).toEqual([{ from: "flows.second", to: "services.store", kind: "flow", label: "writes" }]);
+  });
+
+  it("warns about unknown fields, with a suggestion for likely typos", () => {
+    const { spec, warnings } = normalizeSpec({
+      title: "Typos",
+      conectors: [{ from: "a", to: "b" }],
+      columns: [{ title: "Only", items: [{ title: "Card", colr: "red" }] }],
+    });
+    expect(spec.connectors).toEqual([]);
+    expect(warnings).toContain('Ignored unknown spec field "conectors" (did you mean "connectors"?)');
+    expect(warnings.some((warning) => warning.startsWith('Ignored unknown card field "colr"'))).toBe(true);
+  });
+
+  it("drops connectors to a grid and warns about ambiguous titles", () => {
+    const { spec, warnings } = normalizeSpec({
+      title: "Refs",
+      columns: [
+        { title: "Apps", items: [{ title: "API" }, { title: "Cache" }] },
+        { title: "Data", items: [{ title: "Cache" }, { type: "grid", id: "stores", items: [{ title: "SQL" }, { title: "Blob" }] }] },
+      ],
+      connectors: [
+        { from: "API", to: "stores" },
+        { from: "API", to: "Cache" },
+      ],
+    });
+    expect(warnings).toContain("Dropped connector to grid stores; connect to one of its cards");
+    expect(warnings).toContain('Ambiguous reference "Cache" matches 2 items; used apps.cache (use an id or flow.step)');
+    expect(spec.connectors).toEqual([{ from: "apps.api", to: "apps.cache", kind: "flow" }]);
+  });
+
+  it("never changes the caller's spec, even when merging extra columns", () => {
+    const input = {
+      title: "Wide",
+      columns: Array.from({ length: 6 }, (_, i) => ({ title: `Column ${i}`, items: [{ title: `Card ${i}` }] })),
+    };
+    const before = JSON.stringify(input);
+    const { spec, warnings } = normalizeSpec(input);
+    expect(JSON.stringify(input)).toBe(before);
+    expect(spec.columns).toHaveLength(4);
+    expect(spec.columns[3].items).toHaveLength(3);
+    expect(warnings).toContain("Merged extra columns beyond 4");
+  });
+
+  it("drops author numbering from column titles but keeps words that start like numerals", () => {
+    const { spec } = normalizeSpec({
+      title: "Numbers",
+      columns: [
+        { title: "1. Ingest", items: [{ title: "a" }] },
+        { title: "II) Process", items: [{ title: "b" }] },
+        { title: "X-Ray", items: [{ title: "c" }] },
+        { title: "3 - Serve", items: [{ title: "d" }] },
+      ],
+    });
+    expect(spec.columns.map((column) => column.title)).toEqual(["Ingest", "Process", "X-Ray", "Serve"]);
+  });
+
+  it("explains truncated output and arrays", () => {
+    expect(() => parseSpecText('{"title": "Cut", "columns": [{"title": "A"')).toThrow(/looks cut off/);
+    expect(() => parseSpecText("[1, 2]")).toThrow(/must be a JSON object, but got an array/);
+    expect(parseSpecText('{"a": "x, }", "b": [1, 2, ], }')).toEqual({ a: "x, }", b: [1, 2] });
   });
 });

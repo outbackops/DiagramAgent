@@ -283,8 +283,6 @@ EXAMPLE 2
 ${JSON.stringify(COMPOSER_EXAMPLES[1], null, 2)}`;
 }
 
-export const COMPOSER_SYSTEM_PROMPT = buildComposerSystemPrompt();
-
 export function composeInitialPrompt(prompt: string, analysis?: unknown): string {
   const analysisBlock = analysis === undefined || analysis === null ? "" : `\n\nClarify analysis context:\n${JSON.stringify(analysis, null, 2)}`;
   return `Create a composition spec for this diagram request:\n\n${prompt}${analysisBlock}\n\nOutput only the complete spec JSON object.`;

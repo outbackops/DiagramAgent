@@ -43,21 +43,23 @@ function deriveColumns(nodes: DiagramNode[], children: Map<string | null, Diagra
   const explicit = nodes.filter((node) => node.parent === null && node.role === "column").sort(byX);
   const topContainers = nodes.filter((node) => node.parent === null && node.container && !node.role && node.id !== HEADER_ID && node.id !== FOOTER_ID).sort(byX);
   let columns = [...explicit, ...topContainers].sort(byX);
-  const topLeaves = nodes.filter((node) => node.parent === null && !node.container && !node.role && node.id !== HEADER_ID && node.id !== FOOTER_ID);
-  if (!columns.length && topLeaves.length) {
-    columns = [syntheticColumn("components", "Components", topLeaves)];
-  }
-  if (!columns.length) {
-    const laneOrphans = nodes.filter((node) => node.parent === null && node.role === "lane").sort(byYThenX);
-    if (laneOrphans.length) columns = [syntheticColumn("components", "Components", laneOrphans)];
-  }
-  for (const leaf of topLeaves) {
-    if (!leaf.parent && !columns.some((column) => column.id === leaf.id)) {
-      const column = nearestColumn(leaf, columns);
-      if (column) {
-        children.set(column.id, [...(children.get(column.id) ?? []), leaf]);
-      }
-    }
+  // Everything else at the top level (hand-added nodes, or items dragged out of their column)
+  // belongs to the nearest column, so a recompose never drops it.
+  const strays = nodes.filter(
+    (node) =>
+      node.parent === null &&
+      node.id !== HEADER_ID &&
+      node.id !== FOOTER_ID &&
+      node.role !== "column" &&
+      node.role !== "header" &&
+      node.role !== "footer" &&
+      !(node.container && !node.role),
+  );
+  if (!columns.length && strays.length) columns = [syntheticColumn("components", "Components", strays)];
+  for (const stray of strays) {
+    if (columns.some((column) => column.id === stray.id)) continue;
+    const column = nearestColumn(stray, columns);
+    if (column && !(children.get(column.id) ?? []).includes(stray)) children.set(column.id, [...(children.get(column.id) ?? []), stray]);
   }
   return columns.length ? columns : [syntheticColumn("components", "Components", [])];
 }
@@ -95,10 +97,12 @@ function columnToSpec(column: DiagramNode, children: Map<string | null, DiagramN
 function nodeToItems(node: DiagramNode, children: Map<string | null, DiagramNode[]>, parentKind: "column" | "lane" | "grid"): SpecItem[] {
   if (parentKind === "lane") return [stepToSpec(node, undefined) as unknown as SpecItem];
   if (node.role === "banner") return [bannerToSpec(node)];
-  if (node.role === "grid") return [gridToSpec(node, children)];
-  if (node.role === "zone") return [zoneToSpec(node, children)];
-  if (node.role === "lane") return [laneToSpec(node, children)];
-  if (node.role === "card" || !node.container) return [cardToSpec(node)];
+  // Boxes dropped inside a lane, grid or zone come back out as items of the column, after it.
+  const lifted = (children.get(node.id) ?? []).filter((child) => child.container).sort(byYThenX).flatMap((child) => nodeToItems(child, children, "column"));
+  if (node.role === "grid") return [gridToSpec(node, children), ...lifted];
+  if (node.role === "zone") return [zoneToSpec(node, children), ...lifted];
+  if (node.role === "lane") return [laneToSpec(node, children), ...lifted];
+  if (node.role === "card" || node.role === "step" || !node.container) return [cardToSpec(node)];
   if (node.container) return [containerToFlow(node, children)];
   return [];
 }
@@ -128,7 +132,7 @@ function gridToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[
   const grid: SpecGrid = {
     type: "grid",
     id: localId(node),
-    items: orderedGridCards(children.get(node.id) ?? []).map(cardToSpec),
+    items: orderedGridCards((children.get(node.id) ?? []).filter((child) => !child.container)).map(cardToSpec),
   };
   if (node.content?.columns) grid.columns = node.content.columns;
   return grid;
@@ -136,7 +140,7 @@ function gridToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[
 
 /** A boundary; one whose cards were all deleted is kept as a banner so its context isn't lost. */
 function zoneToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[]>): SpecItem {
-  const cards = orderedGridCards((children.get(node.id) ?? []).flatMap((child) => (child.container ? flattenLeaves(child, children) : [child])));
+  const cards = orderedGridCards((children.get(node.id) ?? []).filter((child) => !child.container));
   if (cards.length === 0) return bannerToSpec(node);
   const zone: SpecZone = { type: "zone", id: localId(node), title: node.label || localId(node), items: cards.map(cardToSpec) };
   if (node.content?.subtitle) zone.subtitle = node.content.subtitle;
@@ -149,8 +153,9 @@ function zoneToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[
 }
 
 function laneToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[]>): SpecFlow {
+  // Any leaf in a lane is one of its steps (a card dropped onto a lane joins the flow).
   const steps = [...(children.get(node.id) ?? [])]
-    .filter((child) => child.role === "step" || !child.role)
+    .filter((child) => !child.container)
     .sort(node.content?.vertical ? byYThenX : byXThenY)
     .map((child) => stepToSpec(child, node.tone));
   const flow: SpecFlow = {
@@ -209,7 +214,9 @@ function edgesToConnectors(edges: DiagramEdge[], byId: Map<string, DiagramNode>)
       kind: edge.kind === "call" ? "call" : "flow",
     };
     if (edge.label) connector.label = edge.label;
-    if (edge.tone) connector.tone = edge.tone;
+    // Only a colour that differs from the default: recolouring an item then carries to its connectors.
+    const fallback = edge.kind === "call" ? (to.tone ?? from.tone) : from.tone;
+    if (edge.tone && edge.tone !== fallback) connector.tone = edge.tone;
     out.push(connector);
   }
   return out;

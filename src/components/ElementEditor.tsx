@@ -178,22 +178,43 @@ const DETAILS_LABEL: Record<string, string> = {
 /** Detail text and colour of a composed item. Keyed by node id, so a draft never lands on another item. */
 function ComposedFields({ node, onApply }: { node: DiagramNode; onApply: ElementEditorProps["onApply"] }) {
   const saved = detailsOf(node);
-  const [value, setValue] = useState(saved);
+  // `base` is the saved text the draft started from: when undo, redo or an AI edit changes the
+  // text under an unedited field, the field follows; an edit in progress is kept.
+  const [draft, setDraft] = useState({ base: saved, value: saved });
+  if (draft.base !== saved && draft.value === draft.base) setDraft({ base: saved, value: saved });
+  const pending = useRef({ id: node.id, value: draft.value, dirty: false, onApply });
+  useEffect(() => {
+    pending.current = { id: node.id, value: draft.value, dirty: draft.value !== saved, onApply };
+  });
+  // Clicking another item unmounts this field before blur fires: save what was typed.
+  useEffect(
+    () => () => {
+      const { id, value, dirty, onApply: apply } = pending.current;
+      if (dirty) apply((m) => setDetails(m, id, value), { coalesceKey: `details:${id}` });
+    },
+    [],
+  );
   const commit = () => {
-    if (value !== saved) onApply((m) => setDetails(m, node.id, value), { coalesceKey: `details:${node.id}` });
+    if (draft.value === saved) return;
+    onApply((m) => setDetails(m, node.id, draft.value), { coalesceKey: `details:${node.id}` });
+    pending.current = { ...pending.current, dirty: false };
+    setDraft((d) => ({ base: d.value, value: d.value }));
   };
   const multiline = node.role === "card" || node.role === "step";
   return (
     <div className="mt-2 space-y-2">
       <textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
+        value={draft.value}
+        onChange={(e) => {
+          const value = e.target.value;
+          setDraft((d) => ({ ...d, value }));
+        }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
-            setValue(saved);
+            setDraft({ base: saved, value: saved });
           } else if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             e.currentTarget.blur();
