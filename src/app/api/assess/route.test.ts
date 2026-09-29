@@ -44,6 +44,20 @@ describe("POST /api/assess", () => {
     expect(call.prompt).toContain("Current diagram spec (JSON)");
   });
 
+  it("adds architecture assessment guidance only for architecture", async () => {
+    await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x", d2Code: "{}" }));
+    expect(llm.lastCall().system).not.toContain("reference-architecture diagram");
+
+    await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x", d2Code: "{}", format: "composition" }));
+    expect(llm.lastCall().system).not.toContain("reference-architecture diagram");
+
+    await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x", d2Code: "{}", format: "architecture" }));
+    const call = llm.lastCall();
+    expect(call.system).toContain("reference-architecture diagram");
+    expect(call.system).toContain("invented facts");
+    expect(call.prompt).toContain("Current diagram spec (JSON)");
+  });
+
   it("recomputes pass server-side from the score", async () => {
     llm.text = JSON.stringify({ ...VALID_ASSESSMENT, score: 8, pass: false });
     expect((await (await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x" }))).json()).assessment).toMatchObject({ score: 8, pass: true });

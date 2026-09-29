@@ -19,7 +19,7 @@ const turn = z.object({
   content: z.string().max(20_000),
 });
 
-const diagramFormat = z.enum(["d2", "composition"]).optional().default("d2");
+const diagramFormat = z.enum(["d2", "composition", "architecture"]).optional().default("d2");
 
 /** Anything JSON-ish, capped by serialized size. */
 const boundedJson = z.unknown().refine((v) => v === undefined || JSON.stringify(v).length <= 100_000, "Payload too large");
