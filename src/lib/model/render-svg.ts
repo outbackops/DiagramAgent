@@ -1,5 +1,6 @@
 import { D2_THEME_0 } from "./d2-theme";
 import { longestSegmentMidpoint, unionBoxes } from "./geometry";
+import { diagramKind } from "./kind";
 import { indexModel, isGroup } from "./query";
 import { architectureBounds, renderArchitectureSvg } from "./render-architecture";
 import { composedBounds, renderComposedSvg } from "./render-composed";
@@ -24,8 +25,9 @@ const DEFAULT_FONT = "#0A0F25";
 const LABEL_PAD = 8;
 
 export function modelBounds(model: DiagramModel): Box {
-  if (model.kind === "architecture") return architectureBounds(model);
-  if (model.composed) return composedBounds(model);
+  const kind = diagramKind(model);
+  if (kind === "architecture") return architectureBounds(model);
+  if (kind === "poster") return composedBounds(model);
   const boxes: Box[] = [];
   const index = indexModel(model);
   for (const node of model.nodes) {
@@ -43,8 +45,9 @@ export function modelBounds(model: DiagramModel): Box {
 }
 
 export function renderModelSvg(model: DiagramModel, options: RenderModelSvgOptions = {}): string {
-  if (model.kind === "architecture") return renderArchitectureSvg(model, options);
-  if (model.composed) return renderComposedSvg(model, options);
+  const kind = diagramKind(model);
+  if (kind === "architecture") return renderArchitectureSvg(model, options);
+  if (kind === "poster") return renderComposedSvg(model, options);
   const padding = options.padding ?? 40;
   const background = options.background === undefined ? "#ffffff" : options.background;
   const idPrefix = sanitizeId(options.idPrefix ?? "da");

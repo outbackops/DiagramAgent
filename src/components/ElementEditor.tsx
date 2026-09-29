@@ -5,6 +5,7 @@ import { ArrowRight, Box, ImageIcon, Link2, Trash2, X } from "lucide-react";
 import { canTone, detailsOf, hasDetails, setDetails, setTone } from "@/lib/compose/edit";
 import { TONE_COLORS } from "@/lib/compose/theme";
 import { TONES, type DiagramModel, type DiagramNode } from "@/lib/model/types";
+import { isEngineLaidOut } from "@/lib/model/kind";
 import { deleteItems, renameItem, setIcon } from "@/lib/model/ops";
 import { indexModel } from "@/lib/model/query";
 import { MODEL_LIMITS } from "@/lib/model/validate";
@@ -158,7 +159,7 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
       {selectedNode && hasDetails(selectedNode) && <ComposedFields key={selectedNode.id} node={selectedNode} onApply={onApply} />}
       {selectedNode && (
         <p className="mt-2 text-[11px] text-zinc-400">
-          {model.composed ? "Tip: moved items snap back into the layout with Tidy up." : "Tip: drag the selected node onto another container to move it."}
+          {isEngineLaidOut(model) ? "Tip: moved items snap back into the layout with Tidy up." : "Tip: drag the selected node onto another container to move it."}
         </p>
       )}
       {selectedEdge && <div className="mt-2"><Button variant="ghost" size="xs" onClick={() => onApply((m) => deleteItems(m, [selectedEdge.id]))}>Delete connection</Button></div>}

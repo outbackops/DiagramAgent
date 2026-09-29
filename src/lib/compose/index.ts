@@ -1,3 +1,4 @@
+import { diagramKind } from "@/lib/model/kind";
 import type { DiagramModel } from "@/lib/model/types";
 import { modelToSpec } from "./from-model";
 import { layoutSpec, type LayoutOptions, type LayoutReport } from "./layout";
@@ -31,7 +32,7 @@ export function composeText(text: string, options?: LayoutOptions): ComposeResul
 
 /** Page width of a composed model (its header band spans the page). */
 export function pageWidthOf(model: DiagramModel | null | undefined): number | undefined {
-  if (!model?.composed) return undefined;
+  if (!model || diagramKind(model) !== "poster") return undefined;
   return model.nodes.find((n) => n.role === "header")?.box.w ?? Math.max(0, ...model.nodes.map((n) => n.box.x + n.box.w)) + 40;
 }
 

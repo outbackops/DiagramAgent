@@ -136,6 +136,17 @@ describe("POST /api/render", () => {
     expect(quality.scoreDiagram).not.toHaveBeenCalled();
   });
 
+  it("uses the architecture scorer for architecture model requests", async () => {
+    const { composeArchitecture } = await import("@/lib/arch");
+    const { model } = await composeArchitecture({ title: "T", items: [{ id: "web", name: "Web" }, { id: "db", name: "Database" }], connections: [{ from: "web", to: "db", label: "TDS" }] });
+    const res = await POST(makeJsonRequest({ model: JSON.parse(JSON.stringify(model)) }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.svg).toContain('data-id="web"');
+    expect(body.quality.checks.map((item: { id: string }) => item.id)).toContain("connector_through_component");
+    expect(quality.scoreDiagram).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid model", async () => {
     const res = await POST(makeJsonRequest({ model: { version: 1, nodes: [{ id: "x" }], edges: [] } }));
     expect(res.status).toBe(400);

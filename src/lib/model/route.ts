@@ -471,7 +471,8 @@ function endpointAndDescendants(index: ReturnType<typeof indexModel>, id: string
 }
 
 export function routeModelEdges(model: DiagramModel, options: { edgeIds?: string[]; all?: boolean; fallbackOnly?: boolean; maxExpansions?: number; totalExpansions?: number } = {}): DiagramModel {
-  const selected = new Set(options.edgeIds ?? model.edges.filter((e) => options.all || e.route.length === 0).map((e) => e.id));
+  // Hidden links (implied by a shared-services band) are never drawn, so never routed.
+  const selected = new Set((options.edgeIds ?? model.edges.filter((e) => options.all || e.route.length === 0).map((e) => e.id)).filter((id) => !model.edges.find((e) => e.id === id)?.hidden));
   if (selected.size === 0) return model;
   const budget = { remaining: options.totalExpansions ?? DEFAULT_TOTAL_EXPANSIONS };
   const index = indexModel(model);
