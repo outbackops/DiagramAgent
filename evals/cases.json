@@ -68,7 +68,7 @@
       "boundaries": [["account", "aws cloud"], ["region"], ["vpc"], ["availability zone", "az"], ["public"], ["private"]],
       "flows": [
         [["users", "user", "internet", "client", "customer"], ["cloudfront", "route 53"]],
-        [["cloudfront"], ["alb", "application load balancer", "waf"]],
+        [["cloudfront"], ["alb", "application load balancer", "waf", "igw", "internet gateway"]],
         [["alb", "application load balancer"], ["ec2", "auto scaling"]],
         [["ec2", "auto scaling"], ["rds"]],
         [["ec2", "auto scaling"], ["redis", "elasticache"]]

@@ -86,18 +86,18 @@ Connections are `{ "from": "id", "to": "id", "meaning": "...", "label": "protoco
 
 ## Step sequences
 
-Use `sequences` for inbound and outbound flows. The first sequence uses circle badges; the second uses square badges. Attach a connection to a step with `step: "in.2"`, `step: 2`, or `step: { "sequence": "out", "number": 1 }`. Keep the workflow list short and verb-led:
+Use `sequences` for inbound and outbound flows. The first sequence uses numbered circle badges; the second uses lettered square badges (A, B, C…), so the two never show the same mark. Attach a connection to a step with `step: "in.2"`, `step: 2`, or `step: { "sequence": "out", "number": 1 }`. Every listed step must be on a connection: the normaliser warns about a step no connection carries, because it would have no badge on the diagram. Keep the workflow list short and verb-led:
 
 - inbound: user/DNS/edge to workload and data
 - outbound: workload to queue, partner API, monitoring or egress path
 
 ## Overlays
 
-Use `overlays` when a boundary spans members that live in different containment boxes, such as an AWS Auto Scaling group across zones or a security group across subnets. If an overlay cannot be drawn cleanly, the renderer warns and tags members instead.
+Use `overlays` when a boundary spans members that live in different containment boxes, such as an AWS Auto Scaling group across zones or a security group across subnets. If an overlay cannot be drawn cleanly, the renderer warns and tags members instead, with a standard abbreviation (an "EC2 Auto Scaling group" becomes ASG).
 
 ## Trust policy and assumptions
 
-Never present invented facts as known. If the prompt does not provide CIDRs, regions, tiers, counts, protocols or redundancy, either omit them or propose defaults only for a new design. Every proposed default belongs in `assumptions`. Do not mix observed facts and guesses in a `detail` or `facts` string.
+Never present invented facts as known. If the prompt does not provide CIDRs, regions, tiers, counts, protocols or redundancy, either omit them or propose defaults only for a new design. Every proposed default belongs in `assumptions`, including ports (8080), tiers or types ("Standard", "Premium"), counts, versions and model names, not only address ranges. Do not mix observed facts and guesses in a `detail` or `facts` string. The eval harness checks this: a concrete fact in a detail, facts line or label must come from the request or an assumption. An address inside a range an assumption declares counts as grounded, as does a port an assumption states.
 
 ## Views
 
@@ -135,7 +135,7 @@ v1 support envelope:
 3. Use one level of detail. Do not mix a whole estate and one subnet's internals unless that is the story.
 4. Put identity, monitoring, DNS, secrets and DevOps in a `shared` services band.
 5. Use connection labels for protocol/port or link purpose.
-6. Prefer provider icon keys when known; otherwise use a generic icon and a precise label.
+6. Prefer service icon keys when known; otherwise leave the icon out and use a precise label (the component is drawn as a tile with its initials). Never put a provider's logo (`azure`, `aws`, `gcp`) on a specific service: the normaliser swaps in the service's own icon when its name identifies one.
 7. Keep assumptions explicit and short.
 
 ## Rendering with the CLI

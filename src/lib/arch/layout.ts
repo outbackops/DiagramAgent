@@ -757,13 +757,21 @@ function placeLabels(plan: Plan, geo: Geo): void {
       .map((p, i) => ({ a: e.points[i], b: p, len: Math.abs(p.x - e.points[i].x) + Math.abs(p.y - e.points[i].y) }))
       .sort((s, t) => t.len - s.len);
     for (const { a, b, len } of segments) {
-      if (len < 24) continue;
-      for (const t of [0.5, 0.3, 0.7, 0.15, 0.85, 0.4, 0.6, 0.25, 0.75]) {
+      // A short link between neighbours still gets its midpoint (a label can sit beside it).
+      const fractions = len < 24 ? [0.5] : [0.5, 0.3, 0.7, 0.15, 0.85, 0.4, 0.6, 0.25, 0.75];
+      for (const t of fractions) {
         const x = a.x + (b.x - a.x) * t;
         const y = a.y + (b.y - a.y) * t;
-        if (Math.abs(a.y - b.y) < 1) options.push({ x: x - w / 2, y: y - h / 2, w, h }, { x: x - w / 2, y: y - h - 3, w, h }, { x: x - w / 2, y: y + 3, w, h }, { x: x - w / 2, y: y - h - 14, w, h }, { x: x - w / 2, y: y + 14, w, h });
-        else options.push({ x: x + 4, y: y - h / 2, w, h }, { x: x - w - 4, y: y - h / 2, w, h }, { x: x - w / 2, y: y - h / 2, w, h }, { x: x + 16, y: y - h / 2, w, h }, { x: x - w - 16, y: y - h / 2, w, h });
+        if (Math.abs(a.y - b.y) < 1) options.push({ x: x - w / 2, y: y - h / 2, w, h }, { x: x - w / 2, y: y - h - 3, w, h }, { x: x - w / 2, y: y + 3, w, h }, { x: x - w / 2, y: y - h - 14, w, h }, { x: x - w / 2, y: y + 14, w, h }, { x: x - w / 2, y: y - h - 28, w, h }, { x: x - w / 2, y: y + 28, w, h });
+        else options.push({ x: x + 4, y: y - h / 2, w, h }, { x: x - w - 4, y: y - h / 2, w, h }, { x: x - w / 2, y: y - h / 2, w, h }, { x: x + 16, y: y - h / 2, w, h }, { x: x - w - 16, y: y - h / 2, w, h }, { x: x + 32, y: y - h / 2, w, h }, { x: x - w - 32, y: y - h / 2, w, h });
       }
+    }
+    // Last resort before overlapping: clear of the cards beside a short link (above or below the row).
+    for (const { a, b } of segments.slice(0, 2)) {
+      const x = (a.x + b.x) / 2;
+      const y = (a.y + b.y) / 2;
+      if (Math.abs(a.y - b.y) < 1) for (const d of [44, 60, 76]) options.push({ x: x - w / 2, y: y - h - d, w, h }, { x: x - w / 2, y: y + d, w, h });
+      else for (const d of [48, 72]) options.push({ x: x + d, y: y - h / 2, w, h }, { x: x - w - d, y: y - h / 2, w, h });
     }
     // Crowded routes: the spot that overlaps least.
     const cost = (b: Box) =>
