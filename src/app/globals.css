@@ -77,16 +77,6 @@ body {
   border-radius: 9999px;
 }
 
-/* Fit the rendered D2 SVG inside the canvas (letterboxed, aspect preserved). */
-.diagram-paper > svg {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  /* The diagram's own white background reads as a sheet of paper. */
-  filter: drop-shadow(0 1px 2px rgba(24, 24, 27, 0.08)) drop-shadow(0 8px 24px rgba(24, 24, 27, 0.06));
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -96,7 +86,7 @@ body {
   }
 }
 
-/* The editable canvas letterboxes the model's SVG the same way. */
+/* Fit the diagram inside the canvas (letterboxed, aspect preserved); its white background reads as a sheet of paper. */
 .model-canvas-host > svg {
   display: block;
   width: 100% !important;

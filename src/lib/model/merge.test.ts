@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mergeStable, placeNear } from "./merge";
-import { boxesOverlap } from "./geometry";
+import { carryContainers, mergeStable, placeNear } from "./merge";
+import { boxesOverlap, containsBox } from "./geometry";
 import { edgeId, indexModel } from "./query";
 import type { DiagramEdge, DiagramModel, DiagramNode } from "./types";
 
@@ -64,6 +64,49 @@ describe("stable merge", () => {
     expect(cache && b ? boxesOverlap(cache.box, b.box) : true).toBe(false);
   });
 
+  it("places a new child in a full group without overlapping siblings and grows the group", () => {
+    const prev: DiagramModel = {
+      version: 1,
+      nodes: [node("G", null, 0, 0, 380, 180, true), node("G.A", "G", 24, 48, 140, 60), node("G.B", "G", 214, 48, 140, 60)],
+      edges: [],
+    };
+    const next: DiagramModel = {
+      version: 1,
+      nodes: [...prev.nodes, node("G.C", "G", 24, 48, 140, 60)],
+      edges: [edge("G.A", "G.C", [], edgeId("G.A", "G.C", 0))],
+    };
+    const result = mergeStable(prev, next);
+    const index = indexModel(result.model);
+    const c = index.byId.get("G.C");
+    const siblings = result.model.nodes.filter((item) => item.parent === "G" && item.id !== "G.C");
+    expect(c?.box).not.toEqual({ x: 24, y: 48, w: 140, h: 60 });
+    expect(siblings.every((sibling) => c && !boxesOverlap(c.box, sibling.box))).toBe(true);
+    expect(index.byId.get("G")?.box.h).toBeGreaterThan(180);
+  });
+
+  it("does not place a new child beside a connected node in another group", () => {
+    const prev: DiagramModel = {
+      version: 1,
+      nodes: [
+        node("web", null, 0, 0, 300, 200, true),
+        node("web.ui", "web", 40, 70, 80, 50),
+        node("data", null, 400, 0, 300, 200, true),
+        node("data.db", "data", 520, 70, 80, 50),
+      ],
+      edges: [],
+    };
+    const next: DiagramModel = {
+      version: 1,
+      nodes: [...prev.nodes, node("web.cache", "web", 0, 0, 80, 50)],
+      edges: [edge("web.cache", "data.db", [], edgeId("web.cache", "data.db", 0))],
+    };
+    const result = mergeStable(prev, next);
+    const index = indexModel(result.model);
+    const cache = index.byId.get("web.cache");
+    expect(cache?.box.x).toBeLessThan(400);
+    expect(index.byId.get("data")?.box).toEqual({ x: 400, y: 0, w: 300, h: 200 });
+  });
+
   it("keeps an existing node's exact box when a new sibling is added next to it", () => {
     const prev: DiagramModel = { version: 1, nodes: [node("g", null, 0, 0, 260, 180, true), node("g.a", "g", 40, 70)], edges: [] };
     const next: DiagramModel = { version: 1, nodes: [node("g", null, 0, 0, 260, 180, true), node("g.a", "g", 900, 900), node("g.b", "g", 0, 0)], edges: [edge("g.a", "g.b", [], edgeId("g.a", "g.b", 0))] };
@@ -103,8 +146,42 @@ describe("stable merge", () => {
     const index = indexModel(result.model);
     expect(result.regrouped).toEqual(["newGroup.b"]);
     expect(result.added).toContain("newGroup");
-    expect(index.byId.get("newGroup")?.box.w).toBeGreaterThanOrEqual(124);
-    expect(index.byId.get("newGroup")?.box.h).toBeGreaterThanOrEqual(124);
+    const group = index.byId.get("newGroup");
+    const child = index.byId.get("newGroup.b");
+    expect(group && child ? containsBox(group.box, child.box) : false).toBe(true);
+  });
+
+  it("carries empty containers across imported next models", () => {
+    const prev: DiagramModel = { version: 1, nodes: [node("empty", null, 0, 0, 200, 140, true)], edges: [] };
+    const next: DiagramModel = { version: 1, nodes: [node("empty", null, 0, 0, 200, 140, false)], edges: [] };
+    expect(carryContainers(prev, next).nodes[0].container).toBe(true);
+    expect(mergeStable(prev, next).model.nodes[0].container).toBe(true);
+  });
+
+  it("keeps prior boxes stable across consecutive additions to a full group", () => {
+    let model: DiagramModel = {
+      version: 1,
+      nodes: [node("G", null, 0, 0, 380, 180, true), node("G.A", "G", 24, 48, 140, 60), node("G.B", "G", 214, 48, 140, 60)],
+      edges: [],
+    };
+    const additions = ["C", "D", "E"];
+    for (const name of additions) {
+      const before = new Map(model.nodes.map((item) => [item.id, item.box]));
+      const next: DiagramModel = {
+        version: 1,
+        nodes: [...model.nodes, node(`G.${name}`, "G", 24, 48, 140, 60)],
+        edges: [...model.edges, edge("G.A", `G.${name}`, [], edgeId("G.A", `G.${name}`, 0))],
+      };
+      model = mergeStable(model, next).model;
+      for (const item of model.nodes) {
+        if (!before.has(item.id) || item.id === "G") continue;
+        expect(item.box, `${name} changed ${item.id}`).toEqual(before.get(item.id));
+      }
+      const leaves = model.nodes.filter((item) => item.parent === "G" && !item.container);
+      for (let i = 0; i < leaves.length; i++) {
+        for (let j = i + 1; j < leaves.length; j++) expect(boxesOverlap(leaves[i].box, leaves[j].box), `${leaves[i].id}/${leaves[j].id}`).toBe(false);
+      }
+    }
   });
 
   it("clears routes for new edges while keeping safe existing routes", () => {

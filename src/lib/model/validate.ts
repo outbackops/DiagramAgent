@@ -12,7 +12,7 @@ export const MODEL_LIMITS = {
   edges: 4000,
   routePoints: 400,
   idLength: 500,
-  labelLength: 1000,
+  labelLength: 4000,
   iconLength: 300_000,
   coordinate: 1_000_000,
 };
@@ -21,6 +21,7 @@ const ARROWHEADS: readonly Arrowhead[] = [
   "none",
   "arrow",
   "triangle",
+  "unfilled-triangle",
   "diamond",
   "filled-diamond",
   "circle",
@@ -104,8 +105,8 @@ function nodeStyle(v: unknown, where: string): NodeStyle {
   if (!isObject(v)) fail(`${where} must be an object`);
   const s = v as Record<string, unknown>;
   return compact({
-    fill: optStr(s.fill, `${where}.fill`, 64),
-    stroke: optStr(s.stroke, `${where}.stroke`, 64),
+    fill: optStr(s.fill, `${where}.fill`, 256),
+    stroke: optStr(s.stroke, `${where}.stroke`, 256),
     strokeWidth: optNum(s.strokeWidth, `${where}.strokeWidth`, { min: 0, max: 100 }),
     strokeDash: optNum(s.strokeDash, `${where}.strokeDash`, { min: 0, max: 100 }),
     borderRadius: optNum(s.borderRadius, `${where}.borderRadius`, { min: 0, max: 1000 }),
@@ -114,7 +115,7 @@ function nodeStyle(v: unknown, where: string): NodeStyle {
     multiple: optBool(s.multiple, `${where}.multiple`),
     doubleBorder: optBool(s.doubleBorder, `${where}.doubleBorder`),
     fontSize: optNum(s.fontSize, `${where}.fontSize`, { min: 1, max: 400 }),
-    fontColor: optStr(s.fontColor, `${where}.fontColor`, 64),
+    fontColor: optStr(s.fontColor, `${where}.fontColor`, 256),
     bold: optBool(s.bold, `${where}.bold`),
     italic: optBool(s.italic, `${where}.italic`),
     underline: optBool(s.underline, `${where}.underline`),
@@ -126,14 +127,14 @@ function edgeStyle(v: unknown, where: string): EdgeStyle {
   if (!isObject(v)) fail(`${where} must be an object`);
   const s = v as Record<string, unknown>;
   return compact({
-    stroke: optStr(s.stroke, `${where}.stroke`, 64),
+    stroke: optStr(s.stroke, `${where}.stroke`, 256),
     strokeWidth: optNum(s.strokeWidth, `${where}.strokeWidth`, { min: 0, max: 100 }),
     strokeDash: optNum(s.strokeDash, `${where}.strokeDash`, { min: 0, max: 100 }),
     opacity: optNum(s.opacity, `${where}.opacity`, { min: 0, max: 1 }),
     borderRadius: optNum(s.borderRadius, `${where}.borderRadius`, { min: 0, max: 1000 }),
     animated: optBool(s.animated, `${where}.animated`),
     fontSize: optNum(s.fontSize, `${where}.fontSize`, { min: 1, max: 400 }),
-    fontColor: optStr(s.fontColor, `${where}.fontColor`, 64),
+    fontColor: optStr(s.fontColor, `${where}.fontColor`, 256),
     bold: optBool(s.bold, `${where}.bold`),
     italic: optBool(s.italic, `${where}.italic`),
   });
@@ -228,20 +229,11 @@ export function validateModel(input: unknown): ValidationResult {
       if (!ids.has(e.from) || !ids.has(e.to)) fail(`edge "${e.id}" references a missing node`);
     }
 
-    let classDefs: Record<string, string> | undefined;
-    if (m.classDefs !== undefined) {
-      if (!isObject(m.classDefs) || Object.keys(m.classDefs).length > 200) fail("classDefs must be a small map");
-      classDefs = Object.fromEntries(
-        Object.entries(m.classDefs as Record<string, unknown>).map(([k, body]) => [str(k, "classDefs key", 200), str(body, `classDefs.${k}`, 20_000)]),
-      );
-    }
-
     const model: DiagramModel = compact({
       version: 1 as const,
       layout: layoutHints(m.layout, "layout"),
       nodes,
       edges,
-      classDefs,
       handArranged: optBool(m.handArranged, "handArranged"),
     });
     return { ok: true, model };

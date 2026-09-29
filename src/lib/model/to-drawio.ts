@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { bottom, right, unionBoxes } from "./geometry";
+import { iconBox } from "./render-svg";
 import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point } from "./types";
 
 interface DrawioOptions {
@@ -114,11 +115,7 @@ function nodeShape(shape: string): string | null {
   }
 }
 
-function canUseLabelIcon(node: DiagramNode): boolean {
-  return node.shape === "rectangle" || node.shape === "square" || node.shape === "";
-}
-
-function buildNodeStyle(node: DiagramNode, icon: string | undefined): string {
+function buildNodeStyle(node: DiagramNode): string {
   const style = node.style;
   if (node.container) {
     return styleText([
@@ -145,7 +142,6 @@ function buildNodeStyle(node: DiagramNode, icon: string | undefined): string {
   }
 
   const shape = nodeShape(node.shape);
-  const labelIcon = icon && canUseLabelIcon(node);
   return styleText([
     shape ?? "rounded=1",
     "whiteSpace=wrap",
@@ -161,23 +157,14 @@ function buildNodeStyle(node: DiagramNode, icon: string | undefined): string {
     `fontStyle=${fontStyle(style)}`,
     style.opacity !== undefined ? `opacity=${Math.round(style.opacity * 100)}` : null,
     style.shadow ? "shadow=1" : null,
-    labelIcon ? "shape=label" : null,
-    labelIcon ? `image=${icon}` : null,
-    labelIcon ? "imageWidth=24" : null,
-    labelIcon ? "imageHeight=24" : null,
-    labelIcon ? "imageAlign=center" : null,
-    labelIcon ? "imageVerticalAlign=top" : null,
-    labelIcon ? "spacingTop=28" : null,
-    labelIcon ? "verticalAlign=bottom" : "verticalAlign=middle",
+    "verticalAlign=middle",
     "align=center",
   ]);
 }
 
 function iconGeometry(node: DiagramNode): { x: number; y: number; w: number; h: number } {
-  const size = Math.min(128, Math.max(24, Math.round(Math.min(node.box.w, node.box.h) / 2)));
-  const x = Math.round((node.box.w - size) / 2);
-  const y = node.iconPosition === "INSIDE_MIDDLE_CENTER" ? Math.round((node.box.h - size) / 2) : Math.min(8, Math.max(0, node.box.h - size));
-  return { x, y, w: size, h: size };
+  const box = iconBox(node);
+  return { x: box.x - node.box.x, y: box.y - node.box.y, w: box.w, h: box.h };
 }
 
 function imageCellXml(id: string, parentId: string, dataUri: string, node: DiagramNode): string {
@@ -245,11 +232,11 @@ export async function modelToDrawio(model: DiagramModel, options: DrawioOptions 
     const parent = node.parent ? nodeIds.get(node.parent) ?? ROOT_CELL_ID : ROOT_CELL_ID;
     const geometry = geometryFor(node, byId);
     const icon = node.icon ? iconMap.get(node.icon) : undefined;
-    const style = buildNodeStyle(node, icon);
+    const style = buildNodeStyle(node);
     const cells = [
       `        <mxCell id="${id}" value="${escapeXml(node.label)}" style="${escapeXml(style)}" vertex="1" parent="${parent}">\n          <mxGeometry x="${geometry.x}" y="${geometry.y}" width="${geometry.w}" height="${geometry.h}" as="geometry"/>\n        </mxCell>`,
     ];
-    if (icon && !node.container && !canUseLabelIcon(node)) cells.push(imageCellXml(`${id}-icon`, id, icon, node));
+    if (icon) cells.push(imageCellXml(`${id}-icon`, id, icon, node));
     return cells;
   });
 

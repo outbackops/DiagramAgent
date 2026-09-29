@@ -23,7 +23,9 @@ vi.mock("@terrastruct/d2", () => ({
         throw new Error(JSON.stringify([{ errmsg: "syntax error at line 1" }]));
       }
       const icon = /icon: (\S+)/.exec(code)?.[1];
-      const shapes = [shape("a", 0, icon), shape("b", 200)];
+      const shapes = code.includes("bad-import")
+        ? [shape("a", 0, icon), { ...shape("b", Number.NaN), label: "b".repeat(4100), strokeWidth: 500, borderRadius: 5000, fontSize: 900, opacity: 2 }]
+        : [shape("a", 0, icon), shape("b", 200)];
       const connections = code.includes("->")
         ? [{ id: "(a -> b)[0]", src: "a", dst: "b", srcArrow: "none", dstArrow: "triangle", label: "", strokeDash: 0, route: [{ x: 100, y: 30 }, { x: 200, y: 30 }] }]
         : [];
@@ -86,6 +88,15 @@ describe("POST /api/render", () => {
     const body = await (await POST(makeJsonRequest({ code: "a: { icon: aws-ec2 }" }))).json();
     expect(body.model.nodes[0].icon).toBe("/icons/aws-ec2.svg");
     expect(body.svg).toContain('href="/icons/aws-ec2.svg"');
+  });
+
+  it("returns a validated imported model", async () => {
+    const res = await POST(makeJsonRequest({ code: "bad-import" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.model.nodes[1].label).toHaveLength(4000);
+    expect(body.model.nodes[1].style.borderRadius).toBe(1000);
+    expect(body.model.nodes[1].box.x).toBe(0);
   });
 
   it("renders and scores an edited model without compiling", async () => {

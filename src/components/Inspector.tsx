@@ -58,7 +58,7 @@ export default function Inspector({
   reviewEnabled: boolean;
   canApplyReview: boolean;
   onApplyReview: (assessment: ReviewAssessment) => void;
-  onImportD2(code: string): Promise<string[]>;
+  onImportD2(code: string, signal: AbortSignal): Promise<string[]>;
   importDisabled: boolean;
 }) {
   const [copied, setCopied] = useState(false);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addGroup, addNode, alignItems, connect, deleteItems, distributeItems, moveItems, renameItem, reparent, resizeGroup, setIcon } from "./ops";
+import { boxesOverlap } from "./geometry";
 import { edgeId, indexModel } from "./query";
 import type { DiagramEdge, DiagramModel, DiagramNode, NodeStyle } from "./types";
 
@@ -48,6 +49,33 @@ describe("model operations", () => {
     expect(model.nodes[0]?.box.x).toBe(0);
   });
 
+  it("a tiny leaf move changes only that leaf and ancestors", () => {
+    const model: DiagramModel = {
+      version: 1,
+      nodes: [
+        node("g", null, 0, 0, 240, 180, true),
+        node("g.a", "g", 40, 70),
+        node("g.b", "g", 140, 70),
+        node("other", null, 320, 0, 240, 180, true),
+        node("other.c", "other", 360, 70),
+      ],
+      edges: [],
+    };
+    const moved = moveItems(model, ["g.a"], 1, 0);
+    const changed = moved.nodes.filter((item, i) => JSON.stringify(item.box) !== JSON.stringify(model.nodes[i]?.box)).map((item) => item.id);
+    expect(changed).toEqual(["g.a"]);
+  });
+
+  it("moves one item among 1000 nodes quickly", () => {
+    const nodes: DiagramNode[] = [];
+    for (let i = 0; i < 1000; i++) nodes.push(node(`n${i}`, null, (i % 50) * 30, Math.floor(i / 50) * 30, 20, 20));
+    const started = performance.now();
+    const moved = moveItems({ version: 1, nodes, edges: [] }, ["n500"], 1, 0);
+    const elapsed = performance.now() - started;
+    expect(indexModel(moved).byId.get("n500")?.box.x).toBe(nodes[500].box.x + 1);
+    expect(elapsed).toBeLessThan(50);
+  });
+
   it("grows a group leftwards and shifts a left sibling group when a child moves past the left edge", () => {
     const model: DiagramModel = {
       version: 1,
@@ -62,13 +90,13 @@ describe("model operations", () => {
     expect((index.byId.get("left.child")?.box.x ?? 0)).toBe(-214);
   });
 
-  it("grows a group upwards when a child moves into the label headroom", () => {
+  it("grows a group upwards only when a child crosses the current top edge", () => {
     const model: DiagramModel = { version: 1, nodes: [node("grp", null, 0, 0, 200, 160, true), node("grp.a", "grp", 40, 70)], edges: [] };
-    const moved = moveItems(model, ["grp.a"], 0, -60);
+    const moved = moveItems(model, ["grp.a"], 0, -100);
     const index = indexModel(moved);
-    expect(index.byId.get("grp.a")?.box.y).toBe(10);
+    expect(index.byId.get("grp.a")?.box.y).toBe(-30);
     expect(index.byId.get("grp")?.box.y).toBeLessThan(0);
-    expect(index.byId.get("grp")?.box.y).toBe(10 - (20 * 1.3 + 24));
+    expect(index.byId.get("grp")?.box.y).toBe(-30 - 24);
   });
 
   it("grows every ancestor in a nested chain", () => {
@@ -150,6 +178,21 @@ describe("model operations", () => {
     expect(connected.id).toBe(`(${addedNode.id} -> Wrapper.top)[0]`);
     expect(connected.model.edges.at(-1)?.route).toEqual([]);
     expect(connect(model, "top", "top")).toEqual({ model, id: "" });
+  });
+
+  it("adds a node inside a full group without overlapping siblings and grows the group", () => {
+    const model: DiagramModel = {
+      version: 1,
+      nodes: [node("G", null, 0, 0, 380, 180, true), node("G.A", "G", 24, 48, 140, 60), node("G.B", "G", 214, 48, 140, 60)],
+      edges: [],
+    };
+    const { model: added, id } = addNode(model, { parent: "G", label: "C", near: "G.A" });
+    const index = indexModel(added);
+    const c = index.byId.get(id);
+    const siblings = added.nodes.filter((item) => item.parent === "G" && item.id !== id);
+    expect(c).toBeTruthy();
+    expect(siblings.every((sibling) => c && !boxesOverlap(c.box, sibling.box))).toBe(true);
+    expect(index.byId.get("G")?.box.h).toBeGreaterThan(180);
   });
 
   it("aligns and distributes three items", () => {

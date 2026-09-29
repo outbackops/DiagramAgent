@@ -4,6 +4,7 @@ import path from "node:path";
 import JSZip from "jszip";
 
 import { unionBoxes } from "./geometry";
+import { iconBox } from "./render-svg";
 import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 
 const PX_PER_IN = 96;
@@ -92,17 +93,10 @@ function shapeXml(node: DiagramNode, id: number, page: PageSpace): string {
   return `<Shape ID="${id}" NameU="${esc(node.id)}" Type="Shape">\n  <Cell N="PinX" V="${fmt(pinX)}"/>\n  <Cell N="PinY" V="${fmt(pinY)}"/>\n  <Cell N="Width" V="${fmt(w)}"/>\n  <Cell N="Height" V="${fmt(h)}"/>\n  <Cell N="LocPinX" V="${fmt(w / 2)}"/>\n  <Cell N="LocPinY" V="${fmt(h / 2)}"/>\n  <Cell N="Angle" V="0"/>\n  <Cell N="FillForegnd" V="${esc(fill)}"/>\n  <Cell N="FillPattern" V="${fill === "none" ? "0" : "1"}"/>\n  <Cell N="LineColor" V="${esc(stroke)}"/>\n  <Cell N="LineWeight" V="${fmt(lineWeight)}"/>\n  <Cell N="LinePattern" V="${linePattern}"/>\n  <Cell N="Rounding" V="${fmt(rounding)}"/>\n  <Cell N="VerticalAlign" V="${verticalAlign}"/>\n  <Section N="Character"><Row IX="0"><Cell N="Font" V="0"/><Cell N="Color" V="${esc(font)}"/><Cell N="Size" V="${fontSize}"/><Cell N="Style" V="${fontStyle}"/></Row></Section>\n  <Section N="Geometry" IX="0">\n    <Cell N="NoFill" V="${fill === "none" ? "1" : "0"}"/><Cell N="NoLine" V="0"/>\n    <Row T="RelMoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="2"><Cell N="X" V="1"/><Cell N="Y" V="0"/></Row>\n    <Row T="RelLineTo" IX="3"><Cell N="X" V="1"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>\n    <Row T="RelLineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>\n  </Section>\n  <Text>${esc(node.label)}</Text>\n</Shape>`;
 }
 
-function iconBoxInNode(node: DiagramNode): { x: number; y: number; size: number } {
-  const size = Math.min(128, Math.max(24, Math.round(Math.min(node.box.w, node.box.h) / 2)));
-  const x = node.box.x + Math.round((node.box.w - size) / 2);
-  const offsetY = node.iconPosition === "INSIDE_MIDDLE_CENTER" ? Math.round((node.box.h - size) / 2) : Math.min(8, Math.max(0, node.box.h - size));
-  return { x, y: node.box.y + offsetY, size };
-}
-
 function iconShapeXml(node: DiagramNode, id: number, page: PageSpace, dataUri: string): string {
-  const box = iconBoxInNode(node);
-  const w = inch(box.size);
-  const h = inch(box.size);
+  const box = iconBox(node);
+  const w = inch(box.w);
+  const h = inch(box.h);
   const x = PAGE_MARGIN_IN + inch(box.x - page.minX);
   const y = PAGE_MARGIN_IN + inch(box.y - page.minY);
   const pinX = x + w / 2;

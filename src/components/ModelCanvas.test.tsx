@@ -136,3 +136,71 @@ describe("ModelCanvas", () => {
     expect(onRequestRename).toHaveBeenCalledWith("api");
   });
 });
+
+describe("dragging nodes", () => {
+  const group = (id: string, x: number, y: number, w: number, h: number): DiagramNode => ({ id, parent: null, label: id, shape: "rectangle", box: { x, y, w, h }, style: {}, container: true });
+  const nested: DiagramModel = {
+    version: 1,
+    nodes: [group("vpc", 0, 0, 400, 300), group("dmz", 500, 0, 300, 300), { ...node("vpc.api", "vpc", 40, 80) }],
+    edges: [],
+  };
+
+  /** Pins the rendered SVG to a known on-screen box: `scale` screen px per model unit, no letterboxing. */
+  function pinGeometry(container: HTMLElement, scale: number) {
+    const svg = container.querySelector(".model-canvas-host svg") as SVGSVGElement;
+    const [vx, vy, vw, vh] = (svg.getAttribute("viewBox") ?? "").split(/\s+/).map(Number);
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, x: 0, y: 0, width: vw * scale, height: vh * scale, right: vw * scale, bottom: vh * scale, toJSON: () => ({}) }) as DOMRect;
+    return (mx: number, my: number) => ({ clientX: (mx - vx) * scale, clientY: (my - vy) * scale });
+  }
+
+  function drag(el: Element, from: { clientX: number; clientY: number }, to: { clientX: number; clientY: number }) {
+    fireEvent.pointerDown(el, { button: 0, buttons: 1, pointerId: 1, pointerType: "mouse", ...from });
+    fireEvent.pointerMove(el, { buttons: 1, pointerId: 1, pointerType: "mouse", clientX: (from.clientX + to.clientX) / 2, clientY: (from.clientY + to.clientY) / 2 });
+    fireEvent.pointerMove(el, { buttons: 1, pointerId: 1, pointerType: "mouse", ...to });
+    fireEvent.pointerUp(el, { button: 0, buttons: 0, pointerId: 1, pointerType: "mouse", ...to });
+  }
+
+  it("moving a node inside its own group keeps it in the group", () => {
+    const onApply = vi.fn();
+    const onSelectionChange = vi.fn();
+    const { container } = render(
+      <ModelCanvas model={nested} fitKey="f" selection={["vpc.api"]} onSelectionChange={onSelectionChange} onApply={onApply} />,
+    );
+    const at = pinGeometry(container, 1);
+    const api = container.querySelector('[data-id="vpc.api"]') as SVGGElement;
+    drag(api, at(80, 100), at(130, 140));
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const next = (onApply.mock.calls[0][0] as (m: DiagramModel) => DiagramModel)(nested);
+    const moved = next.nodes.find((n) => n.id === "vpc.api");
+    expect(moved?.parent).toBe("vpc");
+    expect(moved?.box.x).toBeCloseTo(90);
+    expect(moved?.box.y).toBeCloseTo(120);
+  });
+
+  it("dropping a node onto another group moves it there and selects its new id", () => {
+    const onApply = vi.fn();
+    const onSelectionChange = vi.fn();
+    const { container } = render(
+      <ModelCanvas model={nested} fitKey="f" selection={["vpc.api"]} onSelectionChange={onSelectionChange} onApply={onApply} />,
+    );
+    const at = pinGeometry(container, 1);
+    const api = container.querySelector('[data-id="vpc.api"]') as SVGGElement;
+    drag(api, at(80, 100), at(600, 150));
+    const next = (onApply.mock.calls[0][0] as (m: DiagramModel) => DiagramModel)(nested);
+    expect(next.nodes.find((n) => n.id === "dmz.api")?.parent).toBe("dmz");
+    expect(onSelectionChange).toHaveBeenLastCalledWith(["dmz.api"]);
+  });
+
+  it("drags follow the cursor when the diagram is scaled to fit", () => {
+    const onApply = vi.fn();
+    const { container } = render(<ModelCanvas model={nested} fitKey="f" selection={["vpc.api"]} onSelectionChange={vi.fn()} onApply={onApply} />);
+    const at = pinGeometry(container, 2);
+    const api = container.querySelector('[data-id="vpc.api"]') as SVGGElement;
+    const from = at(80, 100);
+    drag(api, from, { clientX: from.clientX + 100, clientY: from.clientY + 60 });
+    const next = (onApply.mock.calls[0][0] as (m: DiagramModel) => DiagramModel)(nested);
+    const moved = next.nodes.find((n) => n.id === "vpc.api");
+    expect(moved?.box.x).toBeCloseTo(90);
+    expect(moved?.box.y).toBeCloseTo(110);
+  });
+});

@@ -26,15 +26,12 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     return jsonError(err, "PNG export error");
   }
-  let svg = body?.svg;
-  if (body?.model !== undefined) {
-    const result = validateModel(body.model);
-    if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
-    svg = renderModelSvg(routeModelEdges(result.model));
-  }
-  if (typeof svg !== "string" || !svg) {
+  if (body?.model === undefined) {
     return NextResponse.json({ error: "A diagram is required" }, { status: 400 });
   }
+  const result = validateModel(body.model);
+  if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
+  const svg = renderModelSvg(routeModelEdges(result.model, { fallbackOnly: true }));
   if (svg.length > MAX_SVG_LENGTH) {
     return NextResponse.json({ error: "SVG is too large" }, { status: 413 });
   }

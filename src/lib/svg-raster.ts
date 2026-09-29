@@ -68,26 +68,8 @@ export interface RasterOptions {
   maxHeight?: number;
 }
 
-const SANS_STACK = `"Segoe UI", "Helvetica Neue", Arial, "DejaVu Sans", "Liberation Sans", sans-serif`;
-const MONO_STACK = `"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace`;
-
-/**
- * librsvg ignores D2's embedded @font-face fonts and falls back to whatever
- * it finds first (often a monospace face). Give each D2 font family an
- * explicit system fallback with the matching weight/style.
- */
-export function withFallbackFonts(svg: string): string {
-  return svg.replace(/font-family:\s*"(d2-[\w-]{1,120})";/g, (_whole, family: string) => {
-    const variant = /font-([a-z]+)/.exec(family)?.[1] ?? "";
-    const stack = variant.startsWith("mono") ? MONO_STACK : SANS_STACK;
-    const weight = variant === "bold" ? " font-weight: 700;" : variant === "semibold" ? " font-weight: 600;" : "";
-    const style = variant === "italic" ? " font-style: italic;" : "";
-    return `font-family: "${family}", ${stack};${weight}${style}`;
-  });
-}
-
 export async function svgToPng(svg: string, options: RasterOptions = {}): Promise<Buffer> {
-  const prepared = withFallbackFonts(await inlineVendoredIcons(svg));
+  const prepared = await inlineVendoredIcons(svg);
   let image = sharp(Buffer.from(prepared), { density: options.density ?? 150 });
   if (options.maxWidth || options.maxHeight) {
     image = image.resize({ width: options.maxWidth, height: options.maxHeight, fit: "inside", withoutEnlargement: true });

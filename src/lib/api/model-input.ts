@@ -19,7 +19,8 @@ export async function modelFromBody(
   if (body?.model !== undefined) {
     const result = validateModel(body.model);
     if (!result.ok) return { response: NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 }) };
-    return { model: routeModelEdges(result.model) };
+    // Client models arrive routed; anything missing gets a cheap line (no search on untrusted input).
+    return { model: routeModelEdges(result.model, { fallbackOnly: true }) };
   }
   const code = body?.d2Code;
   if (typeof code !== "string" || !code.trim()) {

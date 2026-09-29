@@ -44,8 +44,15 @@ function routeCrossesBoxes(route: { x: number; y: number }[], boxes: DiagramNode
   return false;
 }
 
-function sizeGroupsToChildren(model: DiagramModel): DiagramModel {
-  return growGroupsAndMakeRoom(model);
+export function carryContainers(prev: DiagramModel, next: DiagramModel): DiagramModel {
+  const prevContainers = new Set(prev.nodes.filter((node) => node.container).map((node) => node.id));
+  let changed = false;
+  const nodes = next.nodes.map((node) => {
+    if (node.container || !prevContainers.has(node.id)) return node;
+    changed = true;
+    return { ...node, container: true };
+  });
+  return changed ? { ...next, nodes } : next;
 }
 
 export function mergeStable(prev: DiagramModel, next: DiagramModel): MergeStableResult {
@@ -68,13 +75,13 @@ export function mergeStable(prev: DiagramModel, next: DiagramModel): MergeStable
     return node;
   });
 
-  let draft: DiagramModel = { ...next, nodes: stableNodes, handArranged: prev.handArranged };
+  let draft: DiagramModel = carryContainers(prev, { ...next, nodes: stableNodes, handArranged: prev.handArranged });
   for (const node of draft.nodes) {
     if (!added.includes(node.id) && !regrouped.includes(node.id)) continue;
     const anchors = edgeAnchors(next, node.id).filter((anchor) => parentStable(prev, indexModel(draft).byId.get(anchor) ?? { ...node, id: anchor }));
     draft = placeNear(draft, node.id, anchors);
   }
-  draft = sizeGroupsToChildren(draft);
+  draft = growGroupsAndMakeRoom(draft, [...added, ...regrouped]);
 
   const draftIndex = indexModel(draft);
   const movedOrAdded = draft.nodes.filter((node) => {

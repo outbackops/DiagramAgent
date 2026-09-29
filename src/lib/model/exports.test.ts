@@ -6,14 +6,17 @@ import path from "node:path";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 
+import { compileD2 } from "../d2-render";
+import { iconBox } from "./render-svg";
+import { modelFromCompiled } from "./from-d2";
 import { modelToDrawio } from "./to-drawio";
 import { modelToMermaid } from "./to-mermaid";
 import { modelToVsdx } from "./to-vsdx";
-import type { DiagramModel } from "./types";
+import type { Box, DiagramModel } from "./types";
 
 const PX_PER_IN = 96;
 const VSDX_MARGIN_IN = 0.5;
-const SESSION_EXPORT_DIR = "C:\\Users\\rajangda\\.copilot\\session-state\\978576d4-f88d-460d-b7b9-0c80158fc0b6\\files\\exports-check";
+const ICON_TOLERANCE_PX = 1;
 
 function testModel(): DiagramModel {
   return {
@@ -25,6 +28,7 @@ function testModel(): DiagramModel {
         parent: null,
         label: "Cloud & Platform",
         shape: "rectangle",
+        icon: "/icons/aws.svg",
         box: { x: 40, y: 30, w: 620, h: 360 },
         style: { fill: "#f5f7ff", stroke: "#4361ee", strokeWidth: 2, borderRadius: 10, fontColor: "#1d3557", bold: true, fontSize: 14 },
         container: true,
@@ -242,6 +246,13 @@ function absoluteCellBox(cell: Cell, cells: Map<string, Cell>): { x: number; y: 
   return { x, y, w: cell.w ?? 0, h: cell.h ?? 0 };
 }
 
+function expectBoxClose(actual: Box, expected: Box, tolerance = ICON_TOLERANCE_PX): void {
+  expect(Math.abs(actual.x - expected.x)).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(actual.y - expected.y)).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(actual.w - expected.w)).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(actual.h - expected.h)).toBeLessThanOrEqual(tolerance);
+}
+
 interface VShape {
   id: number;
   name: string;
@@ -273,12 +284,30 @@ function parseVShapes(pageXml: string): VShape[] {
   });
 }
 
+function modelBounds(model: DiagramModel): Box {
+  const minX = Math.min(...model.nodes.map((node) => node.box.x));
+  const minY = Math.min(...model.nodes.map((node) => node.box.y));
+  const maxX = Math.max(...model.nodes.map((node) => node.box.x + node.box.w));
+  const maxY = Math.max(...model.nodes.map((node) => node.box.y + node.box.h));
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+function expectedVisioBox(box: Box, bounds: Box): VShape {
+  const pageH = bounds.h / PX_PER_IN + VSDX_MARGIN_IN * 2;
+  return {
+    id: 0,
+    name: "",
+    pinX: VSDX_MARGIN_IN + (box.x - bounds.x) / PX_PER_IN + box.w / PX_PER_IN / 2,
+    pinY: pageH - (VSDX_MARGIN_IN + (box.y - bounds.y) / PX_PER_IN + box.h / PX_PER_IN / 2),
+    width: box.w / PX_PER_IN,
+    height: box.h / PX_PER_IN,
+  };
+}
+
 describe("model exports", () => {
   it("exports draw.io XML with model geometry, containers, icons, routes and escaping", async () => {
     const model = testModel();
     const xml = await modelToDrawio(model, { title: "Model <Export>" });
-    await fs.mkdir(SESSION_EXPORT_DIR, { recursive: true });
-    await fs.writeFile(path.join(SESSION_EXPORT_DIR, "model-export.drawio.xml"), xml, "utf8");
 
     expect(xml).toContain("Model &lt;Export&gt;");
     expect(xml).toContain("Cloud &amp; Platform");
@@ -325,13 +354,13 @@ describe("model exports", () => {
     expect(dbCell.style).toContain("shape=cylinder3");
     const dbIcon = cells.find((cell) => cell.parent === dbCell.id && cell.style.includes("shape=image"));
     expect(dbIcon).toBeDefined();
+    const cloudIcon = cells.find((cell) => cell.parent === byValue.get("Cloud &amp; Platform")!.id && cell.style.includes("shape=image"));
+    expect(cloudIcon).toBeDefined();
   });
 
   it("exports a valid VSDX package with node positions converted from px", async () => {
     const model = testModel();
     const buffer = await modelToVsdx(model);
-    await fs.mkdir(SESSION_EXPORT_DIR, { recursive: true });
-    await fs.writeFile(path.join(SESSION_EXPORT_DIR, "model-export.vsdx"), buffer);
 
     expect(buffer.slice(0, 2).toString("hex")).toBe("504b");
     const zip = await JSZip.loadAsync(buffer);
@@ -399,4 +428,48 @@ describe("model exports", () => {
     expect(mermaid).toContain("This is a very long label");
     expect(mermaid).toContain('EmptyLabel --> LongLabel');
   });
+
+  it(
+    "matches renderer icon boxes for every fixture in draw.io and VSDX exports",
+    async () => {
+      const fixtureDir = path.join(process.cwd(), "src", "test", "fixtures", "diagrams");
+      const fixtureFiles = (await fs.readdir(fixtureDir)).filter((file) => file.endsWith(".d2"));
+      let checkedGroupIconCount = 0;
+
+      for (const fixtureFile of fixtureFiles) {
+        const code = await fs.readFile(path.join(fixtureDir, fixtureFile), "utf8");
+        const { diagram } = await compileD2(code);
+        const { model } = modelFromCompiled(diagram, { code });
+        const iconNodes = model.nodes.filter((node) => node.icon?.startsWith("/icons/"));
+        const groupIconNodes = iconNodes.filter((node) => node.container);
+        expect(iconNodes.length, fixtureFile).toBeGreaterThan(0);
+        checkedGroupIconCount += groupIconNodes.length;
+
+        const drawioCells = parseCells(await modelToDrawio(model));
+        const drawioById = new Map(drawioCells.map((cell) => [cell.id, cell]));
+        for (const node of iconNodes) {
+          const nodeIndex = model.nodes.findIndex((candidate) => candidate.id === node.id);
+          const iconCell = drawioById.get(`node-${nodeIndex + 2}-icon`);
+          expect(iconCell, `${fixtureFile}:${node.id}`).toBeDefined();
+          expectBoxClose(absoluteCellBox(iconCell!, drawioById), iconBox(node));
+        }
+
+        const zip = await JSZip.loadAsync(await modelToVsdx(model));
+        const page = await zip.file("visio/pages/page1.xml")!.async("string");
+        const shapes = new Map(parseVShapes(page).map((shape) => [shape.name, shape]));
+        const bounds = modelBounds(model);
+        for (const node of iconNodes) {
+          const shape = shapes.get(`${node.id}.Icon`);
+          expect(shape, `${fixtureFile}:${node.id}`).toBeDefined();
+          const expected = expectedVisioBox(iconBox(node), bounds);
+          expect(Math.abs(shape!.pinX - expected.pinX)).toBeLessThanOrEqual(ICON_TOLERANCE_PX / PX_PER_IN);
+          expect(Math.abs(shape!.pinY - expected.pinY)).toBeLessThanOrEqual(ICON_TOLERANCE_PX / PX_PER_IN);
+          expect(Math.abs(shape!.width - expected.width)).toBeLessThanOrEqual(ICON_TOLERANCE_PX / PX_PER_IN);
+          expect(Math.abs(shape!.height - expected.height)).toBeLessThanOrEqual(ICON_TOLERANCE_PX / PX_PER_IN);
+        }
+      }
+      expect(checkedGroupIconCount).toBeGreaterThan(0);
+    },
+    180000
+  );
 });

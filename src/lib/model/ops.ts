@@ -4,6 +4,7 @@ import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle,
 
 const GROUP_PADDING = 24;
 const GROUP_GAP = 40;
+const PLACEMENT_GAP = 12;
 const DEFAULT_NODE_STYLE: NodeStyle = {
   fill: "#ffffff",
   stroke: "#757575",
@@ -98,14 +99,14 @@ function siblingNodes(model: DiagramModel, parent: string | null): DiagramNode[]
 function neededGroupBox(model: DiagramModel, group: DiagramNode): Box {
   const children = siblingNodes(model, group.id);
   if (children.length === 0) return group.box;
-  const minX = Math.min(...children.map((child) => child.box.x)) - GROUP_PADDING;
-  const minY = Math.min(...children.map((child) => child.box.y)) - topHeadroom(group);
-  const maxRight = Math.max(...children.map((child) => right(child.box))) + GROUP_PADDING;
-  const maxBottom = Math.max(...children.map((child) => bottom(child.box))) + GROUP_PADDING;
-  const x = Math.min(group.box.x, minX);
-  const y = Math.min(group.box.y, minY);
-  const groupRight = Math.max(right(group.box), maxRight);
-  const groupBottom = Math.max(bottom(group.box), maxBottom);
+  const minChildX = Math.min(...children.map((child) => child.box.x));
+  const minChildY = Math.min(...children.map((child) => child.box.y));
+  const maxChildRight = Math.max(...children.map((child) => right(child.box)));
+  const maxChildBottom = Math.max(...children.map((child) => bottom(child.box)));
+  const x = minChildX < group.box.x ? minChildX - GROUP_PADDING : group.box.x;
+  const y = minChildY < group.box.y ? minChildY - GROUP_PADDING : group.box.y;
+  const groupRight = maxChildRight > right(group.box) ? maxChildRight + GROUP_PADDING : right(group.box);
+  const groupBottom = maxChildBottom > bottom(group.box) ? maxChildBottom + GROUP_PADDING : bottom(group.box);
   return {
     x,
     y,
@@ -149,14 +150,26 @@ function shiftSiblingsForGrowth(model: DiagramModel, group: DiagramNode, oldBox:
   };
 }
 
-export function growGroupsAndMakeRoom(model: DiagramModel): DiagramModel {
+function groupIdsToCheck(model: DiagramModel, changedIds: Iterable<string>): Set<string> {
+  const index = indexModel(model);
+  const ids = new Set<string>();
+  for (const id of changedIds) {
+    if (isGroup(index, id)) ids.add(id);
+    for (const ancestor of ancestors(index, id)) ids.add(ancestor.id);
+  }
+  return ids;
+}
+
+export function growGroupsAndMakeRoom(model: DiagramModel, changedIds: Iterable<string> = []): DiagramModel {
+  const check = groupIdsToCheck(model, changedIds);
+  if (check.size === 0) return model;
   let current = model;
   let changed = true;
   let guard = 0;
   while (changed && guard < 100) {
     changed = false;
     guard += 1;
-    const groups = [...current.nodes].filter((node) => node.container).reverse();
+    const groups = [...current.nodes].filter((node) => node.container && check.has(node.id)).reverse();
     for (const group of groups) {
       const fresh = current.nodes.find((node) => node.id === group.id);
       if (!fresh) continue;
@@ -221,7 +234,13 @@ function withParentsFirst(model: DiagramModel): DiagramModel {
 }
 
 function finalizePositionChange(prev: DiagramModel, draft: DiagramModel): DiagramModel {
-  const grown = growGroupsAndMakeRoom(makeRoomForExplicitGroupGrowth(prev, withParentsFirst(draft)));
+  const ordered = withParentsFirst(draft);
+  const prevIndex = indexModel(prev);
+  const changedIds = ordered.nodes.filter((node) => {
+    const old = prevIndex.byId.get(node.id);
+    return !old || !sameBox(old.box, node.box);
+  }).map((node) => node.id);
+  const grown = growGroupsAndMakeRoom(makeRoomForExplicitGroupGrowth(prev, ordered), changedIds);
   return clearAffectedRoutes(prev, { ...grown, handArranged: true });
 }
 
@@ -273,17 +292,17 @@ function translateRoot(model: DiagramModel, rootId: string, x: number, y: number
   return shiftNodeIds(model, ids, x - root.box.x, y - root.box.y);
 }
 
-function candidateFits(model: DiagramModel, id: string, x: number, y: number): boolean {
+function candidateFits(model: DiagramModel, id: string, x: number, y: number, requireWithinParent = false): boolean {
   const index = indexModel(model);
   const node = index.byId.get(id);
   if (!node) return false;
   const box = { ...node.box, x, y };
+  if (requireWithinParent && node.parent) {
+    const parent = index.byId.get(node.parent);
+    if (parent && !containsBox(parent.box, box)) return false;
+  }
   const siblings = siblingNodes(model, node.parent).filter((sibling) => sibling.id !== id);
-  const noOverlap = siblings.every((sibling) => !boxesOverlap(box, sibling.box));
-  if (!noOverlap) return false;
-  if (node.parent === null) return true;
-  const parent = index.byId.get(node.parent);
-  return parent ? containsBox(parent.box, box) : true;
+  return siblings.every((sibling) => !boxesOverlap(box, { x: sibling.box.x - PLACEMENT_GAP, y: sibling.box.y - PLACEMENT_GAP, w: sibling.box.w + PLACEMENT_GAP * 2, h: sibling.box.h + PLACEMENT_GAP * 2 }));
 }
 
 function placementCandidates(anchor: DiagramNode, node: DiagramNode): Point[] {
@@ -295,6 +314,23 @@ function placementCandidates(anchor: DiagramNode, node: DiagramNode): Point[] {
   ];
 }
 
+function fallbackPlacement(model: DiagramModel, node: DiagramNode, parent: DiagramNode | undefined): Point {
+  const siblings = siblingNodes(model, node.parent).filter((sibling) => sibling.id !== node.id);
+  if (siblings.length === 0) return parent ? contentOrigin(parent) : { x: 0, y: 0 };
+  const bounds = unionBoxes(siblings.map((sibling) => sibling.box));
+  if (!bounds) return parent ? contentOrigin(parent) : { x: 0, y: 0 };
+  const rightPoint = { x: right(bounds) + GROUP_GAP, y: bounds.y };
+  const belowPoint = { x: bounds.x, y: bottom(bounds) + GROUP_GAP };
+  if (!parent) return rightPoint;
+  const parentAspect = parent.box.w / Math.max(1, parent.box.h);
+  const aspectWith = (point: Point) => {
+    const placed = { ...node.box, x: point.x, y: point.y };
+    const next = unionBoxes([...siblings.map((sibling) => sibling.box), placed]);
+    return next ? next.w / Math.max(1, next.h) : parentAspect;
+  };
+  return Math.abs(aspectWith(rightPoint) - parentAspect) <= Math.abs(aspectWith(belowPoint) - parentAspect) ? rightPoint : belowPoint;
+}
+
 export function placeNear(model: DiagramModel, id: string, anchorIds: string[]): DiagramModel {
   const index = indexModel(model);
   const node = index.byId.get(id);
@@ -302,11 +338,14 @@ export function placeNear(model: DiagramModel, id: string, anchorIds: string[]):
   for (const anchorId of anchorIds) {
     const anchor = index.byId.get(anchorId);
     if (!anchor) continue;
+    const requireWithinParent = node.parent !== null && anchor.parent !== node.parent;
     for (const point of placementCandidates(anchor, node)) {
-      if (candidateFits(model, id, point.x, point.y)) return translateRoot(model, id, point.x, point.y);
+      if (candidateFits(model, id, point.x, point.y, requireWithinParent)) return translateRoot(model, id, point.x, point.y);
     }
   }
   const parent = node.parent ? index.byId.get(node.parent) : undefined;
+  const fallback = fallbackPlacement(model, node, parent);
+  if (candidateFits(model, id, fallback.x, fallback.y)) return translateRoot(model, id, fallback.x, fallback.y);
   const start = parent ? contentOrigin(parent) : { x: Math.max(0, ...model.nodes.filter((n) => n.parent === null && n.id !== id).map((n) => right(n.box) + GROUP_GAP)), y: 0 };
   const limitX = parent ? right(parent.box) - GROUP_PADDING : start.x + 2000;
   const limitY = parent ? bottom(parent.box) - GROUP_PADDING : start.y + 2000;
@@ -315,7 +354,7 @@ export function placeNear(model: DiagramModel, id: string, anchorIds: string[]):
       if (candidateFits(model, id, x, y)) return translateRoot(model, id, x, y);
     }
   }
-  return translateRoot(model, id, start.x, start.y);
+  return translateRoot(model, id, fallback.x, fallback.y);
 }
 
 export function moveItems(model: DiagramModel, ids: string[], dx: number, dy: number): DiagramModel {
@@ -384,7 +423,7 @@ export function renameItem(model: DiagramModel, id: string, label: string): Diag
   if (node) {
     const minWidth = labelMinWidth(node, label);
     const draft = cloneWithNode(model, id, (item) => ({ ...item, label, box: { ...item.box, w: Math.max(item.box.w, minWidth) } }));
-    return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft));
+    return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft, [id]));
   }
   const edge = index.edgeById.get(id);
   if (!edge) return model;

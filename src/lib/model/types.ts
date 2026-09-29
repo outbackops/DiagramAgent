@@ -68,6 +68,7 @@ export type Arrowhead =
   | "none"
   | "arrow"
   | "triangle"
+  | "unfilled-triangle"
   | "diamond"
   | "filled-diamond"
   | "circle"
@@ -137,8 +138,6 @@ export interface DiagramModel {
   /** Parents before children. */
   nodes: DiagramNode[];
   edges: DiagramEdge[];
-  /** D2 `classes` definitions to emit on export, keyed by class name (verbatim D2 map body). */
-  classDefs?: Record<string, string>;
   /**
    * Set when the user has moved or resized items by hand since the last full
    * layout; "Apply suggested fixes" warns before re-laying out such a diagram.

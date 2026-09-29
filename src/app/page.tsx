@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/primitives";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { useCopilotSession, useModelChoice } from "@/hooks/useCopilot";
 import { useDiagramAgent, type AgentDocument } from "@/hooks/useDiagramAgent";
-import { LARGE_EDIT, useDiagramDocument } from "@/hooks/useDiagramDocument";
+import { suggestsTidyUp, useDiagramDocument } from "@/hooks/useDiagramDocument";
 import { useLiveRender } from "@/hooks/useLiveRender";
 import { useModelQuality } from "@/hooks/useModelQuality";
 import { useTheme } from "@/hooks/useTheme";
@@ -73,14 +73,14 @@ function Workspace() {
   }, [doc]);
 
   const agentDocument: AgentDocument = {
-    currentCode: () => doc.d2,
+    currentCode: () => (doc.model ? doc.d2 : null),
     onKeep: async (code, info) => {
       const result = await doc.acceptRunCode(code, info.layout);
       if (result.warnings.length > 0) {
         toast({ tone: "info", title: "Some parts of the diagram weren't imported", description: result.warnings.slice(0, 3).join(" · ") });
       }
       // Stable merges tuck new items in around the existing layout; many of them deserve a fresh layout (R16).
-      if (info.layout === "stable" && result.added + result.regrouped >= LARGE_EDIT) {
+      if (suggestsTidyUp(result, info.layout)) {
         toast({
           tone: "info",
           title: `${result.added + result.regrouped} items were added or moved into new groups`,
@@ -203,8 +203,8 @@ function Workspace() {
   );
 
   const importD2 = useCallback(
-    async (code: string) => {
-      const warnings = await doc.importD2(code);
+    async (code: string, signal: AbortSignal) => {
+      const warnings = await doc.importD2(code, signal);
       deselect();
       setFitNonce((n) => n + 1);
       return warnings;

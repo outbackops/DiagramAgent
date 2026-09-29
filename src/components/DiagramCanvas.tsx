@@ -184,7 +184,7 @@ export default function DiagramCanvas({
           </div>
         </div>
       )}
-      {status && <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center"><div className="rounded-lg bg-white/90 px-2 py-1 text-xs text-zinc-500 shadow-sm backdrop-blur dark:bg-zinc-900/90 dark:text-zinc-300">{status}</div></div>}
+      {status && <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center"><div className="pointer-events-auto rounded-lg bg-white/90 px-2 py-1 text-xs text-zinc-500 shadow-sm backdrop-blur dark:bg-zinc-900/90 dark:text-zinc-300">{status}</div></div>}
       {overlay}
     </div>
   );

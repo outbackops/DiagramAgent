@@ -5,6 +5,7 @@ import { ArrowRight, Box, ImageIcon, Link2, Trash2, X } from "lucide-react";
 import type { DiagramModel } from "@/lib/model/types";
 import { deleteItems, renameItem, setIcon } from "@/lib/model/ops";
 import { indexModel } from "@/lib/model/query";
+import { MODEL_LIMITS } from "@/lib/model/validate";
 import IconPicker from "./IconPicker";
 import { Popover } from "./ui/Popover";
 import { Button, IconButton } from "./ui/primitives";
@@ -25,19 +26,37 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
   const [labelValue, setLabelValue] = useState("");
   const skipBlurSave = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The draft belongs to the item it was typed for: clicking another item must
+  // never rename that one with this text (the selection changes before blur).
+  const draftRef = useRef<{ id: string | null; value: string; dirty: boolean }>({ id: null, value: "", dirty: false });
+  const handledRename = useRef<number | null>(null);
   const index = model ? indexModel(model) : null;
   const selectedId = selection.length === 1 ? selection[0] : null;
   const selectedNode = selectedId && index ? index.byId.get(selectedId) ?? null : null;
   const selectedEdge = selectedId && index ? index.edgeById.get(selectedId) ?? null : null;
   const selectedLabel = selectedNode?.label ?? selectedEdge?.label ?? "";
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLabelValue(selectedLabel);
-  }, [selectedId, selectedLabel]);
+  const commitDraft = useCallback(() => {
+    const draft = draftRef.current;
+    if (!draft.dirty || !draft.id) return;
+    draftRef.current = { ...draft, dirty: false };
+    const next = draft.value.trim();
+    const id = draft.id;
+    if (next) onApply((m) => renameItem(m, id, next), { coalesceKey: `rename:${id}` });
+  }, [onApply]);
 
   useEffect(() => {
-    if (!renameRequest || renameRequest.id !== selectedId) return;
+    // A pending edit for the previous selection is saved to that item before switching.
+    if (draftRef.current.id !== selectedId) commitDraft();
+    else if (draftRef.current.dirty) return;
+    draftRef.current = { id: selectedId, value: selectedLabel, dirty: false };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLabelValue(selectedLabel);
+  }, [commitDraft, selectedId, selectedLabel]);
+
+  useEffect(() => {
+    if (!renameRequest || renameRequest.id !== selectedId || handledRename.current === renameRequest.nonce) return;
+    handledRename.current = renameRequest.nonce;
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [renameRequest, selectedId]);
@@ -47,11 +66,13 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
       skipBlurSave.current = false;
       return;
     }
-    const next = labelValue.trim();
-    if (selectedId && next && next !== selectedLabel) {
-      onApply((m) => renameItem(m, selectedId, next), { coalesceKey: `rename:${selectedId}` });
-    }
-  }, [labelValue, onApply, selectedId, selectedLabel]);
+    commitDraft();
+  }, [commitDraft]);
+
+  const discardDraft = useCallback(() => {
+    draftRef.current = { ...draftRef.current, value: selectedLabel, dirty: false };
+    setLabelValue(selectedLabel);
+  }, [selectedLabel]);
 
   if (readOnly || !model) return null;
 
@@ -97,7 +118,11 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
         <input
           ref={inputRef}
           value={labelValue}
-          onChange={(e) => setLabelValue(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setLabelValue(value);
+            draftRef.current = { id: selectedId, value, dirty: value.trim() !== selectedLabel };
+          }}
           onBlur={save}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -109,12 +134,13 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
               e.preventDefault();
               e.stopPropagation();
               skipBlurSave.current = true;
-              setLabelValue(selectedLabel);
+              discardDraft();
               e.currentTarget.blur();
             }
           }}
           placeholder="Label"
           aria-label="Label"
+          maxLength={MODEL_LIMITS.labelLength}
           className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] text-zinc-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
         />
         {selectedNode && (

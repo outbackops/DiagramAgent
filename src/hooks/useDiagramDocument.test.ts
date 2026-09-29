@@ -5,7 +5,7 @@ import type { DiagramModel, DiagramNode } from "@/lib/model/types";
 const render = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/client/api", () => ({ api: { render } }));
 
-import { MODEL_STORAGE_KEY, useDiagramDocument } from "./useDiagramDocument";
+import { MODEL_BACKUP_KEY, MODEL_STORAGE_KEY, suggestsTidyUp, useDiagramDocument } from "./useDiagramDocument";
 
 const node = (id: string, x: number, parent: string | null = null): DiagramNode => ({
   id,
@@ -121,6 +121,105 @@ describe("useDiagramDocument", () => {
 
     act(() => result.current.clear());
     expect(result.current.model).toBeNull();
+    await waitFor(() => expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBeNull());
+  });
+
+  it("starts a fresh history for the first diagram, so undo can't empty the canvas", async () => {
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    render.mockResolvedValueOnce({ svg: "", quality: null, model: model([node("a", 0)]), warnings: [] });
+    await act(async () => {
+      await result.current.acceptRunCode("a", "full");
+    });
+    expect(result.current.model?.nodes).toHaveLength(1);
+    expect(result.current.canUndo).toBe(false);
+  });
+
+  it("drops a Tidy up result when the diagram changed while it was computed", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model([node("a", 0), node("b", 300)])));
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.model).not.toBeNull());
+    let resolve!: (value: unknown) => void;
+    render.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    let tidy!: Promise<void>;
+    act(() => {
+      tidy = result.current.tidyUp();
+    });
+    act(() => result.current.apply((m) => ({ ...m, nodes: m.nodes.map((n) => (n.id === "b" ? { ...n, box: { ...n.box, y: 150 } } : n)) })));
+    resolve({ svg: "", quality: null, model: model([node("a", 0), node("b", 0)]), warnings: [] });
+    await act(async () => {
+      await expect(tidy).rejects.toThrow(/changed/);
+    });
+    expect(result.current.model?.nodes[1].box.y).toBe(150);
+  });
+
+  it("keeps an unreadable saved diagram as a backup and doesn't fall back to older D2", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({ version: 1, nodes: [{ id: "x" }], edges: [] }));
+    window.localStorage.setItem("diagramAgent.d2Code", JSON.stringify("old -> code"));
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.error).toMatch(/couldn't be opened/));
+    expect(result.current.model).toBeNull();
+    expect(window.localStorage.getItem(MODEL_BACKUP_KEY)).toContain('"id":"x"');
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it("doesn't replace the diagram when an import is cancelled", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model([node("a", 0)])));
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.model).not.toBeNull());
+    const controller = new AbortController();
+    render.mockImplementationOnce(async () => {
+      controller.abort();
+      return { svg: "", quality: null, model: model([node("z", 0)]), warnings: [] };
+    });
+    await act(async () => {
+      await expect(result.current.importD2("z", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    });
+    expect(result.current.model?.nodes.map((n) => n.id)).toEqual(["a"]);
+  });
+
+  it("suggests Tidy up only after large merged edits (R16)", () => {
+    expect(suggestsTidyUp({ added: 4, regrouped: 1, warnings: [] }, "stable")).toBe(true);
+    expect(suggestsTidyUp({ added: 3, regrouped: 1, warnings: [] }, "stable")).toBe(false);
+    expect(suggestsTidyUp({ added: 20, regrouped: 0, warnings: [] }, "full")).toBe(false);
+  });
+
+  it("keeps an unreadable saved diagram across reloads instead of importing older D2", async () => {
+    const unreadable = JSON.stringify({ version: 1, nodes: [{ id: "x" }], edges: [] });
+    window.localStorage.setItem(MODEL_STORAGE_KEY, unreadable);
+    window.localStorage.setItem("diagramAgent.d2Code", JSON.stringify("old -> code"));
+    const first = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(first.result.current.error).toMatch(/couldn't be opened/));
+    first.unmount();
+    expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBe(unreadable);
+    const second = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(second.result.current.error).toMatch(/couldn't be opened/));
+    expect(render).not.toHaveBeenCalled();
+    expect(second.result.current.model).toBeNull();
+  });
+
+  it("drops a run result that arrives after New, even when the canvas started empty", async () => {
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let resolve!: (value: unknown) => void;
+    render.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.acceptRunCode("a", "full");
+    });
+    act(() => result.current.clear());
+    resolve({ svg: "", quality: null, model: model([node("a", 0)]), warnings: [] });
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.model).toBeNull();
+  });
+
+  it("deletes the saved diagram only after an explicit New", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model([node("a", 0)])));
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.model).not.toBeNull());
+    act(() => result.current.clear());
     await waitFor(() => expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBeNull());
   });
 });

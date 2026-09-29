@@ -164,10 +164,38 @@ export function uniqueKey(label: string, taken: Iterable<string>): string {
       .replace(/[^A-Za-z0-9_\- ]+/g, "")
       .replace(/\s+/g, "_")
       .replace(/^[-_]+|[-_]+$/g, "") || "node";
-  const used = new Set(taken);
-  if (!used.has(base)) return base;
+  const reserved = new Set([
+    "shape",
+    "label",
+    "style",
+    "icon",
+    "near",
+    "width",
+    "height",
+    "direction",
+    "class",
+    "classes",
+    "link",
+    "tooltip",
+    "vars",
+    "layers",
+    "scenarios",
+    "steps",
+    "grid-rows",
+    "grid-columns",
+    "grid-gap",
+    "top",
+    "left",
+    "source-arrowhead",
+    "target-arrowhead",
+    "constraint",
+    "filled",
+  ]);
+  const used = new Set([...taken].map((key) => key.toLowerCase()));
+  const first = reserved.has(base.toLowerCase()) ? `${base}_2` : base;
+  if (!used.has(first.toLowerCase())) return first;
   for (let i = 2; ; i++) {
     const candidate = `${base}_${i}`;
-    if (!used.has(candidate)) return candidate;
+    if (!used.has(candidate.toLowerCase()) && !reserved.has(candidate.toLowerCase())) return candidate;
   }
 }

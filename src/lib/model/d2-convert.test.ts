@@ -6,8 +6,10 @@ import { compileD2, type CompiledDiagram, type CompiledShape } from "@/lib/d2-re
 import { isOrthogonalRoute } from "@/lib/d2-routes";
 import { modelFromCompiled } from "./from-d2";
 import { resolveColor } from "./d2-theme";
+import { growGroupsAndMakeRoom, setIcon } from "./ops";
 import { modelToD2 } from "./to-d2";
-import type { DiagramModel, DiagramNode } from "./types";
+import { validateModel } from "./validate";
+import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode } from "./types";
 
 const fixturesDir = path.join(process.cwd(), "src", "test", "fixtures", "diagrams");
 const fixtureNames = readdirSync(fixturesDir)
@@ -106,6 +108,85 @@ describe("D2 compiled import", () => {
     expect(model.layout).toEqual({ direction: "right" });
     expect(model.nodes.find((node) => node.id === "Group")?.layout).toEqual({ direction: "down", gridColumns: 2, gridGap: 60 });
   });
+
+  it("keeps layout hints scoped after edge blocks and accepts spaced or quoted keys", () => {
+    const diagram: CompiledDiagram = {
+      shapes: [shape("Cloud"), shape("Cloud.a"), shape("Cloud.b"), shape("Web Tier"), shape("Quoted Key")],
+      connections: [],
+    };
+    const { model } = modelFromCompiled(diagram, {
+      code: 'Cloud: {\n  a -> b: {\n    style.stroke: red\n  }\n  grid-columns: 3\n}\nWeb Tier: {\n  direction: right\n}\n"Quoted Key": {\n  grid-rows: 2\n}\n',
+    });
+    expect(model.layout).toBeUndefined();
+    expect(model.nodes.find((node) => node.id === "Cloud")?.layout).toEqual({ gridColumns: 3 });
+    expect(model.nodes.find((node) => node.id === "Web Tier")?.layout).toEqual({ direction: "right" });
+    expect(model.nodes.find((node) => node.id === "Quoted Key")?.layout).toEqual({ gridRows: 2 });
+  });
+
+  it("parses pathological quoted block keys in linear time", () => {
+    const quoted = `"${"\\".repeat(80)}".child`;
+    const started = performance.now();
+    modelFromCompiled({ shapes: [shape("x")], connections: [] }, { code: `${quoted} {\n  x\n}\n` });
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("normalises compiled values so imported models pass validation", () => {
+    const longLabel = "x".repeat(4100);
+    const diagram: CompiledDiagram = {
+      shapes: [
+        shape("A", {
+          pos: { x: Number.NaN, y: Infinity },
+          width: 100,
+          height: 80,
+          label: longLabel,
+          fill: "linear-gradient(" + "a".repeat(220) + ")",
+          strokeWidth: 500,
+          borderRadius: 5000,
+          fontSize: 900,
+          opacity: 2,
+        }),
+        shape("B", { pos: { x: 300, y: 0 } }),
+      ],
+      connections: [
+        {
+          id: "(A -> B)[0]",
+          src: "A",
+          dst: "B",
+          srcArrow: "unfilled-triangle",
+          dstArrow: "not-real",
+          label: longLabel,
+          strokeDash: 0,
+          strokeWidth: 500,
+          borderRadius: 5000,
+          fontSize: 900,
+          opacity: -1,
+          route: [
+            { x: Number.NaN, y: 0 },
+            { x: 300, y: Infinity },
+          ],
+        },
+      ],
+    };
+    const { model, warnings } = modelFromCompiled(diagram);
+    expect(warnings.join("\n")).toContain("Truncated overlong label");
+    expect(model.nodes[0].label).toHaveLength(4000);
+    expect(model.nodes[0].style.borderRadius).toBe(1000);
+    expect(model.edges[0].srcArrow).toBe("unfilled-triangle");
+    expect(model.edges[0].dstArrow).toBe("triangle");
+    expect(validateModel(model).ok).toBe(true);
+  });
+
+  it(
+    "leaves imported fixtures byte-identical when no nodes changed",
+    async () => {
+      for (const fixture of fixtureNames) {
+        const code = readFileSync(path.join(fixturesDir, fixture), "utf8");
+        const model = modelFromCompiled((await compileD2(code)).diagram, { code }).model;
+        expect(growGroupsAndMakeRoom(model), fixture).toBe(model);
+      }
+    },
+    120_000,
+  );
 });
 
 describe("D2 model export/import", () => {
@@ -161,6 +242,253 @@ describe("D2 model export/import", () => {
       const imported = modelFromCompiled((await compileD2(modelToD2(model))).diagram).model;
       expect(imported.nodes.map((n) => [n.id, n.label])).toEqual(model.nodes.map((n) => [n.id, n.label]));
       expect(imported.edges.map((edge) => [edge.from, edge.to, edge.label])).toEqual(model.edges.map((edge) => [edge.from, edge.to, edge.label]));
+    },
+    60_000,
+  );
+
+  it(
+    "exports a plain node after adding an icon as compilable D2",
+    async () => {
+      const model: DiagramModel = {
+        version: 1,
+        nodes: [
+          { id: "web", parent: null, label: "web", shape: "rectangle", box: { x: 0, y: 0, w: 120, h: 80 }, style: {}, container: false, labelPosition: "INSIDE_MIDDLE_CENTER" },
+          { id: "api", parent: null, label: "api", shape: "rectangle", box: { x: 220, y: 0, w: 120, h: 80 }, style: {}, container: false },
+          { id: "db", parent: null, label: "db", shape: "rectangle", box: { x: 440, y: 0, w: 120, h: 80 }, style: {}, container: false },
+        ],
+        edges: [
+          { id: "(web -> api)[0]", from: "web", to: "api", srcArrow: "none", dstArrow: "triangle", style: {}, route: [] },
+          { id: "(api -> db)[0]", from: "api", to: "db", srcArrow: "none", dstArrow: "triangle", style: {}, route: [] },
+        ],
+      };
+      await expect(compileD2(modelToD2(setIcon(model, "web", "/icons/app.svg")))).resolves.toBeTruthy();
+    },
+    60_000,
+  );
+
+  it(
+    "round-trips every D2-supported label and icon position",
+    async () => {
+      const positions = [
+        "INSIDE_TOP_LEFT",
+        "INSIDE_TOP_CENTER",
+        "INSIDE_TOP_RIGHT",
+        "INSIDE_MIDDLE_LEFT",
+        "INSIDE_MIDDLE_CENTER",
+        "INSIDE_MIDDLE_RIGHT",
+        "INSIDE_BOTTOM_LEFT",
+        "INSIDE_BOTTOM_CENTER",
+        "INSIDE_BOTTOM_RIGHT",
+        "OUTSIDE_TOP_LEFT",
+        "OUTSIDE_TOP_CENTER",
+        "OUTSIDE_TOP_RIGHT",
+        "OUTSIDE_BOTTOM_LEFT",
+        "OUTSIDE_BOTTOM_CENTER",
+        "OUTSIDE_BOTTOM_RIGHT",
+      ];
+      const nodes: DiagramNode[] = positions.map((position, i) => ({
+        id: `n${i}`,
+        parent: null,
+        label: `n${i}`,
+        shape: "rectangle",
+        icon: "/icons/app.svg",
+        box: { x: i * 160, y: 0, w: 120, h: 100 },
+        style: {},
+        container: false,
+        labelPosition: position,
+        iconPosition: position,
+      }));
+      const imported = modelFromCompiled((await compileD2(modelToD2({ version: 1, nodes, edges: [] }))).diagram).model;
+      expect(imported.nodes.map((node) => [node.labelPosition, node.iconPosition])).toEqual(positions.map((position) => [position, position]));
+    },
+    60_000,
+  );
+
+  it(
+    "emits every arrowhead value as D2 that compiles and round-trips",
+    async () => {
+      const arrowheads: Arrowhead[] = [
+        "none",
+        "arrow",
+        "triangle",
+        "unfilled-triangle",
+        "diamond",
+        "filled-diamond",
+        "circle",
+        "filled-circle",
+        "box",
+        "filled-box",
+        "line",
+        "cross",
+        "cf-one",
+        "cf-many",
+        "cf-one-required",
+        "cf-many-required",
+      ];
+      const edges: DiagramEdge[] = arrowheads.map((arrowhead, i) => ({
+        id: `(a -> b)[${i}]`,
+        from: "a",
+        to: "b",
+        label: arrowhead,
+        srcArrow: "none",
+        dstArrow: arrowhead,
+        style: {},
+        route: [],
+      }));
+      const model: DiagramModel = {
+        version: 1,
+        nodes: [
+          { id: "a", parent: null, label: "a", shape: "rectangle", box: { x: 0, y: 0, w: 120, h: 80 }, style: {}, container: false },
+          { id: "b", parent: null, label: "b", shape: "rectangle", box: { x: 220, y: 0, w: 120, h: 80 }, style: {}, container: false },
+        ],
+        edges,
+      };
+      const exported = modelToD2(model);
+      const imported = modelFromCompiled((await compileD2(exported)).diagram, { code: exported }).model;
+      const expected = edges.map((edge) => ["none", edge.dstArrow === "line" ? "arrow" : edge.dstArrow]);
+      expect(imported.edges.map((edge) => [edge.srcArrow, edge.dstArrow])).toEqual(expected);
+    },
+    60_000,
+  );
+
+  it(
+    "round-trips representative source and target arrowhead combinations",
+    async () => {
+      const combinations: [Arrowhead, Arrowhead][] = [
+        ["none", "none"],
+        ["diamond", "none"],
+        ["cf-one", "cf-many"],
+        ["filled-diamond", "triangle"],
+        ["none", "triangle"],
+        ["triangle", "triangle"],
+      ];
+      const edges: DiagramEdge[] = combinations.map(([srcArrow, dstArrow], i) => ({
+        id: `(a -> b)[${i}]`,
+        from: "a",
+        to: "b",
+        label: `${srcArrow}/${dstArrow}`,
+        srcArrow,
+        dstArrow,
+        style: {},
+        route: [],
+      }));
+      const model: DiagramModel = {
+        version: 1,
+        nodes: [
+          { id: "a", parent: null, label: "a", shape: "rectangle", box: { x: 0, y: 0, w: 120, h: 80 }, style: {}, container: false },
+          { id: "b", parent: null, label: "b", shape: "rectangle", box: { x: 220, y: 0, w: 120, h: 80 }, style: {}, container: false },
+        ],
+        edges,
+      };
+      const imported = modelFromCompiled((await compileD2(modelToD2(model))).diagram).model;
+      expect(imported.edges.map((edge) => [edge.from, edge.to, edge.srcArrow, edge.dstArrow])).toEqual(edges.map((edge) => [edge.from, edge.to, edge.srcArrow, edge.dstArrow]));
+    },
+    60_000,
+  );
+
+  it(
+    "imports source D2 features and exports compilable D2",
+    async () => {
+      const dataIcon = "data:image/svg+xml;base64,PHN2Zy8+";
+      const code = `
+Cloud: {
+  grid-columns: 2
+  a -> b: {
+    style.stroke: red
+  }
+  a
+  b
+}
+"Web Tier": {
+  grid-columns: 3
+  service: {
+    icon: "${dataIcon}"
+    tooltip: "service tip"
+    link: "https://example.com/service"
+    label.near: outside-bottom-center
+    icon.near: top-left
+  }
+  remote: {
+    icon: https://cdn.example.com/logo.svg
+  }
+}
+src -> dst: arrow {
+  target-arrowhead.shape: arrow
+}
+src -> dst: triangle {
+  target-arrowhead.shape: triangle
+}
+src -> dst: unfilled {
+  target-arrowhead.shape: triangle
+  target-arrowhead.style.filled: false
+}
+src -> dst: diamond {
+  target-arrowhead.shape: diamond
+}
+src -> dst: filled-diamond {
+  target-arrowhead.shape: diamond
+  target-arrowhead.style.filled: true
+}
+src -> dst: circle {
+  target-arrowhead.shape: circle
+}
+src -> dst: filled-circle {
+  target-arrowhead.shape: circle
+  target-arrowhead.style.filled: true
+}
+src -> dst: box {
+  target-arrowhead.shape: box
+}
+src -> dst: filled-box {
+  target-arrowhead.shape: box
+  target-arrowhead.style.filled: true
+}
+src -> dst: cross {
+  target-arrowhead.shape: cross
+}
+src -> dst: cf-one {
+  target-arrowhead.shape: cf-one
+}
+src -> dst: cf-many {
+  target-arrowhead.shape: cf-many
+}
+src -> dst: cf-one-required {
+  target-arrowhead.shape: cf-one-required
+}
+src -> dst: cf-many-required {
+  target-arrowhead.shape: cf-many-required
+}
+`;
+      const { diagram } = await compileD2(code);
+      const { model, warnings } = modelFromCompiled(diagram, { code });
+      expect(model.layout).toBeUndefined();
+      expect(model.nodes.find((node) => node.id === "Cloud")?.layout).toEqual({ gridColumns: 2 });
+      const service = model.nodes.find((node) => node.id === "Web Tier.service");
+      expect(service?.icon).toBe(dataIcon);
+      expect(service?.tooltip).toBe("service tip");
+      expect(service?.link).toBe("https://example.com/service");
+      expect(service?.labelPosition).toBe("OUTSIDE_BOTTOM_CENTER");
+      expect(service?.iconPosition).toBe("INSIDE_TOP_LEFT");
+      expect(model.nodes.find((node) => node.id === "Web Tier.remote")?.icon).toBeUndefined();
+      expect(warnings.join("\n")).toContain("Dropped unsafe icon");
+      expect(model.edges.map((edge) => edge.dstArrow)).toEqual([
+        "triangle",
+        "arrow",
+        "triangle",
+        "unfilled-triangle",
+        "diamond",
+        "filled-diamond",
+        "circle",
+        "filled-circle",
+        "box",
+        "filled-box",
+        "cross",
+        "cf-one",
+        "cf-many",
+        "cf-one-required",
+        "cf-many-required",
+      ]);
+      await expect(compileD2(modelToD2(model))).resolves.toBeTruthy();
     },
     60_000,
   );

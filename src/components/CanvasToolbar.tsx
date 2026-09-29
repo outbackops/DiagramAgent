@@ -5,6 +5,7 @@ import { AlignCenter, AlignEndHorizontal, AlignHorizontalJustifyCenter, AlignHor
 import type { DiagramModel } from "@/lib/model/types";
 import { addGroup, addNode, alignItems, deleteItems, distributeItems } from "@/lib/model/ops";
 import { indexModel, isGroup } from "@/lib/model/query";
+import { MODEL_LIMITS } from "@/lib/model/validate";
 import IconPicker from "./IconPicker";
 import { MenuItem, Popover } from "./ui/Popover";
 import { Button, IconButton, Spinner, cn } from "./ui/primitives";
@@ -78,26 +79,22 @@ export default function CanvasToolbar({
     const name = label.trim() || "New node";
     const parent = oneSelectedNode && index && isGroup(index, oneSelectedNode.id) ? oneSelectedNode.id : null;
     const near = oneSelectedNode && !oneSelectedNode.container ? oneSelectedNode.id : undefined;
-    let newId = "";
-    onApply((m) => {
-      const result = addNode(m, { parent, label: name, icon, near });
-      newId = result.id;
-      return result.model;
-    });
+    if (!model) return;
+    // Operations are pure: the new id comes from the model on screen, not from inside the (possibly deferred) state update.
+    const newId = addNode(model, { parent, label: name, icon, near }).id;
+    onApply((m) => addNode(m, { parent, label: name, icon, near }).model);
     if (newId) onSelectionChange([newId]);
     setLabel("New node");
     setIcon(undefined);
   };
 
   const addNewGroup = () => {
-    let newId = "";
+    if (!model) return;
     const canWrap = selectedNodes.length > 0 && selectedNodes.every((id) => index?.byId.get(id)?.parent === index?.byId.get(selectedNodes[0])?.parent);
     const parent = canWrap ? (index?.byId.get(selectedNodes[0])?.parent ?? null) : null;
-    onApply((m) => {
-      const result = addGroup(m, { parent, label: "New group", wrap: canWrap ? selectedNodes : undefined });
-      newId = result.id;
-      return result.model;
-    });
+    const options = { parent, label: "New group", wrap: canWrap ? selectedNodes : undefined };
+    const newId = addGroup(model, options).id;
+    onApply((m) => addGroup(m, options).model);
     if (newId) onSelectionChange([newId]);
   };
 
@@ -124,7 +121,7 @@ export default function CanvasToolbar({
       )}>
         {(close) => <div className="space-y-2">
           <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">Label
-            <input value={label} onChange={(e) => setLabel(e.target.value)} className="mt-1 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-[13px] dark:border-zinc-700 dark:bg-zinc-950" />
+            <input value={label} maxLength={MODEL_LIMITS.labelLength} onChange={(e) => setLabel(e.target.value)} className="mt-1 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-[13px] dark:border-zinc-700 dark:bg-zinc-950" />
           </label>
           <IconPicker value={icon} onSelect={setIcon} allowNone />
           <Button variant="primary" className="w-full" onClick={() => { addNewNode(); close(); }}>Add node</Button>

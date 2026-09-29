@@ -107,17 +107,49 @@ function properlyIntersect(a: Segment, b: Segment): boolean {
   return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
+/**
+ * Caps on geometric work so a huge (or hostile) diagram can't stall scoring.
+ * Past the cap the counts are underestimates, which is fine for an advisory score.
+ */
+const PAIR_BUDGET = 2_000_000;
+
+interface Extent {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function extentOf(points: Array<{ x: number; y: number }>): Extent {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+const extentsOverlap = (a: Extent, b: Extent) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
+
 export function countCrossings(connections: CompiledConnection[]): number {
+  const prepared = connections.map((c) => ({ c, segs: segments(c.route ?? []), extent: extentOf(c.route ?? []) }));
   let crossings = 0;
-  for (let i = 0; i < connections.length; i++) {
-    for (let j = i + 1; j < connections.length; j++) {
-      const a = connections[i];
-      const b = connections[j];
+  let budget = PAIR_BUDGET;
+  for (let i = 0; i < prepared.length; i++) {
+    for (let j = i + 1; j < prepared.length; j++) {
+      const a = prepared[i];
+      const b = prepared[j];
       // Edges that share an endpoint meet by design.
-      if (a.src === b.src || a.src === b.dst || a.dst === b.src || a.dst === b.dst) continue;
-      const sa = segments(a.route ?? []);
-      const sb = segments(b.route ?? []);
-      if (sa.some((x) => sb.some((y) => properlyIntersect(x, y)))) crossings++;
+      if (a.c.src === b.c.src || a.c.src === b.c.dst || a.c.dst === b.c.src || a.c.dst === b.c.dst) continue;
+      if (!extentsOverlap(a.extent, b.extent)) continue;
+      budget -= a.segs.length * b.segs.length;
+      if (budget < 0) return crossings;
+      if (a.segs.some((x) => b.segs.some((y) => properlyIntersect(x, y)))) crossings++;
     }
   }
   return crossings;
@@ -153,16 +185,22 @@ export function findEdgesThroughNodes(diagram: CompiledDiagram, inset = 6): stri
   const ids = diagram.shapes.map((s) => s.id);
   const leaves = diagram.shapes.filter((s) => !ids.some((other) => other.startsWith(`${s.id}.`)));
   const hits: string[] = [];
+  let budget = PAIR_BUDGET;
   for (const c of diagram.connections) {
     const route = c.route ?? [];
+    const extent = extentOf(route);
     const through = leaves.some((leaf) => {
       if (leaf.id === c.src || leaf.id === c.dst) return false;
       const box = { x: leaf.pos.x + inset, y: leaf.pos.y + inset, w: leaf.width - inset * 2, h: leaf.height - inset * 2 };
       if (box.w <= 0 || box.h <= 0) return false;
+      if (!extentsOverlap(extent, { minX: box.x, minY: box.y, maxX: box.x + box.w, maxY: box.y + box.h })) return false;
+      budget -= route.length;
+      if (budget < 0) return false;
       for (let i = 1; i < route.length; i++) if (segmentCrossesBox(route[i - 1], route[i], box)) return true;
       return false;
     });
     if (through) hits.push(c.id);
+    if (budget < 0) break;
   }
   return hits;
 }

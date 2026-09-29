@@ -98,6 +98,13 @@ describe("routeEdge", () => {
     expect(polylineHitsBox(route, expand(blocker, 12))).toBe(false);
   });
 
+  it("routes fractional coordinates around blockers", () => {
+    const blocker = { x: 100 + 1 / 3, y: -20, w: 50, h: 80 };
+    const route = routeEdge({ x: 1 / 3, y: 0, w: 60, h: 40 }, { x: 220 + 1 / 3, y: 0, w: 60, h: 40 }, [blocker], { fromSide: "right", toSide: "left" });
+    expectAxisAligned(route);
+    expect(polylineHitsBox(route, expand(blocker, 12))).toBe(false);
+  });
+
   it("places endpoints on borders and uses perpendicular first and last segments", () => {
     const from = { x: 0, y: 0, w: 80, h: 40 };
     const to = { x: 180, y: 60, w: 70, h: 50 };
@@ -180,6 +187,24 @@ describe("routeModelEdges", () => {
     expect(starts).toEqual([...starts].sort((a, b) => a - b));
   });
 
+  it("routes four fractional spread ports on one side around a blocker", () => {
+    const blocker = node("block", { x: 120, y: -40, w: 50, h: 140 });
+    const model: DiagramModel = {
+      version: 1,
+      nodes: [
+        node("a", { x: 0, y: 0, w: 60, h: 60 }),
+        node("b", { x: 240, y: -90, w: 60, h: 40 }),
+        node("c", { x: 240, y: -30, w: 60, h: 40 }),
+        node("d", { x: 240, y: 30, w: 60, h: 40 }),
+        node("e", { x: 240, y: 90, w: 60, h: 40 }),
+        blocker,
+      ],
+      edges: [edge("e1", "a", "b"), edge("e2", "a", "c"), edge("e3", "a", "d"), edge("e4", "a", "e")],
+    };
+    const routed = routeModelEdges(model);
+    for (const item of routed.edges) expect(polylineHitsBox(item.route, expand(blocker.box, 12)), item.id).toBe(false);
+  });
+
   it("is deterministic", () => {
     const model: DiagramModel = {
       version: 1,
@@ -212,6 +237,33 @@ describe("routeModelEdges", () => {
     const elapsed = performance.now() - started;
     console.log(`routeModelEdges performance: ${elapsed.toFixed(1)} ms`);
     expect(routed.edges.every((e) => e.route.length >= 2)).toBe(true);
+    const leafBoxes = nodes.filter((item) => !item.container);
+    for (const item of routed.edges) {
+      const obstacles = leafBoxes.filter((leaf) => leaf.id !== item.from && leaf.id !== item.to);
+      for (const obstacle of obstacles) expect(polylineHitsBox(item.route, expand(obstacle.box, 12)), `${item.id} crosses ${obstacle.id}`).toBe(false);
+    }
     expect(elapsed).toBeLessThan(1500);
+  });
+
+  it("falls back quickly when the A* expansion budget is exhausted", () => {
+    const nodes: DiagramNode[] = [node("from", { x: 0, y: 0, w: 60, h: 40 }), node("to", { x: 800, y: 0, w: 60, h: 40 }), node("cover", { x: 780, y: -40, w: 120, h: 120 })];
+    for (let i = 0; i < 100; i++) nodes.push(node(`n${i}`, { x: 100 + (i % 20) * 32, y: -220 + Math.floor(i / 20) * 90, w: 24, h: 24 }));
+    const started = performance.now();
+    const routed = routeModelEdges({ version: 1, nodes, edges: [edge("e", "from", "to")] }, { maxExpansions: 200, totalExpansions: 500 });
+    const elapsed = performance.now() - started;
+    expect(routed.edges[0].route.length).toBeGreaterThanOrEqual(2);
+    expectAxisAligned(routed.edges[0].route);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("fallbackOnly fills orthogonal routes without using the A* budget", () => {
+    const nodes: DiagramNode[] = [node("from", { x: 0, y: 0, w: 60, h: 40 }), node("to", { x: 800, y: 200, w: 60, h: 40 })];
+    for (let i = 0; i < 200; i++) nodes.push(node(`n${i}`, { x: 80 + (i % 40) * 18, y: -200 + Math.floor(i / 40) * 90, w: 12, h: 12 }));
+    const started = performance.now();
+    const routed = routeModelEdges({ version: 1, nodes, edges: [edge("e", "from", "to")] }, { fallbackOnly: true, maxExpansions: 0, totalExpansions: 0 });
+    const elapsed = performance.now() - started;
+    expectAxisAligned(routed.edges[0].route);
+    expect(routed.edges[0].route.length).toBeGreaterThanOrEqual(2);
+    expect(elapsed).toBeLessThan(100);
   });
 });

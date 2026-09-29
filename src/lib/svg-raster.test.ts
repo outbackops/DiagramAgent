@@ -1,11 +1,10 @@
 // @vitest-environment node
-import { performance } from "node:perf_hooks";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { inlineVendoredIcons, svgToPng, withFallbackFonts } from "./svg-raster";
+import { inlineVendoredIcons, svgToPng } from "./svg-raster";
 
 let publicDir: string;
 
@@ -53,34 +52,6 @@ describe("inlineVendoredIcons", () => {
     expect(readFile).toHaveBeenCalledTimes(500);
     vi.doUnmock("node:fs/promises");
     vi.doUnmock("@/lib/icon-registry");
-  });
-});
-
-describe("withFallbackFonts", () => {
-  it("adds system fallbacks with matching weight and style to D2 font families", () => {
-    const css = [
-      '.d2-1 .text { font-family: "d2-1-font-regular"; }',
-      '.d2-1 .text-bold { font-family: "d2-1-font-bold"; }',
-      '.d2-1 .text-italic { font-family: "d2-1-font-italic"; }',
-      '.d2-1 .text-mono { font-family: "d2-1-font-mono"; }',
-    ].join("\n");
-    const out = withFallbackFonts(css);
-    expect(out).toContain('font-family: "d2-1-font-regular", "Segoe UI"');
-    expect(out).toMatch(/"d2-1-font-bold", "Segoe UI"[^;]*; font-weight: 700;/);
-    expect(out).toMatch(/"d2-1-font-italic", "Segoe UI"[^;]*; font-style: italic;/);
-    expect(out).toContain('"d2-1-font-mono", "Cascadia Mono"');
-  });
-
-  it("leaves other font declarations alone", () => {
-    const css = 'text { font-family: "Inter"; }';
-    expect(withFallbackFonts(css)).toBe(css);
-  });
-
-  it("handles hostile unterminated D2 font declarations in linear time", () => {
-    const hostile = `font-family: "d2-${"font-".repeat(40_000)}`;
-    const start = performance.now();
-    expect(withFallbackFonts(hostile)).toBe(hostile);
-    expect(performance.now() - start).toBeLessThan(1000);
   });
 });
 

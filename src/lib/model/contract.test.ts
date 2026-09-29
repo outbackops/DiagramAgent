@@ -113,6 +113,8 @@ describe("query", () => {
   it("derives unique D2 keys from labels", () => {
     expect(uniqueKey("App Service", [])).toBe("App_Service");
     expect(uniqueKey("App Service", ["App_Service", "App_Service_2"])).toBe("App_Service_3");
+    expect(uniqueKey("API", ["api"])).toBe("API_2");
+    expect(uniqueKey("shape", [])).toBe("shape_2");
     expect(uniqueKey("  ***  ", [])).toBe("node");
   });
 });

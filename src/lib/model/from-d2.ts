@@ -2,6 +2,7 @@ import { compileD2, type CompiledConnection, type CompiledDiagram, type Compiled
 import { resolveColor } from "./d2-theme";
 import { joinPath, splitPath } from "./query";
 import type { Arrowhead, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle } from "./types";
+import { MODEL_LIMITS } from "./validate";
 
 const SAFE_ICON = /^\/icons\/[A-Za-z0-9._-]+\.svg$/;
 const DATA_IMAGE = /^data:image\//;
@@ -60,11 +61,40 @@ function firstBrace(line: string): number {
   return -1;
 }
 
+function countBraces(line: string, brace: "{" | "}"): number {
+  let quote: string | null = null;
+  let count = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === "\\" && i + 1 < line.length) i++;
+      else if (ch === quote) quote = null;
+    } else if (ch === "\"" || ch === "'") {
+      quote = ch;
+    } else if (ch === brace) {
+      count++;
+    }
+  }
+  return count;
+}
+
 function localKeyFromBlockHead(head: string): string | null {
   const trimmed = head.trim();
-  if (!trimmed || trimmed === "classes:" || trimmed.includes("->")) return null;
-  const match = /^((?:"(?:\\.|[^"])+")|(?:'(?:\\.|[^'])+')|(?:[^\s:]+))(?::(?:\s+.*)?)?$/.exec(trimmed);
-  return match?.[1] ?? null;
+  if (!trimmed || trimmed === "classes:" || /(?:<->|->|<-|--)/.test(trimmed)) return null;
+  if (trimmed.startsWith("\"") || trimmed.startsWith("'")) {
+    const quote = trimmed[0];
+    for (let i = 1; i < trimmed.length; i++) {
+      if (trimmed[i] === "\\" && i + 1 < trimmed.length) i++;
+      else if (trimmed[i] === quote) {
+        const inner = trimmed.slice(1, i);
+        return /[.:]/.test(inner) ? trimmed.slice(0, i + 1) : inner;
+      }
+    }
+    return null;
+  }
+  const key = (trimmed.includes(":") ? trimmed.slice(0, trimmed.indexOf(":")) : trimmed).trim();
+  if (!key || ["style", "source-arrowhead", "target-arrowhead"].includes(key)) return null;
+  return key;
 }
 
 function setHint(layout: LayoutHints, key: string, value: string): void {
@@ -87,15 +117,15 @@ function parseSourceHints(code: string | undefined): SourceHints {
   if (/\bnear\s*:/.test(code) || /\bnear\s*=/.test(code)) hints.warnings.push("D2 near constants are not represented in the diagram model.");
   if (/```\w+/.test(code)) hints.warnings.push("D2 text/code blocks with languages are imported as labels only.");
 
-  const stack: string[] = [];
+  const stack: (string | null)[] = [];
   let classDepth = 0;
   for (const raw of code.split(/\r?\n/)) {
     const line = stripComment(raw).trim();
     if (!line) continue;
 
     if (classDepth > 0) {
-      classDepth += (line.match(/\{/g) ?? []).length;
-      classDepth -= (line.match(/\}/g) ?? []).length;
+      classDepth += countBraces(line, "{");
+      classDepth -= countBraces(line, "}");
       continue;
     }
 
@@ -106,6 +136,7 @@ function parseSourceHints(code: string | undefined): SourceHints {
         setHint(hints.modelLayout, prop[1], prop[2]);
       } else {
         const id = stack[stack.length - 1];
+        if (!id) continue;
         const layout = hints.nodeLayouts.get(id) ?? {};
         setHint(layout, prop[1], prop[2]);
         hints.nodeLayouts.set(id, layout);
@@ -117,17 +148,20 @@ function parseSourceHints(code: string | undefined): SourceHints {
     if (brace >= 0) {
       const head = line.slice(0, brace).trim();
       if (head === "classes:") {
-        classDepth = 1;
+        classDepth = countBraces(line, "{") - countBraces(line, "}");
       } else {
         const key = localKeyFromBlockHead(head);
         if (key) {
-          const id = joinPath(stack[stack.length - 1] ?? null, key);
+          const parent = [...stack].reverse().find((id): id is string => Boolean(id)) ?? null;
+          const id = joinPath(parent, key);
           stack.push(id);
+        } else {
+          stack.push(null);
         }
       }
     }
 
-    const closes = (line.match(/\}/g) ?? []).length;
+    const closes = countBraces(line, "}");
     for (let i = 0; i < closes && stack.length > 0; i++) stack.pop();
   }
   return hints;
@@ -136,24 +170,47 @@ function parseSourceHints(code: string | undefined): SourceHints {
 function iconPath(icon: unknown): string | undefined {
   if (typeof icon === "string") return icon;
   if (icon && typeof icon === "object") {
-    const path = (icon as Record<string, unknown>).Path;
-    return typeof path === "string" ? path : undefined;
+    const url = icon as Record<string, unknown>;
+    const scheme = typeof url.Scheme === "string" ? url.Scheme : "";
+    const host = typeof url.Host === "string" ? url.Host : "";
+    const path = typeof url.Path === "string" ? url.Path : "";
+    const opaque = typeof url.Opaque === "string" ? url.Opaque : "";
+    if (scheme === "data" && opaque) return `data:${opaque}`;
+    if (!scheme && !host) return path || undefined;
+    if (scheme || host) return `${scheme ? `${scheme}:` : ""}${host ? `//${host}` : ""}${path}`;
   }
   return undefined;
+}
+
+function clampNumber(value: number | undefined, min: number, max: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  return Math.min(max, Math.max(min, value));
+}
+
+function coordinate(value: number | undefined): number {
+  return clampNumber(value, -MODEL_LIMITS.coordinate, MODEL_LIMITS.coordinate) ?? 0;
+}
+
+function label(value: string | undefined, where: string, warnings: string[]): string {
+  const text = value ?? "";
+  if (text.length <= MODEL_LIMITS.labelLength) return text;
+  warnings.push(`Truncated overlong label for ${where} to ${MODEL_LIMITS.labelLength} characters.`);
+  return text.slice(0, MODEL_LIMITS.labelLength);
 }
 
 function nodeStyle(shape: CompiledShape): NodeStyle {
   return {
     fill: resolveColor(shape.fill),
     stroke: resolveColor(shape.stroke),
-    strokeWidth: shape.strokeWidth,
-    strokeDash: shape.strokeDash,
-    borderRadius: shape.borderRadius,
-    opacity: shape.opacity,
+    strokeWidth: clampNumber(shape.strokeWidth, 0, 100),
+    strokeDash: clampNumber(shape.strokeDash, 0, 100),
+    borderRadius: clampNumber(shape.borderRadius, 0, 1000),
+    opacity: clampNumber(shape.opacity, 0, 1),
     shadow: shape.shadow,
     multiple: shape.multiple,
     doubleBorder: shape["double-border"],
-    fontSize: shape.fontSize,
+    fontSize: clampNumber(shape.fontSize, 1, 400),
     fontColor: resolveColor(shape.color),
     bold: shape.bold,
     italic: shape.italic,
@@ -164,19 +221,42 @@ function nodeStyle(shape: CompiledShape): NodeStyle {
 function edgeStyle(connection: CompiledConnection): EdgeStyle {
   return {
     stroke: resolveColor(connection.stroke),
-    strokeWidth: connection.strokeWidth,
-    strokeDash: connection.strokeDash,
-    opacity: connection.opacity,
-    borderRadius: connection.borderRadius,
-    fontSize: connection.fontSize,
+    strokeWidth: clampNumber(connection.strokeWidth, 0, 100),
+    strokeDash: clampNumber(connection.strokeDash, 0, 100),
+    opacity: clampNumber(connection.opacity, 0, 1),
+    borderRadius: clampNumber(connection.borderRadius, 0, 1000),
+    fontSize: clampNumber(connection.fontSize, 1, 400),
     fontColor: resolveColor(connection.color),
     bold: connection.bold,
     italic: connection.italic,
   };
 }
 
-function asArrowhead(value: string | undefined, fallback: Arrowhead): Arrowhead {
-  return (value ?? fallback) as Arrowhead;
+const ARROWHEADS = new Set<Arrowhead>([
+  "none",
+  "arrow",
+  "triangle",
+  "unfilled-triangle",
+  "diamond",
+  "filled-diamond",
+  "circle",
+  "filled-circle",
+  "box",
+  "filled-box",
+  "line",
+  "cross",
+  "cf-one",
+  "cf-many",
+  "cf-one-required",
+  "cf-many-required",
+]);
+
+function asArrowhead(value: string | undefined, fallback: Arrowhead, warnings: string[], where: string): Arrowhead {
+  if (value === undefined) return fallback;
+  if (ARROWHEADS.has(value as Arrowhead)) return value as Arrowhead;
+  if (value === "filled-triangle") return "triangle";
+  warnings.push(`Unknown arrowhead "${value}" on ${where}; using triangle.`);
+  return "triangle";
 }
 
 export function modelFromCompiled(diagram: CompiledDiagram, options: { code?: string } = {}): { model: DiagramModel; warnings: string[] } {
@@ -198,16 +278,16 @@ export function modelFromCompiled(diagram: CompiledDiagram, options: { code?: st
       return {
         id: shape.id,
         parent: parentPath(shape.id),
-        label: shape.label,
+        label: label(shape.label, shape.id, warnings),
         shape: shape.type,
         icon,
-        box: { x: shape.pos.x, y: shape.pos.y, w: shape.width, h: shape.height },
+        box: { x: coordinate(shape.pos?.x), y: coordinate(shape.pos?.y), w: Math.max(0, coordinate(shape.width)), h: Math.max(0, coordinate(shape.height)) },
         style: nodeStyle(shape),
         container: parentIds.has(shape.id),
         labelPosition: shape.labelPosition || undefined,
         iconPosition: shape.iconPosition || undefined,
         labelSize:
-          shape.labelWidth !== undefined && shape.labelHeight !== undefined ? { w: shape.labelWidth, h: shape.labelHeight } : undefined,
+          shape.labelWidth !== undefined && shape.labelHeight !== undefined ? { w: Math.max(0, coordinate(shape.labelWidth)), h: Math.max(0, coordinate(shape.labelHeight)) } : undefined,
         classes: shape.classes && shape.classes.length > 0 ? [...shape.classes] : undefined,
         layout: source.nodeLayouts.get(shape.id),
         tooltip: shape.tooltip || undefined,
@@ -220,15 +300,15 @@ export function modelFromCompiled(diagram: CompiledDiagram, options: { code?: st
     id: connection.id,
     from: connection.src,
     to: connection.dst,
-    label: connection.label || undefined,
+    label: connection.label ? label(connection.label, connection.id, warnings) : undefined,
     labelSize:
       connection.labelWidth !== undefined && connection.labelHeight !== undefined
-        ? { w: connection.labelWidth, h: connection.labelHeight }
+        ? { w: Math.max(0, coordinate(connection.labelWidth)), h: Math.max(0, coordinate(connection.labelHeight)) }
         : undefined,
-    srcArrow: asArrowhead(connection.srcArrow, "none"),
-    dstArrow: asArrowhead(connection.dstArrow, "triangle"),
+    srcArrow: asArrowhead(connection.srcArrow, "none", warnings, connection.id),
+    dstArrow: asArrowhead(connection.dstArrow, "triangle", warnings, connection.id),
     style: edgeStyle(connection),
-    route: connection.route.map((p) => ({ x: p.x, y: p.y })),
+    route: connection.route.map((p) => ({ x: coordinate(p.x), y: coordinate(p.y) })),
   }));
 
   return { model: { version: 1, layout: source.modelLayout, nodes, edges }, warnings };

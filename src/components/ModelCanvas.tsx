@@ -37,6 +37,12 @@ const DRAG_THRESHOLD = 4;
 const GROUP_PADDING = 24;
 const HANDLE_SIZE = 8;
 
+/** Value for a double-quoted attribute selector (CSS.escape where available). */
+function escapeAttr(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+  return value.replace(/["\\]/g, (ch) => `\\${ch}`);
+}
+
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 const normalizeRect = (a: Point, b: Point): Box => ({
   x: Math.min(a.x, b.x),
@@ -135,6 +141,8 @@ export default function ModelCanvas({
 
   const pointerStart = useRef<Point | null>(null);
   const modelStart = useRef<Point | null>(null);
+  // Raw drop target of the current drag: undefined = not over anything yet, null = top level.
+  const dropRef = useRef<string | null | undefined>(undefined);
   const pointerHit = useRef<{ id: string; kind: "node" | "edge" } | null>(null);
   const pendingConnectTarget = useRef<string | null>(null);
   const translateStart = useRef({ x: 0, y: 0 });
@@ -148,7 +156,9 @@ export default function ModelCanvas({
   >(null);
 
   const renderedSvg = useMemo(() => renderModelSvg(model, { idPrefix: "canvas-" }), [model]);
-  const safeSvg = useMemo(() => sanitizeSvg(renderedSvg), [renderedSvg]);
+  // React 19 re-applies dangerouslySetInnerHTML whenever the object changes, so keep it stable:
+  // otherwise every hover or drag re-render would rebuild the whole diagram DOM.
+  const svgHtml = useMemo(() => ({ __html: sanitizeSvg(renderedSvg) }), [renderedSvg]);
   const bounds = useMemo(() => modelBounds(model), [model]);
   const viewBox = useMemo<Box>(() => ({ x: bounds.x - 40, y: bounds.y - 40, w: bounds.w + 80, h: bounds.h + 80 }), [bounds]);
   const index = useMemo(() => indexModel(model), [model]);
@@ -231,6 +241,7 @@ export default function ModelCanvas({
   const cancelPointer = useCallback(() => {
     pointerStart.current = null;
     modelStart.current = null;
+    dropRef.current = undefined;
     pointerHit.current = null;
     pendingConnectTarget.current = null;
     gesture.current = null;
@@ -244,7 +255,7 @@ export default function ModelCanvas({
       if (!host) return;
       const moving = new Set(nodes);
       for (const id of nodes) {
-        const el = host.querySelector<SVGGElement>(`[data-id="${CSS.escape(id)}"]`);
+        const el = host.querySelector<SVGGElement>(`[data-id="${escapeAttr(id)}"]`);
         if (el) {
           el.style.transform = `translate(${dx}px, ${dy}px)`;
           el.style.opacity = "0.75";
@@ -356,8 +367,9 @@ export default function ModelCanvas({
     }
     if (currentGesture.type === "click") return;
 
-    const dx = (e.clientX - pointerStart.current.x) / view.scale;
-    const dy = (e.clientY - pointerStart.current.y) / view.scale;
+    const current = modelPoint(e.clientX, e.clientY);
+    const dx = current.x - modelStart.current.x;
+    const dy = current.y - modelStart.current.y;
     if (currentGesture.type === "box") {
       setBoxSelect(normalizeRect(modelStart.current, modelPoint(e.clientX, e.clientY)));
       return;
@@ -370,7 +382,8 @@ export default function ModelCanvas({
       if (!dragging && Math.hypot(e.clientX - pointerStart.current.x, e.clientY - pointerStart.current.y) < DRAG_THRESHOLD) return;
       if (!dragging) setDragging(true);
       applyMovePreview(currentGesture.nodes, dx, dy);
-      const target = dropTargetAt(model, modelPoint(e.clientX, e.clientY), currentGesture.roots);
+      const target = dropTargetAt(model, current, currentGesture.roots);
+      dropRef.current = target;
       setDropTarget(target !== currentGesture.sourceParent ? target : null);
     }
   };
@@ -389,19 +402,18 @@ export default function ModelCanvas({
       cancelPointer();
       return;
     }
-    if (currentGesture.type === "move" && dragging) {
-      const dx = (e.clientX - start.x) / view.scale;
-      const dy = (e.clientY - start.y) / view.scale;
+    if (currentGesture.type === "move" && dragging && modelStart.current) {
+      const end = modelPoint(e.clientX, e.clientY);
+      const dx = Math.round(end.x - modelStart.current.x);
+      const dy = Math.round(end.y - modelStart.current.y);
       const roots = currentGesture.roots;
-      const target = dropTarget;
-      if (roots.length === 1 && target !== currentGesture.sourceParent) {
+      const target = dropRef.current;
+      // Only a drop onto a different group (or out to the top level) regroups; moving inside the same group just moves.
+      if (roots.length === 1 && target !== undefined && target !== currentGesture.sourceParent) {
         const at = { x: (index.byId.get(roots[0])?.box.x ?? 0) + dx, y: (index.byId.get(roots[0])?.box.y ?? 0) + dy };
-        let nextId = roots[0];
-        onApply((draft) => {
-          const result = reparent(draft, roots[0], target, at);
-          nextId = result.id;
-          return result.model;
-        });
+        // Ids are D2 paths, so regrouping renames the node; the pure op gives the new id up front.
+        const nextId = reparent(model, roots[0], target, at).id;
+        onApply((draft) => reparent(draft, roots[0], target, at).model);
         onSelectionChange([nextId]);
       } else {
         onApply((draft) => moveItems(draft, roots, dx, dy));
@@ -517,7 +529,7 @@ export default function ModelCanvas({
           }}
         >
           <div className="relative h-full w-full">
-            <div ref={svgHostRef} className="model-canvas-host h-full w-full" dangerouslySetInnerHTML={{ __html: safeSvg }} />
+            <div ref={svgHostRef} className="model-canvas-host h-full w-full" dangerouslySetInnerHTML={svgHtml} />
             <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`} aria-hidden>
               {selectedBoxes.map(({ id, box }) => (
                 <rect

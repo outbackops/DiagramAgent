@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
 import { commit, createHistory, redo as redoHistory, undo as undoHistory, type History } from "@/lib/model/history";
-import { mergeStable } from "@/lib/model/merge";
+import { carryContainers, mergeStable } from "@/lib/model/merge";
 import { routeModelEdges } from "@/lib/model/route";
 import { modelToD2 } from "@/lib/model/to-d2";
 import type { DiagramModel } from "@/lib/model/types";
 import { validateModel } from "@/lib/model/validate";
 
 export const MODEL_STORAGE_KEY = "diagramAgent.model.v1";
+/** Where a saved model that no longer validates is kept, instead of being deleted. */
+export const MODEL_BACKUP_KEY = "diagramAgent.model.v1.unreadable";
 const LEGACY_CODE_KEY = "diagramAgent.d2Code";
 /** An AI edit that adds or regroups at least this many items suggests a Tidy up (R16). */
 export const LARGE_EDIT = 5;
@@ -25,14 +27,22 @@ export interface AcceptResult {
 
 export type DocumentStatus = "loading" | "migrating" | "ready";
 
-function readStoredModel(): DiagramModel | null {
+/** After a chat edit merged into the layout, many new or regrouped items deserve a fresh layout (R16). */
+export function suggestsTidyUp(result: AcceptResult, layout: RunLayout): boolean {
+  return layout === "stable" && result.added + result.regrouped >= LARGE_EDIT;
+}
+
+type StoredModel = { kind: "none" } | { kind: "ok"; model: DiagramModel } | { kind: "unreadable"; raw: string };
+
+function readStoredModel(): StoredModel {
+  let raw: string | null = null;
   try {
-    const raw = window.localStorage.getItem(MODEL_STORAGE_KEY);
-    if (!raw) return null;
+    raw = window.localStorage.getItem(MODEL_STORAGE_KEY);
+    if (!raw) return { kind: "none" };
     const result = validateModel(JSON.parse(raw));
-    return result.ok ? result.model : null;
+    return result.ok ? { kind: "ok", model: result.model } : { kind: "unreadable", raw };
   } catch {
-    return null;
+    return raw ? { kind: "unreadable", raw } : { kind: "none" };
   }
 }
 
@@ -64,16 +74,32 @@ export function useDiagramDocument() {
   useEffect(() => {
     historyRef.current = history;
   });
+  // Bumped by every change to the document (edits, undo, runs, imports, New), so an
+  // async result can tell whether the diagram it started from is still the current one.
+  const generation = useRef(0);
+  // The saved diagram is only deleted after an explicit New, never because loading failed.
+  const clearedRef = useRef(false);
   const model = history.present;
 
   // Load the saved model; diagrams saved by the D2-based version are imported
   // once, and their D2 stays in storage so a failed import loses nothing (R19).
   useEffect(() => {
     const stored = readStoredModel();
-    if (stored) {
+    if (stored.kind === "ok") {
       // Hydrating from browser storage after mount keeps server and client renders identical.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHistory(createHistory(stored));
+      setHistory(createHistory(stored.model));
+      setStatus("ready");
+      return;
+    }
+    if (stored.kind === "unreadable") {
+      // Never silently lose a diagram (or replace it with older D2): keep a copy and say so.
+      try {
+        window.localStorage.setItem(MODEL_BACKUP_KEY, stored.raw);
+      } catch {
+        // Storage full: the original entry is still there until the next save.
+      }
+      setError("Your saved diagram couldn't be opened. A copy was kept in this browser's storage.");
       setStatus("ready");
       return;
     }
@@ -102,8 +128,12 @@ export function useDiagramDocument() {
   useEffect(() => {
     if (status !== "ready") return;
     try {
-      if (model) window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model));
-      else window.localStorage.removeItem(MODEL_STORAGE_KEY);
+      if (model) {
+        window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model));
+        clearedRef.current = false;
+      } else if (clearedRef.current) {
+        window.localStorage.removeItem(MODEL_STORAGE_KEY);
+      }
     } catch {
       // Storage full or disabled: the diagram still works for this session.
     }
@@ -111,6 +141,7 @@ export function useDiagramDocument() {
 
   /** Applies a hand edit; lines that need it are re-routed. */
   const apply = useCallback((op: (current: DiagramModel) => DiagramModel, options?: { coalesceKey?: string }) => {
+    generation.current++;
     setHistory((h) => {
       if (!h.present) return h;
       const next = op(h.present);
@@ -119,9 +150,14 @@ export function useDiagramDocument() {
     });
   }, []);
 
-  /** Puts a whole model on the canvas as one undoable step. */
+  /**
+   * Puts a whole model on the canvas as one undoable step. The first diagram
+   * starts a fresh history: undoing back to "no diagram" would leave nothing to
+   * redo from.
+   */
   const replace = useCallback((next: DiagramModel | null) => {
-    setHistory((h) => commit(h, next));
+    generation.current++;
+    setHistory((h) => (h.present === null ? createHistory(next) : commit(h, next)));
   }, []);
 
   /**
@@ -129,8 +165,11 @@ export function useDiagramDocument() {
    * reviewer fixes, or merged into the current layout for chat edits.
    */
   const acceptRunCode = useCallback(async (code: string, layout: RunLayout, signal?: AbortSignal): Promise<AcceptResult> => {
-    const { model: imported, warnings } = await importCode(code, signal);
+    const started = generation.current;
     const current = historyRef.current.present;
+    const { model: imported, warnings } = await importCode(code, signal);
+    // Async results only land if the diagram hasn't changed (edit, undo, New…) meanwhile.
+    if (generation.current !== started) return { added: 0, regrouped: 0, warnings: [] };
     if (layout === "stable" && current && current.nodes.length > 0) {
       const merged = mergeStable(current, imported);
       replace(routeModelEdges(merged.model));
@@ -142,16 +181,22 @@ export function useDiagramDocument() {
 
   /** Re-runs the full automatic layout on the current diagram (R15). */
   const tidyUp = useCallback(async () => {
+    const started = generation.current;
     const current = historyRef.current.present;
     if (!current || current.nodes.length === 0) return;
     const { model: imported } = await importCode(modelToD2(current));
-    replace({ ...imported, handArranged: false });
+    if (generation.current !== started) throw new Error("The diagram changed while it was being tidied. Try again.");
+    // D2 has no empty groups; keep the ones you made.
+    replace({ ...carryContainers(current, imported), handArranged: false });
   }, [replace]);
 
   /** Opens D2 from elsewhere as the current diagram (undoable). */
   const importD2 = useCallback(
-    async (code: string): Promise<string[]> => {
-      const { model: imported, warnings } = await importCode(code);
+    async (code: string, signal?: AbortSignal): Promise<string[]> => {
+      const started = generation.current;
+      const { model: imported, warnings } = await importCode(code, signal);
+      if (signal?.aborted) throw new DOMException("Import cancelled", "AbortError");
+      if (generation.current !== started) throw new Error("The diagram changed while importing. Try again.");
       replace({ ...imported, handArranged: false });
       return warnings;
     },
@@ -159,12 +204,20 @@ export function useDiagramDocument() {
   );
 
   const clear = useCallback(() => {
+    generation.current++;
+    clearedRef.current = true;
     setHistory(createHistory(null));
     setError(null);
   }, []);
 
-  const undo = useCallback(() => setHistory((h) => undoHistory(h)), []);
-  const redo = useCallback(() => setHistory((h) => redoHistory(h)), []);
+  const undo = useCallback(() => {
+    generation.current++;
+    setHistory((h) => undoHistory(h));
+  }, []);
+  const redo = useCallback(() => {
+    generation.current++;
+    setHistory((h) => redoHistory(h));
+  }, []);
 
   const d2 = useMemo(() => (model && model.nodes.length > 0 ? modelToD2(model) : ""), [model]);
 

@@ -13,15 +13,20 @@ interface RouteOptions {
   toSide?: Side;
   fromOffset?: number;
   toOffset?: number;
+  maxExpansions?: number;
 }
 
 interface InternalRouteOptions extends RouteOptions {
   softObstacles?: Box[];
   softPenalty?: number;
+  fallbackOnly?: boolean;
+  budget?: { remaining: number };
 }
 
 const DEFAULT_MARGIN = 12;
 const DEFAULT_BEND_PENALTY = 30;
+const DEFAULT_MAX_EXPANSIONS = 20_000;
+const DEFAULT_TOTAL_EXPANSIONS = 50_000;
 const STUB = 8;
 const EPSILON = 0.001;
 
@@ -73,7 +78,11 @@ function stubPoint(p: Point, side: Side): Point {
 }
 
 function uniqueSorted(values: number[]): number[] {
-  return [...new Set(values.map((v) => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+  return [...new Set(values.map(snapGrid))].sort((a, b) => a - b);
+}
+
+function snapGrid(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function addCoordinate(values: number[], value: number): void {
@@ -89,8 +98,12 @@ function pointKey(ix: number, iy: number, dir: Dir): string {
   return `${ix},${iy},${dir}`;
 }
 
+function pointInsideBox(p: Point, b: Box): boolean {
+  return p.x > b.x + EPSILON && p.x < right(b) - EPSILON && p.y > b.y + EPSILON && p.y < bottom(b) - EPSILON;
+}
+
 function pointInsideAny(p: Point, boxes: Box[]): boolean {
-  return boxes.some((b) => p.x > b.x + EPSILON && p.x < right(b) - EPSILON && p.y > b.y + EPSILON && p.y < bottom(b) - EPSILON);
+  return boxes.some((b) => pointInsideBox(p, b));
 }
 
 function segmentPenalty(a: Point, b: Point, hard: Box[], soft: Box[], softPenalty: number): number | null {
@@ -102,6 +115,48 @@ function segmentPenalty(a: Point, b: Point, hard: Box[], soft: Box[], softPenalt
     if (segmentHitsBox(a, b, box)) penalty += softPenalty;
   }
   return penalty;
+}
+
+function edgeKey(ix: number, iy: number, dir: Dir): string {
+  return `${ix},${iy},${dir}`;
+}
+
+function buildGridObstacles(gridX: number[], gridY: number[], hard: Box[], soft: Box[], softPenalty: number): { blockedPoints: Set<string>; blockedEdges: Set<string>; edgePenalties: Map<string, number> } {
+  const blockedPoints = new Set<string>();
+  for (let iy = 0; iy < gridY.length; iy++) {
+    for (let ix = 0; ix < gridX.length; ix++) {
+      const p = { x: gridX[ix], y: gridY[iy] };
+      if (hard.some((box) => pointInsideBox(p, box))) blockedPoints.add(`${ix},${iy}`);
+    }
+  }
+
+  const blockedEdges = new Set<string>();
+  const edgePenalties = new Map<string, number>();
+  const addEdge = (ix: number, iy: number, dir: Dir, a: Point, b: Point) => {
+    const key = edgeKey(ix, iy, dir);
+    if (hard.some((box) => segmentHitsBox(a, b, box))) {
+      blockedEdges.add(key);
+      return;
+    }
+    const hits = soft.reduce((sum, box) => sum + (segmentHitsBox(a, b, box) ? softPenalty : 0), 0);
+    if (hits > 0) edgePenalties.set(key, hits);
+  };
+  for (let iy = 0; iy < gridY.length; iy++) {
+    for (let ix = 0; ix < gridX.length; ix++) {
+      const a = { x: gridX[ix], y: gridY[iy] };
+      if (ix + 1 < gridX.length) {
+        const b = { x: gridX[ix + 1], y: gridY[iy] };
+        addEdge(ix, iy, "right", a, b);
+        addEdge(ix + 1, iy, "left", b, a);
+      }
+      if (iy + 1 < gridY.length) {
+        const b = { x: gridX[ix], y: gridY[iy + 1] };
+        addEdge(ix, iy, "down", a, b);
+        addEdge(ix, iy + 1, "up", b, a);
+      }
+    }
+  }
+  return { blockedPoints, blockedEdges, edgePenalties };
 }
 
 class MinHeap<T> {
@@ -160,6 +215,7 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
   const bendPenalty = options.bendPenalty ?? DEFAULT_BEND_PENALTY;
   const soft = options.softObstacles ?? [];
   const softPenalty = options.softPenalty ?? 60;
+  const maxExpansions = options.maxExpansions ?? DEFAULT_MAX_EXPANSIONS;
   const xs: number[] = [start.x, end.x];
   const ys: number[] = [start.y, end.y];
   const all = unionBoxes([...hard, ...soft]) ?? { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), w: Math.abs(start.x - end.x), h: Math.abs(start.y - end.y) };
@@ -179,11 +235,14 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
 
   const gridX = uniqueSorted(xs);
   const gridY = uniqueSorted(ys);
-  const startIx = gridX.indexOf(start.x);
-  const startIy = gridY.indexOf(start.y);
-  const endIx = gridX.indexOf(end.x);
-  const endIy = gridY.indexOf(end.y);
+  const startIx = gridX.indexOf(snapGrid(start.x));
+  const startIy = gridY.indexOf(snapGrid(start.y));
+  const endIx = gridX.indexOf(snapGrid(end.x));
+  const endIy = gridY.indexOf(snapGrid(end.y));
   if (startIx < 0 || startIy < 0 || endIx < 0 || endIy < 0) return null;
+  const obstacleCount = hard.length + soft.length;
+  const precomputeCost = gridX.length * gridY.length * Math.max(1, obstacleCount);
+  const obstacleGrid = obstacleCount > 80 && precomputeCost <= 100_000 ? buildGridObstacles(gridX, gridY, hard, soft, softPenalty) : null;
 
   const best = new Map<string, number>();
   const prev = new Map<string, string>();
@@ -193,9 +252,12 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
   heap.push({ ix: startIx, iy: startIy, dir: startDir }, Math.abs(start.x - end.x) + Math.abs(start.y - end.y));
 
   let endKey: string | null = null;
+  let expansions = 0;
   while (heap.length > 0) {
     const current = heap.pop();
     if (!current) break;
+    expansions += 1;
+    if (expansions > maxExpansions || (options.budget && --options.budget.remaining < 0)) return null;
     const key = pointKey(current.ix, current.iy, current.dir);
     const cost = best.get(key);
     if (cost === undefined) continue;
@@ -214,9 +276,17 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
     for (const n of neighbours) {
       if (n.ix < 0 || n.iy < 0 || n.ix >= gridX.length || n.iy >= gridY.length) continue;
       const b = { x: gridX[n.ix], y: gridY[n.iy] };
-      if (pointInsideAny(b, hard)) continue;
-      const penalty = segmentPenalty(a, b, hard, soft, softPenalty);
-      if (penalty === null) continue;
+      const moveKey = edgeKey(current.ix, current.iy, n.dir);
+      let penalty = 0;
+      if (obstacleGrid) {
+        if (obstacleGrid.blockedPoints.has(`${n.ix},${n.iy}`) || obstacleGrid.blockedEdges.has(moveKey)) continue;
+        penalty = obstacleGrid.edgePenalties.get(moveKey) ?? 0;
+      } else {
+        if (pointInsideAny(b, hard)) continue;
+        const scanPenalty = segmentPenalty(a, b, hard, soft, softPenalty);
+        if (scanPenalty === null) continue;
+        penalty = scanPenalty;
+      }
       const turnCost = current.dir === n.dir ? 0 : bendPenalty;
       const nextCost = cost + Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + turnCost + penalty;
       const nextKey = pointKey(n.ix, n.iy, n.dir);
@@ -255,6 +325,10 @@ function fallbackRoute(from: Box, to: Box, fromSide: Side, toSide: Side, fromOff
 }
 
 function routeWithSides(from: Box, to: Box, obstacles: Box[], fromSide: Side, toSide: Side, options: InternalRouteOptions): SearchResult {
+  if (options.fallbackOnly) {
+    const points = fallbackRoute(from, to, fromSide, toSide, options.fromOffset ?? 0, options.toOffset ?? 0);
+    return { points, cost: polylineLength(points) + 100_000 };
+  }
   const start = port(from, fromSide, options.fromOffset ?? 0);
   const end = port(to, toSide, options.toOffset ?? 0);
   const startStub = stubPoint(start, fromSide);
@@ -357,9 +431,10 @@ function endpointAndDescendants(index: ReturnType<typeof indexModel>, id: string
   return excluded;
 }
 
-export function routeModelEdges(model: DiagramModel, options: { edgeIds?: string[]; all?: boolean } = {}): DiagramModel {
+export function routeModelEdges(model: DiagramModel, options: { edgeIds?: string[]; all?: boolean; fallbackOnly?: boolean; maxExpansions?: number; totalExpansions?: number } = {}): DiagramModel {
   const selected = new Set(options.edgeIds ?? model.edges.filter((e) => options.all || e.route.length === 0).map((e) => e.id));
   if (selected.size === 0) return model;
+  const budget = { remaining: options.totalExpansions ?? DEFAULT_TOTAL_EXPANSIONS };
   const index = indexModel(model);
   const leaves = leafNodes(model);
   const groupNodes = model.nodes.filter((n) => isGroup(index, n.id));
@@ -375,7 +450,7 @@ export function routeModelEdges(model: DiagramModel, options: { edgeIds?: string
     const obstacles = pruneObstacles(from.box, to.box, allObstacles, DEFAULT_MARGIN);
     const softObstacles = groupNodes.filter((n) => n.id !== edge.from && n.id !== edge.to && !isWithin(index, edge.from, n.id) && !isWithin(index, edge.to, n.id)).map((n) => expand(n.box, DEFAULT_MARGIN));
     const portOptions = spread.get(edge.id);
-    const route = routeEdgeInternal(from.box, to.box, obstacles, { ...portOptions, softObstacles });
+    const route = routeEdgeInternal(from.box, to.box, obstacles, { ...portOptions, softObstacles, fallbackOnly: options.fallbackOnly, maxExpansions: options.maxExpansions, budget });
     changed = true;
     return { ...edge, route };
   });

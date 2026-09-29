@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
   if (body?.model !== undefined) {
     const result = validateModel(body.model);
     if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
-    const model = routeModelEdges(result.model);
+    const model = routeModelEdges(result.model, { fallbackOnly: true });
     return NextResponse.json({ svg: renderModelSvg(model), quality: score(modelToD2(model), modelToCompiled(model)) });
   }
 
@@ -65,7 +65,12 @@ export async function POST(request: NextRequest) {
   try {
     const { diagram } = await compileD2(code, { signal: request.signal });
     const { model, warnings } = modelFromCompiled(diagram, { code });
-    return NextResponse.json({ svg: renderModelSvg(model), quality: score(code, diagram), model, warnings });
+    const validated = validateModel(model);
+    if (!validated.ok) {
+      console.error("Imported D2 model failed validation:", validated.error);
+      return NextResponse.json({ error: `Imported D2 model is invalid: ${validated.error}` }, { status: 500 });
+    }
+    return NextResponse.json({ svg: renderModelSvg(validated.model), quality: score(code, diagram), model: validated.model, warnings });
   } catch (err) {
     if (err instanceof D2BusyError) return NextResponse.json({ error: err.message }, { status: 503 });
     if (err instanceof Error && err.name === "AbortError") return NextResponse.json({ error: "Request was cancelled" }, { status: 499 });

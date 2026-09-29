@@ -1,27 +1,7 @@
+import { D2_THEME_0 } from "./d2-theme";
 import { longestSegmentMidpoint, unionBoxes } from "./geometry";
 import { indexModel, isGroup } from "./query";
 import type { Arrowhead, Box, DiagramEdge, DiagramModel, DiagramNode, NodeStyle, Point, Size } from "./types";
-
-export const D2_THEME0: Record<string, string> = {
-  N1: "#0A0F25",
-  N2: "#676C7E",
-  N3: "#9499AB",
-  N4: "#CFD2DD",
-  N5: "#DEE1EB",
-  N6: "#EEF1F8",
-  N7: "#FFFFFF",
-  B1: "#0D32B2",
-  B2: "#0D32B2",
-  B3: "#E3E9FD",
-  B4: "#E3E9FD",
-  B5: "#EDF0FD",
-  B6: "#F7F8FE",
-  AA2: "#4A6FF3",
-  AA4: "#EDF0FD",
-  AA5: "#F7F8FE",
-  AB4: "#EDF0FD",
-  AB5: "#F7F8FE",
-};
 
 export interface RenderModelSvgOptions {
   padding?: number;
@@ -39,7 +19,6 @@ interface LabelPlacement {
 const FONT_FAMILY = "\"Source Sans Pro\", \"Segoe UI\", \"Helvetica Neue\", Arial, sans-serif";
 const DEFAULT_STROKE = "#0D32B2";
 const DEFAULT_FONT = "#0A0F25";
-const DEFAULT_GROUP_FILL = "#F7F8FE";
 const LABEL_PAD = 8;
 
 export function modelBounds(model: DiagramModel): Box {
@@ -109,8 +88,8 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
   }
   const icon = safeIconHref(node.icon);
   if (icon) {
-    const iconBox = node.shape.toLowerCase() === "image" ? node.box : iconPlacement(node);
-    parts.push(`<image href="${escAttr(icon)}" x="${num(iconBox.x)}" y="${num(iconBox.y)}" width="${num(iconBox.w)}" height="${num(iconBox.h)}"/>`);
+    const place = iconBox(node);
+    parts.push(`<image href="${escAttr(icon)}" x="${num(place.x)}" y="${num(place.y)}" width="${num(place.w)}" height="${num(place.h)}"/>`);
   }
   if (node.label) parts.push(renderText(node.label, nodeLabelPlacement(node, group), node.style));
   parts.push("</g>");
@@ -119,7 +98,7 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
 
 function renderShape(node: DiagramNode, group: boolean, box: Box, extra: string): string {
   const style = node.style;
-  const fill = style.fill === undefined ? (group ? DEFAULT_GROUP_FILL : "#ffffff") : resolveColor(style.fill);
+  const fill = style.fill === undefined ? "transparent" : resolveColor(style.fill);
   const stroke = resolveColor(style.stroke ?? (group ? "#757575" : DEFAULT_STROKE));
   const sw = style.strokeWidth ?? (group ? 2 : 1);
   const attrs = [
@@ -216,8 +195,10 @@ function edgeLabelBox(edge: DiagramEdge): Box {
   return { x: mid.x - size.w / 2 - 6, y: mid.y - size.h / 2 - 3, w: size.w + 12, h: size.h + 6 };
 }
 
-function iconPlacement(node: DiagramNode): Box {
+/** Where a node's icon is drawn (absolute). Exporters use the same box so files match the canvas. */
+export function iconBox(node: DiagramNode): Box {
   const box = node.box;
+  if (node.shape.toLowerCase() === "image") return box;
   const pos = normalizePosition(node.iconPosition || "INSIDE_MIDDLE_CENTER");
   const middle = pos === "INSIDE_MIDDLE_CENTER";
   const minSide = Math.min(box.w, box.h);
@@ -383,7 +364,7 @@ function normalizePosition(pos: string): string {
 }
 
 function resolveColor(color: string): string {
-  return D2_THEME0[color] ?? color;
+  return D2_THEME_0[color] ?? color;
 }
 
 function dashAttr(strokeDash: number | undefined): string {

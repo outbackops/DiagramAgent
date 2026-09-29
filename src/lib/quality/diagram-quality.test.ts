@@ -119,3 +119,22 @@ describe("findUnknownIcons", () => {
     expect(findUnknownIcons("a.icon: 'not-a-real-icon-xyz' # comment")).toEqual(["not-a-real-icon-xyz"]);
   });
 });
+
+describe("scoring cost on large or hostile diagrams", () => {
+  it("bounds the crossing and through-node checks", () => {
+    // 100 long zig-zag lines inside the same area: no crossings, but a naive check compares ~48M segment pairs.
+    const connections = Array.from({ length: 100 }, (_, i) => ({
+      id: `e${i}`,
+      src: `s${i}`,
+      dst: `t${i}`,
+      label: "",
+      strokeDash: 0,
+      route: Array.from({ length: 100 }, (_, k) => ({ x: k * 10, y: i * 3 + (k % 2) })),
+    }));
+    const shapes = Array.from({ length: 200 }, (_, i) => ({ id: `n${i}`, type: "rectangle", pos: { x: (i % 20) * 50, y: Math.floor(i / 20) * 30 }, width: 40, height: 20, label: "", icon: null, level: 1 }));
+    const started = performance.now();
+    countCrossings(connections);
+    findEdgesThroughNodes({ shapes, connections });
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});

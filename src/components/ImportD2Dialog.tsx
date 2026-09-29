@@ -5,12 +5,28 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Dialog } from "./ui/Dialog";
 import { Button, Spinner } from "./ui/primitives";
 
-export default function ImportD2Dialog({ open, onClose, onImport }: { open: boolean; onClose: () => void; onImport: (code: string) => Promise<string[]> }) {
+export default function ImportD2Dialog({
+  open,
+  onClose,
+  onImport,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImport: (code: string, signal: AbortSignal) => Promise<string[]>;
+}) {
   const [code, setCode] = useState("");
   const [warnings, setWarnings] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pending = useRef<AbortController | null>(null);
+
+  // Closing (Cancel, Esc, backdrop) while an import runs cancels it, so it can't replace the diagram afterwards.
+  useEffect(() => {
+    if (open) return;
+    pending.current?.abort();
+    pending.current = null;
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -22,15 +38,21 @@ export default function ImportD2Dialog({ open, onClose, onImport }: { open: bool
   }, [open]);
 
   const importCode = async () => {
+    pending.current?.abort();
+    const controller = new AbortController();
+    pending.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const nextWarnings = await onImport(code);
-      setWarnings(nextWarnings);
+      const nextWarnings = await onImport(code, controller.signal);
+      if (!controller.signal.aborted) setWarnings(nextWarnings);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (pending.current === controller) {
+        pending.current = null;
+        setLoading(false);
+      }
     }
   };
 

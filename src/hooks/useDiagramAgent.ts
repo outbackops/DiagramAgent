@@ -171,8 +171,8 @@ export interface AgentModels {
 export type KeepLayout = "full" | "stable";
 
 export interface AgentDocument {
-  /** D2 of the diagram currently on the canvas ("" when there is none); edit runs start from it. */
-  currentCode: () => string;
+  /** D2 of the diagram on the canvas: "" for an empty canvas, null when there's no document yet. Edit runs start from it. */
+  currentCode: () => string | null;
   /** Puts a run's result on the canvas. Rejections are reported in the conversation. */
   onKeep: (code: string, info: { layout: KeepLayout; status: "done" | "cancelled" | "failed" }) => Promise<unknown> | void;
 }
@@ -193,8 +193,8 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
   });
   /** The diagram edit runs start from: the canvas when there is a document, otherwise the last run's code. */
   const currentCode = useCallback(() => {
-    const fromDocument = documentRef.current?.currentCode() ?? "";
-    return fromDocument.trim() ? fromDocument : code;
+    const fromDocument = documentRef.current?.currentCode();
+    return fromDocument ?? code;
   }, [code]);
 
   // One-time cleanup after hydration: migrate the old chat format and mark

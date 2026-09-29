@@ -1,7 +1,7 @@
 ---
 title: Editable diagram canvas on a model we own — Milestone 1
 date: 2026-09-29
-status: active
+status: completed
 origin: docs/brainstorms/2026-09-28-editable-diagram-canvas-requirements.md
 ---
 

@@ -1,5 +1,5 @@
 import { keyOf } from "./query";
-import type { DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle } from "./types";
+import type { Arrowhead, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle } from "./types";
 
 type StyleValue = string | number | boolean;
 
@@ -42,6 +42,25 @@ function layoutLines(layout: LayoutHints | undefined): string[] {
   if (isSet(layout.gridColumns)) lines.push(`grid-columns: ${layout.gridColumns}`);
   if (isSet(layout.gridGap)) lines.push(`grid-gap: ${layout.gridGap}`);
   return lines;
+}
+
+function d2Near(position: string): string | undefined {
+  const match = /^(INSIDE|OUTSIDE)_(TOP|MIDDLE|BOTTOM)_(LEFT|CENTER|RIGHT)$/.exec(position);
+  if (!match) return undefined;
+  const [, scope, vertical, horizontal] = match;
+  if (scope === "OUTSIDE" && vertical === "MIDDLE") return undefined;
+  const parts = [];
+  if (scope === "OUTSIDE") parts.push("outside");
+  parts.push(vertical.toLowerCase() === "middle" ? "center" : vertical.toLowerCase());
+  parts.push(horizontal.toLowerCase());
+  return parts.join("-");
+}
+
+function defaultLabelPosition(node: DiagramNode): string {
+  if (node.shape === "image") return "OUTSIDE_BOTTOM_CENTER";
+  if (node.container) return "INSIDE_TOP_CENTER";
+  if (node.icon) return "INSIDE_TOP_CENTER";
+  return "INSIDE_MIDDLE_CENTER";
 }
 
 // Values equal to D2's own defaults are left out: the export stays short for
@@ -140,6 +159,35 @@ function emitStyleBlock(lines: string[], styles: Record<string, StyleValue>, ind
   for (const key of Object.keys(styles).sort()) lines.push(`${indent}${key}: ${formatValue(styles[key])}`);
 }
 
+function addArrowhead(styles: Record<string, StyleValue>, prefix: "source" | "target", arrowhead: Arrowhead): void {
+  if (arrowhead === "none") {
+    styles[`${prefix}-arrowhead.shape`] = "none";
+    return;
+  }
+  if (arrowhead === "filled-diamond" || arrowhead === "filled-circle" || arrowhead === "filled-box") {
+    styles[`${prefix}-arrowhead.shape`] = arrowhead.replace("filled-", "");
+    styles[`${prefix}-arrowhead.style.filled`] = true;
+    return;
+  }
+  if (arrowhead === "unfilled-triangle") {
+    styles[`${prefix}-arrowhead.shape`] = "triangle";
+    styles[`${prefix}-arrowhead.style.filled`] = false;
+    return;
+  }
+  if (arrowhead === "line") {
+    styles[`${prefix}-arrowhead.shape`] = "arrow";
+    return;
+  }
+  styles[`${prefix}-arrowhead.shape`] = arrowhead;
+}
+
+function chooseOperator(srcArrow: Arrowhead, dstArrow: Arrowhead): string {
+  if (srcArrow !== "none" && dstArrow !== "none") return "<->";
+  if (srcArrow !== "none") return "<-";
+  if (dstArrow !== "none") return "->";
+  return "--";
+}
+
 export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "paths" } = {}): string {
   const iconMode = options.icons ?? "keys";
   const lines: string[] = [];
@@ -180,6 +228,12 @@ export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "path
     const body = INDENT.repeat(depth + 1);
     if (node.shape !== "rectangle") lines.push(`${body}shape: ${node.shape}`);
     if (node.icon) lines.push(`${body}icon: ${iconValue(node.icon, iconMode)}`);
+    if (node.tooltip) lines.push(`${body}tooltip: ${quoteString(node.tooltip)}`);
+    if (node.link) lines.push(`${body}link: ${quoteString(node.link)}`);
+    const labelNear = node.labelPosition && node.labelPosition !== defaultLabelPosition(node) ? d2Near(node.labelPosition) : undefined;
+    if (labelNear) lines.push(`${body}label.near: ${labelNear}`);
+    const iconNear = node.iconPosition && node.iconPosition !== "INSIDE_MIDDLE_CENTER" ? d2Near(node.iconPosition) : undefined;
+    if (iconNear) lines.push(`${body}icon.near: ${iconNear}`);
     for (const line of layoutLines(node.layout)) lines.push(`${body}${line}`);
     for (const child of children.get(node.id) ?? []) emitNode(child, depth + 1);
     lines.push(`${indent}}`, "");
@@ -190,14 +244,9 @@ export function modelToD2(model: DiagramModel, options: { icons?: "keys" | "path
   for (const edge of model.edges) {
     const label = edge.label ? `: ${quoteString(edge.label)}` : "";
     const styles = edgeStyleProps(edge.style);
-    let operator = "->";
-    if (edge.srcArrow === "triangle" && edge.dstArrow === "triangle") operator = "<->";
-    else if (edge.srcArrow === "triangle" && edge.dstArrow === "none") operator = "<-";
-    else if (edge.srcArrow === "none" && edge.dstArrow === "none") operator = "--";
-    else {
-      if (edge.srcArrow !== "none") styles["source-arrowhead.shape"] = edge.srcArrow;
-      if (edge.dstArrow !== "triangle") styles["target-arrowhead.shape"] = edge.dstArrow;
-    }
+    const operator = chooseOperator(edge.srcArrow, edge.dstArrow);
+    if ((operator === "<->" || operator === "<-") && edge.srcArrow !== "triangle") addArrowhead(styles, "source", edge.srcArrow);
+    if ((operator === "<->" || operator === "->") && edge.dstArrow !== "triangle") addArrowhead(styles, "target", edge.dstArrow);
     const keys = Object.keys(styles).sort();
     if (keys.length === 0) {
       lines.push(`${edge.from} ${operator} ${edge.to}${label}`);
