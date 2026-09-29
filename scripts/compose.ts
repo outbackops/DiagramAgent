@@ -1,7 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { detectSpecKind, parseKindFlag, type CliSpecKind } from "@/lib/arch/cli-detect";
+import { composeArchitectureText, type ArchLayoutReport } from "@/lib/arch";
+import { scoreArchitecture } from "@/lib/arch/quality";
 import { composeText, type LayoutReport } from "@/lib/compose";
+import { parseSpecText } from "@/lib/compose/normalize";
 import { scoreComposition } from "@/lib/compose/quality";
 import { SpecError } from "@/lib/compose/spec";
 import { renderModelSvg } from "@/lib/model/render-svg";
@@ -10,7 +14,7 @@ import { inlineVendoredIcons, svgToPng } from "@/lib/svg-raster";
 
 /**
  * Render a composition spec to SVG or PNG, for people and for other agents:
- *   npm run compose -- spec.json -o out.png [--width 1600] [--json] [--strict]
+ *   npm run compose -- spec.json -o out.png [--kind architecture|poster] [--width 1600] [--json] [--strict]
  * Exit codes: 0 ok · 1 unusable spec or a critical quality failure ·
  * 2 (--strict only) the spec needed repairs or a quality check failed.
  */
@@ -22,13 +26,15 @@ interface CliOptions {
   json: boolean;
   strict: boolean;
   quiet: boolean;
+  kind?: CliSpecKind;
 }
 
-const HELP = `Usage: npm run compose -- <spec.json | --stdin> [-o out.svg|out.png] [--width N] [--json] [--strict] [--quiet]
+const HELP = `Usage: npm run compose -- <spec.json | --stdin> [-o out.svg|out.png] [--kind architecture|poster] [--width N] [--json] [--strict] [--quiet]
 
 Options:
   --stdin          Read the spec from stdin (also: - as the input path)
   -o, --out FILE   Output path; the extension picks .svg or .png. Default: the input path with .svg
+  --kind KIND      Override spec detection. Accepts architecture, arch, poster, or composition
   --width N        Lay the page out at exactly N px wide (raised to the minimum the content needs)
   --json           Print a machine-readable report (page, warnings, layout, quality) on stdout
   --strict         Exit 2 when the spec needed repairs or any quality check failed
@@ -48,6 +54,7 @@ function parseArgs(argv: string[]): CliOptions {
       return value;
     };
     if (arg === "-o" || arg === "--out") options.out = next();
+    else if (arg === "--kind") options.kind = parseKindFlag(next());
     else if (arg === "--width") options.width = Number(next());
     else if (arg === "--stdin") options.input = "-";
     else if (arg === "--json") options.json = true;
@@ -88,7 +95,7 @@ function failedChecks(report: QualityReport): QualityReport["checks"] {
   return report.checks.filter((check) => check.status === "fail");
 }
 
-function printText(outPath: string, layout: LayoutReport, report: QualityReport, warnings: string[]): void {
+function printPosterText(outPath: string, layout: LayoutReport, report: QualityReport, warnings: string[]): void {
   console.log(`Wrote ${outPath}`);
   console.log(`Page: ${layout.width}x${layout.height} (${layout.aspectRatio.toFixed(2)}:1)`);
   if (layout.chipped) console.log(`Note: ${layout.chipped} connector(s) across a column were shown as used-by chips`);
@@ -97,27 +104,65 @@ function printText(outPath: string, layout: LayoutReport, report: QualityReport,
   for (const warning of warnings) console.error(`Warning: ${warning}`);
 }
 
-async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
-  const input = options.input!;
-  const inputText = input === "-" ? await readStdin() : await readFile(fromCaller(input), "utf8");
-  const { model, warnings, report: layout } = composeText(inputText, options.width ? { width: options.width } : undefined);
-  const quality = scoreComposition(model, { warnings });
-  const outPath = fromCaller(options.out ?? (input === "-" ? "composition.svg" : path.format({ ...path.parse(input), base: undefined, ext: ".svg" })));
-  const svg = renderModelSvg(model, { padding: 0 });
+function printArchitectureText(outPath: string, layout: ArchLayoutReport, report: QualityReport, warnings: string[]): void {
+  console.log(`Wrote ${outPath}`);
+  console.log(`Page: ${layout.width}x${layout.height} (${layout.aspectRatio.toFixed(2)}:1)`);
+  console.log(`Layout: ${layout.candidate}${layout.fallback ? " fallback" : ""}`);
+  console.log(`Crossings: ${layout.crossings}`);
+  console.log(`Hard violations: ${layout.hardViolations}`);
+  console.log(`Quality: ${report.score}/${report.grade}`);
+  for (const check of report.checks.filter((c) => c.status !== "pass")) console.log(`${check.status.toUpperCase()} [${check.severity}] ${check.label}: ${check.detail}`);
+  for (const warning of warnings) console.error(`Warning: ${warning}`);
+}
 
+async function writeDiagram(outPath: string, svg: string): Promise<void> {
   if (outputFormat(outPath) === "png") {
     await writeFile(outPath, await svgToPng(svg, { density: 144, maxWidth: 4000, maxHeight: 4000 }));
   } else {
     // A standalone file: icons are embedded rather than linked to the app's /icons folder.
     await writeFile(outPath, await inlineVendoredIcons(svg, path.join(process.cwd(), "public")), "utf8");
   }
+}
+
+async function main(): Promise<void> {
+  const options = parseArgs(process.argv.slice(2));
+  const input = options.input!;
+  const inputText = input === "-" ? await readStdin() : await readFile(fromCaller(input), "utf8");
+  const kind = options.kind ?? detectSpecKind(parseSpecText(inputText));
+  const outPath = fromCaller(options.out ?? (input === "-" ? `${kind === "architecture" ? "architecture" : "composition"}.svg` : path.format({ ...path.parse(input), base: undefined, ext: ".svg" })));
+
+  if (kind === "architecture") {
+    const { model, warnings: normalizerWarnings, report: layout } = await composeArchitectureText(inputText);
+    const svg = renderModelSvg(model, { padding: 0 });
+    await writeDiagram(outPath, svg);
+    const warnings = [...normalizerWarnings, ...layout.warnings];
+    const quality = scoreArchitecture(model, { warnings });
+
+    if (options.json) {
+      const page = { width: layout.width, height: layout.height, aspectRatio: layout.aspectRatio };
+      console.log(JSON.stringify({ output: outPath, kind, page, warnings, layout, quality }, null, 2));
+    } else if (!options.quiet) {
+      printArchitectureText(outPath, layout, quality, warnings);
+    } else {
+      for (const warning of warnings) console.error(`Warning: ${warning}`);
+    }
+
+    const critical = quality.checks.some((check) => check.severity === "critical" && check.status === "fail");
+    if (critical) process.exit(1);
+    if (options.strict && (warnings.length > 0 || failedChecks(quality).length > 0)) process.exit(2);
+    process.exit(0);
+  }
+
+  const { model, warnings, report: layout } = composeText(inputText, options.width ? { width: options.width } : undefined);
+  const quality = scoreComposition(model, { warnings });
+  const svg = renderModelSvg(model, { padding: 0 });
+  await writeDiagram(outPath, svg);
 
   if (options.json) {
     const page = { width: layout.width, height: layout.height, aspectRatio: layout.aspectRatio };
-    console.log(JSON.stringify({ output: outPath, page, warnings, layout, quality }, null, 2));
+    console.log(JSON.stringify({ output: outPath, kind, page, warnings, layout, quality }, null, 2));
   } else if (!options.quiet) {
-    printText(outPath, layout, quality, warnings);
+    printPosterText(outPath, layout, quality, warnings);
   } else {
     for (const warning of warnings) console.error(`Warning: ${warning}`);
   }

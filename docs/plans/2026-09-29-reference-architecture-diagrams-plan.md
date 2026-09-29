@@ -309,7 +309,7 @@ flowchart TB
 
 ### Phase 1: Engine core
 
-- [ ] **U1: Architecture grammar, normaliser and schema**
+- [x] **U1: Architecture grammar, normaliser and schema**
 
 **Goal:** Define the spec types, a lenient normaliser that reports every repair and rejects irreparable input, and a JSON Schema.
 
@@ -351,7 +351,7 @@ flowchart TB
 **Verification:**
 - Normaliser and schema tests pass, and the input contract in R18 behaves as specified.
 
-- [ ] **U2: Style packs, platform detection and icons**
+- [x] **U2: Style packs, platform detection and icons**
 
 **Goal:** Encode platform conventions as data, infer the platform, and fill the key icon gaps where licences allow.
 
@@ -380,7 +380,7 @@ flowchart TB
 **Verification:**
 - Style tests pass. Each newly added icon has a recorded official source and licence; gaps without one use documented generic fallbacks.
 
-- [ ] **U3: Layout engine**
+- [x] **U3: Layout engine**
 
 **Goal:** Deterministic, async layout of a normalised spec into a `DiagramModel` of kind `architecture`. It meets the R14 hard constraints within the envelope and degrades with a warning beyond it.
 
@@ -456,7 +456,7 @@ flowchart TB
 **Verification:**
 - Fixture tests pass deterministically, layout time per fixture is under the envelope budget in Node, and the U0 topologies all meet the hard constraints.
 
-- [ ] **U4: Architecture renderer**
+- [x] **U4: Architecture renderer**
 
 **Goal:** Draw kind-`architecture` models in the platform conventions with `data-id` hooks for the canvas.
 
@@ -490,7 +490,7 @@ flowchart TB
 **Verification:**
 - Renderer tests pass, and the renders of the U0 topologies can be checked visually against the north-star references.
 
-- [ ] **U5: Architecture quality scorer**
+- [x] **U5: Architecture quality scorer**
 
 **Goal:** A `QualityReport` for architecture models: hard constraints as critical checks, goals as warnings, plus faithfulness helpers for evals.
 
@@ -530,7 +530,7 @@ flowchart TB
 
 ### Phase 2: Integration
 
-- [ ] **U6: Model kind, validation, round-trip and Tidy up**
+- [x] **U6: Model kind, validation, round-trip and Tidy up**
 
 **Goal:** Make architecture a first-class document kind: validated, persisted, round-tripped to a spec, and recomposed by Tidy up.
 
@@ -575,7 +575,7 @@ flowchart TB
 **Verification:**
 - Round-trip and validation tests pass, and existing poster and graph tests are unchanged apart from the discriminator.
 
-- [ ] **U7: Architect prompt, pipeline language and intent routing**
+- [x] **U7: Architect prompt, pipeline language and intent routing**
 
 **Goal:** Teach models reference-architecture practice and the trust policy, wire the new format through the pipeline, and route Auto requests by intent.
 
@@ -696,7 +696,7 @@ flowchart TB
 **Verification:**
 - Export tests pass, and a draw.io file opens with icons and boundaries (checked manually once).
 
-- [ ] **U10: CLI, guide and schema docs**
+- [x] **U10: CLI, guide and schema docs**
 
 **Goal:** Any capable model or agent can author and check specs without the app.
 
