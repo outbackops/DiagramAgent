@@ -21,6 +21,9 @@ interface InternalRouteOptions extends RouteOptions {
   softPenalty?: number;
   fallbackOnly?: boolean;
   budget?: { remaining: number };
+  /** Existing routes: crossing one costs `crossPenalty`, running along one half of it. Adds no grid lines. */
+  crossLines?: Array<[Point, Point]>;
+  crossPenalty?: number;
 }
 
 const DEFAULT_MARGIN = 12;
@@ -115,6 +118,32 @@ function segmentPenalty(a: Point, b: Point, hard: Box[], soft: Box[], softPenalt
     if (segmentHitsBox(a, b, box)) penalty += softPenalty;
   }
   return penalty;
+}
+
+/** Cost of an axis-aligned move against existing axis-aligned routes: crossings and shared tracks. */
+function crossingPenalty(a: Point, b: Point, lines: Array<[Point, Point]>, penalty: number): number {
+  const horizontal = Math.abs(a.y - b.y) < EPSILON;
+  const lo = horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y);
+  const hi = horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y);
+  const at = horizontal ? a.y : a.x;
+  let cost = 0;
+  for (const [p, q] of lines) {
+    const lineHorizontal = Math.abs(p.y - q.y) < EPSILON;
+    if (lineHorizontal === horizontal) {
+      // Running along the same track as another route.
+      const lineAt = horizontal ? p.y : p.x;
+      if (Math.abs(lineAt - at) > 2) continue;
+      const llo = horizontal ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
+      const lhi = horizontal ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
+      if (Math.min(hi, lhi) - Math.max(lo, llo) > 2) cost += penalty / 2;
+      continue;
+    }
+    const lineAt = lineHorizontal ? p.y : p.x;
+    const llo = lineHorizontal ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
+    const lhi = lineHorizontal ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
+    if (lineAt > lo + EPSILON && lineAt < hi - EPSILON && at > llo + EPSILON && at < lhi - EPSILON) cost += penalty;
+  }
+  return cost;
 }
 
 function edgeKey(ix: number, iy: number, dir: Dir): string {
@@ -288,6 +317,7 @@ function searchGrid(start: Point, end: Point, startDir: Dir, endDir: Dir, hard: 
         penalty = scanPenalty;
       }
       const turnCost = current.dir === n.dir ? 0 : bendPenalty;
+      if (options.crossLines?.length) penalty += crossingPenalty(a, b, options.crossLines, options.crossPenalty ?? 80);
       const nextCost = cost + Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + turnCost + penalty;
       const nextKey = pointKey(n.ix, n.iy, n.dir);
       if (nextCost >= (best.get(nextKey) ?? Infinity)) continue;
@@ -344,6 +374,15 @@ function routeWithSides(from: Box, to: Box, obstacles: Box[], fromSide: Side, to
 }
 
 export function routeEdge(from: Box, to: Box, obstacles: Box[], options: RouteOptions = {}): Point[] {
+  return routeEdgeInternal(from, to, obstacles, options);
+}
+
+/**
+ * Like routeEdge, but also steers clear of existing routes: each crossing costs `crossPenalty`
+ * (default 80) and running along another route costs half, so connectors drawn after a layout
+ * pick channels instead of cutting through the lines already there.
+ */
+export function routeEdgeAvoiding(from: Box, to: Box, obstacles: Box[], options: RouteOptions & { crossLines?: Array<[Point, Point]>; crossPenalty?: number } = {}): Point[] {
   return routeEdgeInternal(from, to, obstacles, options);
 }
 
