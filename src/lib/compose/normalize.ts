@@ -15,6 +15,7 @@ import {
   type NItem,
   type NormalizedSpec,
   type NStep,
+  type NZone,
   type SpecFooter,
 } from "./spec";
 
@@ -44,8 +45,18 @@ const itemTypeAliases: Record<string, NItem["type"]> = {
   node: "card",
   component: "card",
   card: "card",
-  group: "grid",
   grid: "grid",
+  zone: "zone",
+  group: "zone",
+  boundary: "zone",
+  network: "zone",
+  vnet: "zone",
+  vpc: "zone",
+  subnet: "zone",
+  cluster: "zone",
+  namespace: "zone",
+  account: "zone",
+  region: "zone",
   banner: "banner",
   strip: "banner",
   note: "banner",
@@ -103,7 +114,30 @@ export function normalizeSpec(raw: unknown): NormalizeResult {
 
   normalizeUsedBy(spec, warnings);
   spec.connectors = normalizeConnectors(raw, spec, warnings);
+  letterInReadingOrder(spec);
   return { spec, warnings };
+}
+
+/**
+ * Flow letters follow reading order (columns left to right, top to bottom),
+ * whatever the author wrote. References are resolved by now, so only the
+ * letters and the used-by chips that name them change.
+ */
+function letterInReadingOrder(spec: NormalizedSpec): void {
+  const flows = allFlows(spec.columns);
+  const next = new Map<string, string>();
+  flows.forEach((flow, i) => next.set(flow.label, flowLetter(i)));
+  if (flows.every((flow) => next.get(flow.label) === flow.label)) return;
+  for (const flow of flows) flow.label = next.get(flow.label)!;
+  const order = flows.map((flow) => flow.label);
+  for (const card of allCards(spec.columns)) {
+    card.usedBy = card.usedBy.map((letter) => next.get(letter) ?? letter).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  }
+}
+
+function flowLetter(index: number): string {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  return index < letters.length ? letters[index] : `${letters[Math.floor(index / letters.length) - 1]}${letters[index % letters.length]}`;
 }
 
 function extractFence(text: string): string {
@@ -242,6 +276,7 @@ function normalizeItem(raw: unknown, context: ItemContext, ids: Set<string>, war
   const record = isRecord(raw) ? raw : { title: raw };
   const type = itemType(record);
   if (type === "grid") return normalizeGrid(record, context, ids, warnings);
+  if (type === "zone") return normalizeZone(record, ids, warnings);
   if (type === "banner") return normalizeBanner(record, ids, warnings);
   if (type === "flow") return normalizeFlow(record, context, ids, warnings);
   return normalizeCard(record, ids, warnings);
@@ -281,6 +316,32 @@ function normalizeGrid(raw: JsonRecord, context: ItemContext, ids: Set<string>, 
     columns: clampNumber(numberValue(valueOf(raw, ["columns"])), 2, SPEC_LIMITS.gridColumns, 2, warnings, "grid columns"),
     items: cards,
   };
+}
+
+function normalizeZone(raw: JsonRecord, ids: Set<string>, warnings: string[]): NItem {
+  const title = textField(raw, ["title", "name", "label"], SPEC_LIMITS.titleChars, warnings, "zone title") ?? "Boundary";
+  const rawItems = arrayField(raw, ["items", "cards"]);
+  if (rawItems.length === 0) {
+    // A boundary with nothing inside it is just context: say it as a banner.
+    warnings.push(`Converted empty zone ${title} to a banner`);
+    return normalizeBanner({ ...raw, text: valueOf(raw, ["text", "subtitle", "sub", "description"]) }, ids, warnings);
+  }
+  if (rawItems.length > SPEC_LIMITS.zoneItems) warnings.push(`Dropped zone cards beyond ${SPEC_LIMITS.zoneItems} in ${title}`);
+  const id = uniqueId(valueOf(raw, ["id"]) ?? title, "item", ids);
+  const zone: NZone = {
+    type: "zone",
+    id,
+    title,
+    tone: normalizeTone(valueOf(raw, ["tone", "color", "colour"]), "gray", warnings, "zone"),
+    columns: clampNumber(numberValue(valueOf(raw, ["columns"])), 1, SPEC_LIMITS.gridColumns, 2, warnings, "zone columns"),
+    items: rawItems.slice(0, SPEC_LIMITS.zoneItems).map((item) => normalizeCard(isRecord(item) ? item : { title: item }, ids, warnings)),
+    notes: textArray(raw, ["notes"], SPEC_LIMITS.noteChars, SPEC_LIMITS.notesPerFlow, warnings, "zone notes"),
+  };
+  const subtitle = textField(raw, ["subtitle", "sub", "text", "description"], SPEC_LIMITS.subtitleChars, warnings, "zone subtitle");
+  if (subtitle) zone.subtitle = subtitle;
+  const tag = textField(raw, ["tag"], SPEC_LIMITS.chipChars, warnings, "zone tag");
+  if (tag) zone.tag = tag;
+  return zone;
 }
 
 function normalizeBanner(raw: JsonRecord, ids: Set<string>, warnings: string[]): NItem {
@@ -441,7 +502,7 @@ function buildRefs(spec: NormalizedSpec): RefIndex {
       if (item.type === "flow") {
         flows.push({ flow: item, target: itemTarget });
         for (const step of item.steps) add({ id: `${column.id}.${item.id}.${step.id}`, localId: step.id, title: step.title, kind: "step" });
-      } else if (item.type === "grid") {
+      } else if (item.type === "grid" || item.type === "zone") {
         for (const card of item.items) add({ id: `${column.id}.${item.id}.${card.id}`, localId: card.id, title: card.title, kind: "item" });
       }
     }
@@ -456,9 +517,16 @@ function resolveRef(ref: string, refs: RefIndex): RefTarget | undefined {
   const dotted = ref.split(".");
   if (dotted.length === 2) {
     const [flowRef, stepRef] = dotted;
-    const flow = refs.flows.find((entry) => equalsLoose(flowRef, entry.flow.id) || equalsLoose(flowRef, entry.flow.label));
+    // Ids are deduplicated across the whole spec ("gateway" → "gateway-2"), but a `flow.step`
+    // reference is scoped to its flow, so the id the author wrote (or the title) still finds it.
+    const original = (id: string) => id.replace(/-\d+$/, "");
+    const matches = (value: string, id: string, title: string) =>
+      equalsLoose(value, id) || equalsLoose(slugify(value), id) || equalsLoose(slugify(value), original(id)) || equalsLoose(slugify(value), slugify(title));
+    const flow =
+      refs.flows.find((entry) => equalsLoose(flowRef, entry.flow.id) || equalsLoose(flowRef, entry.flow.label)) ??
+      refs.flows.find((entry) => matches(flowRef, entry.flow.id, entry.flow.title));
     if (flow) {
-      const step = flow.flow.steps.find((candidate) => equalsLoose(stepRef, candidate.id) || equalsLoose(slugify(stepRef), candidate.id));
+      const step = flow.flow.steps.find((candidate) => equalsLoose(stepRef, candidate.id) || equalsLoose(slugify(stepRef), candidate.id)) ?? flow.flow.steps.find((candidate) => matches(stepRef, candidate.id, candidate.title));
       if (step) {
         const columnId = flow.target.id.split(".")[0];
         return refs.byModel.get(`${columnId}.${flow.flow.id}.${step.id}`);
@@ -473,12 +541,12 @@ function resolveRef(ref: string, refs: RefIndex): RefTarget | undefined {
 function normalizeBadge(raw: JsonRecord, warnings: string[]): NormalizedSpec["badge"] | undefined {
   const badge = valueOf(raw, ["badge"]);
   if (isRecord(badge)) {
-    const title = textField(badge, ["title", "label", "name"], SPEC_LIMITS.chipChars, warnings, "badge title");
+    const title = textField(badge, ["title", "label", "name"], SPEC_LIMITS.labelChars, warnings, "badge title");
     if (!title) return undefined;
-    const detail = textField(badge, ["detail", "text"], SPEC_LIMITS.chipChars, warnings, "badge detail");
+    const detail = textField(badge, ["detail", "text"], SPEC_LIMITS.labelChars, warnings, "badge detail");
     return detail ? { title, detail } : { title };
   }
-  const title = cleanText(badge, SPEC_LIMITS.chipChars, warnings, "badge");
+  const title = cleanText(badge, SPEC_LIMITS.labelChars, warnings, "badge");
   return title ? { title } : undefined;
 }
 
@@ -514,7 +582,8 @@ function itemType(record: JsonRecord): NItem["type"] {
   const raw = cleanText(valueOf(record, ["type"]), 30, [], "type")?.toLowerCase();
   if (raw && itemTypeAliases[raw]) return itemTypeAliases[raw];
   if (arrayField(record, ["steps"]).length) return "flow";
-  if (arrayField(record, ["items", "cards"]).length) return "grid";
+  // Cards under a title form a boundary; untitled, just a grid.
+  if (arrayField(record, ["items", "cards"]).length) return valueOf(record, ["title", "name", "label"]) !== undefined ? "zone" : "grid";
   return "card";
 }
 
@@ -524,7 +593,7 @@ function normalizeColumnSize(value: unknown, items: NItem[]): ColumnSize {
   if (raw === "normal" || raw === "medium") return "normal";
   if (raw === "wide" || raw === "large") return "wide";
   if (items.some((item) => item.type === "flow")) return "wide";
-  if (items.some((item) => item.type === "grid")) return "normal";
+  if (items.some((item) => item.type === "grid" || item.type === "zone")) return "normal";
   return "narrow";
 }
 
@@ -678,7 +747,7 @@ function allCards(columns: NColumn[]): NCard[] {
   return columns.flatMap((column) =>
     column.items.flatMap((item) => {
       if (item.type === "card") return [item];
-      if (item.type === "grid") return item.items;
+      if (item.type === "grid" || item.type === "zone") return item.items;
       return [];
     }),
   );

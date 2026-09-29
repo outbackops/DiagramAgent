@@ -210,3 +210,74 @@ describe("layoutSpec", () => {
     expect(again.handArranged).toBeUndefined();
   });
 });
+
+describe("layoutSpec: boundaries and connector labels", () => {
+  const network = (): CompositionSpec => ({
+    title: "Network",
+    columns: [
+      { id: "onprem", title: "On-premises", size: "narrow", items: [card("branch", "Branches"), card("dc", "Datacenter")] },
+      {
+        id: "hub",
+        title: "Hub",
+        size: "normal",
+        items: [{ type: "zone", id: "hub-vnet", title: "Hub VNet", subtitle: "10.0.0.0/16", tone: "blue", columns: 1, items: [card("gw", "Gateway"), card("fw", "Firewall")] }],
+      },
+      {
+        id: "spokes",
+        title: "Spokes",
+        size: "wide",
+        items: [{ type: "zone", id: "prod", title: "Production", subtitle: "10.1.0.0/16", tone: "green", columns: 2, items: [card("aks", "AKS"), card("sql", "SQL")] }],
+      },
+    ],
+    connectors: [
+      { from: "branch", to: "gw", kind: "flow" },
+      { from: "fw", to: "prod", kind: "call", label: "Peering and user-defined routes" },
+    ],
+  });
+
+  it("draws a zone as a dashed boundary holding its cards", () => {
+    const { model, warnings } = composeSpec(network());
+    expect(warnings).toEqual([]);
+    const zone = node(model, "hub.hub-vnet");
+    expect(zone).toMatchObject({ role: "zone", container: true, tone: "blue", content: { subtitle: "10.0.0.0/16", columns: 1 } });
+    expect(zone.style.strokeDash).toBeGreaterThan(0);
+    const cards = model.nodes.filter((n) => n.parent === zone.id);
+    expect(cards.map((c) => c.label)).toEqual(["Gateway", "Firewall"]);
+    for (const c of cards) expect(inside(c.box, zone.box)).toBe(true);
+    expect(renderModelSvg(model)).toContain('data-id="hub.hub-vnet"');
+  });
+
+  it("widens a gutter to hold the label of a connector between cards, and puts the label in it", () => {
+    const { model } = composeSpec(network());
+    const hub = node(model, "hub").box;
+    const spokes = node(model, "spokes").box;
+    const gutter = spokes.x - (hub.x + hub.w);
+    expect(gutter).toBeGreaterThan(32);
+    const edge = model.edges.find((e) => e.label?.startsWith("Peering"))!;
+    expect(edge.labelAt!.x).toBeGreaterThan(hub.x + hub.w);
+    expect(edge.labelAt!.x).toBeLessThan(spokes.x);
+    const other = node(model, "onprem").box;
+    expect(node(model, "hub").box.x - (other.x + other.w)).toBe(32);
+  });
+
+  it("draws a caller's link to a lane two columns away instead of turning it into a chip", () => {
+    const spec = sample();
+    spec.columns.push({ id: "ops", title: "Operations", items: [{ type: "flow", id: "hold", title: "Manual hold", steps: [{ id: "review", title: "Review" }, { id: "release", title: "Release" }] }] });
+    spec.connectors!.push({ from: "partners", to: "hold", kind: "flow" });
+    const { model, report } = composeSpec(spec);
+    expect(report.chipped).toBe(0);
+    const edge = model.edges.find((e) => e.from === "callers.partners" && e.to.startsWith("ops.hold"))!;
+    expect(edge.route.length).toBeGreaterThan(2);
+  });
+
+  it("routes a far link under the panels when both ends sit low", () => {
+    const spec = sample();
+    spec.columns.push({ id: "ops", title: "Operations", items: [card("pad", "Padding", { lines: ["x", "y", "z", "w", "v"] }), card("pad2", "Padding 2", { lines: ["x", "y", "z", "w", "v"] }), card("pager", "On call")] });
+    spec.columns[0].items.push(card("desk", "Service desk"));
+    spec.connectors!.push({ from: "desk", to: "pager", kind: "call" });
+    const { model } = composeSpec(spec);
+    const edge = model.edges.find((e) => e.from === "callers.desk")!;
+    const panel = node(model, "callers").box;
+    expect(Math.max(...edge.route.map((p) => p.y))).toBeGreaterThan(panel.y + panel.h);
+  });
+});

@@ -9,6 +9,7 @@ import {
   type SpecFlow,
   type SpecFooter,
   type SpecGrid,
+  type SpecZone,
   type SpecItem,
   type SpecStep,
 } from "./spec";
@@ -95,6 +96,7 @@ function nodeToItems(node: DiagramNode, children: Map<string | null, DiagramNode
   if (parentKind === "lane") return [stepToSpec(node, undefined) as unknown as SpecItem];
   if (node.role === "banner") return [bannerToSpec(node)];
   if (node.role === "grid") return [gridToSpec(node, children)];
+  if (node.role === "zone") return [zoneToSpec(node, children)];
   if (node.role === "lane") return [laneToSpec(node, children)];
   if (node.role === "card" || !node.container) return [cardToSpec(node)];
   if (node.container) return [containerToFlow(node, children)];
@@ -130,6 +132,20 @@ function gridToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[
   };
   if (node.content?.columns) grid.columns = node.content.columns;
   return grid;
+}
+
+/** A boundary; one whose cards were all deleted is kept as a banner so its context isn't lost. */
+function zoneToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[]>): SpecItem {
+  const cards = orderedGridCards((children.get(node.id) ?? []).flatMap((child) => (child.container ? flattenLeaves(child, children) : [child])));
+  if (cards.length === 0) return bannerToSpec(node);
+  const zone: SpecZone = { type: "zone", id: localId(node), title: node.label || localId(node), items: cards.map(cardToSpec) };
+  if (node.content?.subtitle) zone.subtitle = node.content.subtitle;
+  if (node.content?.tag) zone.tag = node.content.tag;
+  if (node.tone) zone.tone = node.tone;
+  if (node.content?.columns) zone.columns = node.content.columns;
+  const notes = compact(node.content?.notes);
+  if (notes.length) zone.notes = notes;
+  return zone;
 }
 
 function laneToSpec(node: DiagramNode, children: Map<string | null, DiagramNode[]>): SpecFlow {

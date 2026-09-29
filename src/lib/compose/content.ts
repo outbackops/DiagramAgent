@@ -500,6 +500,7 @@ export function nodeBlock(role: string | undefined, node: ContentNode, box: { w:
     case "banner":
       return bannerBlock(node, box.w, box.h);
     case "lane":
+    case "zone":
       return laneHeaderBlock(node, box.w);
     case "step":
       return stepBlock(node, box.w, box.h);

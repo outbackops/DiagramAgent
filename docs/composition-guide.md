@@ -67,6 +67,20 @@ The spec is JSON. It is portable: any model can produce it without knowing the r
 - `text?: string` — short detail line.
 - `tone?: Tone` — default `gray`.
 
+`Zone`
+
+- `type: "zone"` — a boundary that contains components: a VNet or subnet, a cluster or namespace, an account, region or on-premises site. It is drawn as a dashed box around its cards.
+- `id?: string`.
+- `title: string` — the boundary's name.
+- `subtitle?: string` — boundary facts in monospace, such as an address range, namespace or region.
+- `tag?: string` — small status pill.
+- `tone?: Tone` — default `gray`.
+- `columns?: 1 | 2 | 3` — card columns inside; default `2`. The engine uses fewer when the column is narrow.
+- `items: Card[]` — up to `9` cards. An empty zone becomes a banner.
+- `notes?: string[]` — up to `3` one-line facts under the cards.
+
+Zones don't nest. `group`, `boundary`, `vnet`, `vpc`, `subnet`, `cluster`, `namespace`, `account` and `region` are accepted as zone types. An untyped item with a title and `items` is a zone; without a title, it is a grid.
+
 `Flow`
 
 - `type: "flow"`.
@@ -109,11 +123,25 @@ The spec is JSON. It is portable: any model can produce it without knowing the r
 1. Compose the story left to right: callers/sources → main workload → shared dependencies. Use 2–4 columns; never number column titles yourself.
 2. Put the workload in a `wide` column. Add a banner for hosting/runtime context when it helps.
 3. Make each lane an end-to-end flow with 3–5 verb-led steps, a trigger subtitle, and one invariant note.
-4. Use shared services as cards or grids with `usedBy` chips. Avoid a connector to every consumer.
-5. Draw only deliberate connectors: `flow` from caller into a lane; `call` from a step to an external dependency with a short label.
-6. Keep tone meanings consistent: blue = primary request/core compute; purple = async/integration; green = identity/governance/success; orange = secrets/controls/warnings/human action; teal = data/analytics; red = threat/failure; gray = operations/tooling/boundaries/neutral.
-7. Respect text budgets: titles <= 28 chars when possible, card lines <= 44 chars, step lines <= 24 chars, notes <= 90 chars.
-8. Use the header badge for platform/runtime facts and the footer for outcome plus status.
+4. Show the boundaries the reader needs. When a whole column sits inside one boundary, name the column after it and describe it in a banner. When a column holds several boundaries, or a boundary next to things outside it, use zones.
+5. Use cards or grids for shared services. Mark supporting services (identity, secrets, monitoring, shared storage) with `usedBy` chips instead of a connector to every consumer.
+6. Draw the connectors that carry the story:
+   - `flow` from a caller into the lane it starts
+   - from the step that publishes to a queue or topic to the step that consumes it
+   - `call` from a step to an important external dependency, with a short label
+
+   Keep items that are linked within one column next to each other.
+7. Put each component in the column of its role: edge and global services with the entry, processing in the workload, operators and tooling in operations.
+8. Keep tone meanings consistent:
+   - blue: primary request, core compute
+   - purple: async, integration
+   - green: identity, governance, success
+   - orange: secrets, controls, warnings, human action
+   - teal: data, analytics
+   - red: threat, failure
+   - gray: operations, tooling, boundaries, neutral
+9. Respect text budgets: titles <= 28 chars when possible, card lines <= 44 chars, step lines <= 24 chars, notes <= 90 chars.
+10. Use the header badge for platform/runtime facts and the footer for outcome plus status.
 
 ## References
 
@@ -121,7 +149,20 @@ References may use full model ids, local ids, `flow.step`, flow labels, or uniqu
 
 ## What the engine does automatically
 
-The engine adds column numbering, flow letters, step arrows, legends, equal-height panels, connector routing, wrapping and truncation-safe sizing. When a dependency connector would cross an intervening column, the engine turns it into `usedBy` chips on the destination card instead of drawing a noisy line. The renderer also keeps panels visually balanced and wraps text to the available box width.
+The engine does these automatically:
+- column numbering and flow letters in reading order
+- step arrows, legends and equal-height panels
+- text wrapping and truncation-safe sizing
+- connector routing by intent:
+  - S-curves into lanes
+  - dashed elbows through a lane's call band or the gutters
+  - brackets down a panel's margin for items in the same column
+  - over or under the panels for links across a column
+
+It also:
+- stacks a sparse column's grids so the cards fill the panel height
+- widens a gutter to hold the label of a connector between cards
+- turns a flow's link to a service card across an intervening column into a `usedBy` chip on that card, rather than drawing a noisy line
 
 ## Complete example
 

@@ -254,8 +254,8 @@ function textFitOffenders(model: DiagramModel, byParent: Map<string | null, Diag
   const offenders: string[] = [];
   for (const node of model.nodes) {
     const role = roleOf(node, byParent);
-    if (!["card", "step", "banner", "lane", "column", "header", "footer"].includes(role)) continue;
-    if (role === "lane") {
+    if (!["card", "step", "banner", "lane", "zone", "column", "header", "footer"].includes(role)) continue;
+    if (role === "lane" || role === "zone") {
       const header = laneHeaderBlock(node, node.box.w);
       const footer = laneFooterBlock(node, node.box.w);
       if (header.truncated > 0 || footer.truncated > 0 || header.height + footer.height > node.box.h + 1) offenders.push(labelOf(node));
@@ -277,7 +277,7 @@ export function scoreComposition(model: DiagramModel, options: { warnings?: stri
   const byId = new Map(model.nodes.map((node) => [node.id, node]));
   const roles = new Map(model.nodes.map((node) => [node.id, roleOf(node, byParent)]));
   const cardsAndSteps = model.nodes.filter((node) => roles.get(node.id) === "card" || roles.get(node.id) === "step");
-  const containers = model.nodes.filter((node) => ["column", "lane", "grid"].includes(roles.get(node.id) ?? ""));
+  const containers = model.nodes.filter((node) => ["column", "lane", "grid", "zone"].includes(roles.get(node.id) ?? ""));
   const edges = connectorEdges(model);
   const extent = nodeExtent(model.nodes);
   const width = Math.round(extent.maxX - extent.minX);

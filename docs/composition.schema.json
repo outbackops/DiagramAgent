@@ -194,6 +194,23 @@
         "title"
       ]
     },
+    "Zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A boundary that contains components, drawn as a dashed box around its cards: a VNet or subnet, a cluster or namespace, an account, a region or an on-premises site. Zones don't nest.",
+      "properties": {
+        "type": { "const": "zone", "description": "Discriminator for a zone item." },
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 40, "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles." },
+        "title": { "type": "string", "maxLength": 60, "description": "Name of the boundary, e.g. 'Hub VNet' or 'Production cluster'." },
+        "subtitle": { "type": "string", "maxLength": 140, "description": "Boundary facts shown in monospace, e.g. an address range, namespace or region." },
+        "tag": { "type": "string", "maxLength": 40, "description": "Optional short status pill after the title, e.g. 'PRIVATE'." },
+        "tone": { "$ref": "#/$defs/Tone", "description": "Colour of the boundary; gray by default." },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 3, "default": 2, "description": "Card columns inside the zone; the engine uses fewer when the column is narrow." },
+        "items": { "type": "array", "minItems": 1, "maxItems": 9, "items": { "$ref": "#/$defs/Card" }, "description": "Components inside the boundary, as cards in reading order." },
+        "notes": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 140 }, "description": "One-line facts about the boundary shown under its cards." }
+      },
+      "required": ["type", "title", "items"]
+    },
     "Flow": {
       "type": "object",
       "additionalProperties": false,
@@ -463,7 +480,7 @@
         },
         {
           "$ref": "#/$defs/Banner"
-        },
+        }, { "$ref": "#/$defs/Zone" },
         {
           "$ref": "#/$defs/Flow"
         }

@@ -79,7 +79,7 @@ describe("composition schema", () => {
       const props = resolved.properties as Record<string, JsonRecord>;
       return props.type.const;
     });
-    expect(consts.sort()).toEqual(["banner", "card", "flow", "grid"]);
+    expect(consts.sort()).toEqual(["banner", "card", "flow", "grid", "zone"]);
   });
 
   it("matches SPEC_LIMITS for counts and text lengths", () => {

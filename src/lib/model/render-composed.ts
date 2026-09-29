@@ -76,6 +76,7 @@ export function renderComposedSvg(model: DiagramModel, options: RenderModelSvgOp
   renderRole(out, nodes, "column", (node) => renderColumn(node, shadowId, ctx));
   renderRole(out, nodes, "banner", (node) => renderBanner(node));
   renderRole(out, nodes, "lane", (node) => renderLane(node));
+  renderRole(out, nodes, "zone", (node) => renderZone(node));
   renderRole(out, nodes, "grid", (node) => renderGrid(node));
   renderRole(out, nodes, "card", (node) => renderCard(node, ctx));
   renderRole(out, nodes, "step", (node) => renderStep(node));
@@ -131,6 +132,17 @@ function renderLane(node: DiagramNode): string {
   const footer = laneFooterBlock(node, box.w);
   const footerY = box.y + box.h - footer.height;
   const rect = `<rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" rx="${SPACE.laneRadius}" fill="${tone.lane}" stroke="${tone.laneStroke}" stroke-width="1.5"/>`;
+  return group(node, true, rect + renderBlock(header, box.x, box.y, node) + renderBlock(footer, box.x, footerY, node));
+}
+
+/** A boundary (VNet, subnet, cluster, account): a dashed outline in its tone around its cards. */
+function renderZone(node: DiagramNode): string {
+  const { box } = node;
+  const tone = toneColors(node.tone);
+  const header = laneHeaderBlock(node, box.w);
+  const footer = laneFooterBlock(node, box.w);
+  const footerY = box.y + box.h - footer.height;
+  const rect = `<rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" rx="${SPACE.laneRadius}" fill="${tone.lane}" stroke="${tone.main}" stroke-opacity="0.75" stroke-width="1.5" stroke-dasharray="7 5"/>`;
   return group(node, true, rect + renderBlock(header, box.x, box.y, node) + renderBlock(footer, box.x, footerY, node));
 }
 

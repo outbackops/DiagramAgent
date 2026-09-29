@@ -13,7 +13,7 @@ import {
   type ContentContext,
   type ContentNode,
 } from "./content";
-import { FOOTER_ID, HEADER_ID, type NBanner, type NCard, type NColumn, type NConnector, type NFlow, type NGrid, type NItem, type NormalizedSpec, type NStep } from "./spec";
+import { FOOTER_ID, HEADER_ID, type NBanner, type NCard, type NColumn, type NConnector, type NFlow, type NGrid, type NItem, type NormalizedSpec, type NStep, type NZone } from "./spec";
 import { measureText } from "./text";
 import { EDGE, PAGE, PAGE_WIDTH, SPACE, toneColors, TYPE } from "./theme";
 
@@ -64,7 +64,11 @@ const SPARSE_SHARE = 0.4;
 
 export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): LayoutResult {
   const ctx: ContentContext = { flowTones: flowTonesOf(spec) };
-  const minimum = minimumPageWidth(spec);
+  // Everything about connectors that doesn't depend on the page width is planned once.
+  const index = indexSpec(spec);
+  const { chips, lines } = planConnectors(spec, index);
+  const prepared: Prepared = { index, chips, lines, bandUse: bandUsage(lines, index), gutters: gutterWidths(spec, lines, index) };
+  const minimum = minimumPageWidth(spec, prepared.gutters);
   const tightest = Math.max(PAGE_WIDTHS[0], Math.ceil(minimum / 40) * 40);
   const preferred = options.preferWidth && options.preferWidth >= minimum && options.preferWidth <= 4000 ? Math.round(options.preferWidth) : undefined;
   const widths = options.width
@@ -73,7 +77,7 @@ export function layoutSpec(spec: NormalizedSpec, options: LayoutOptions = {}): L
 
   let best: { placed: Placed; score: number } | null = null;
   for (const width of widths) {
-    const placed = place(spec, width, ctx);
+    const placed = place(spec, width, ctx, prepared);
     const aspect = placed.width / placed.height;
     const outside = aspect < ASPECT_LOW ? ASPECT_LOW / aspect - 1 : aspect > ASPECT_HIGH ? aspect / ASPECT_HIGH - 1 : 0;
     const score = outside * 10 + placed.truncated * 2 + Math.abs(width - PAGE_WIDTH) / PAGE_WIDTH - (width === preferred ? KEEP_WIDTH_BONUS : 0);
@@ -120,6 +124,12 @@ const stepContent = (step: NStep): ContentNode => ({ label: step.title, tone: st
 
 const bannerContent = (banner: NBanner): ContentNode => ({ label: banner.title, tone: banner.tone, content: compact({ subtitle: banner.text }) });
 
+const zoneContent = (zone: NZone): ContentNode => ({
+  label: zone.title,
+  tone: zone.tone,
+  content: compact({ subtitle: zone.subtitle, tag: zone.tag, notes: zone.notes, columns: zone.columns }),
+});
+
 function laneContent(flow: NFlow, vertical: boolean): ContentNode {
   return {
     label: flow.title,
@@ -156,6 +166,8 @@ function minColumnWidth(column: NColumn): number {
     if (item.type === "grid") {
       const cols = Math.min(item.columns, item.items.length);
       min = Math.max(min, 2 * SPACE.panelPadX + cols * GRID_CELL_MIN + (cols - 1) * SPACE.gridGap);
+    } else if (item.type === "zone") {
+      min = Math.max(min, 2 * SPACE.panelPadX + 2 * SPACE.lanePadX + GRID_CELL_MIN);
     } else if (item.type === "flow") {
       const lane = column.size === "wide" ? flowRowWidth(item.steps.length) : VERTICAL_LANE_MIN;
       min = Math.max(min, 2 * SPACE.panelPadX + lane);
@@ -164,9 +176,31 @@ function minColumnWidth(column: NColumn): number {
   return min;
 }
 
-function minimumPageWidth(spec: NormalizedSpec): number {
-  const n = spec.columns.length;
-  return spec.columns.reduce((sum, c) => sum + minColumnWidth(c), 0) + 2 * SPACE.margin + Math.max(0, n - 1) * SPACE.gutter;
+function minimumPageWidth(spec: NormalizedSpec, gutters: number[]): number {
+  return spec.columns.reduce((sum, c) => sum + minColumnWidth(c), 0) + 2 * SPACE.margin + gutters.reduce((a, b) => a + b, 0);
+}
+
+/** Widest a gutter grows to hold a connector label. */
+const GUTTER_MAX = 170;
+
+/**
+ * Gutters are 32 px unless a labelled connector between two cards crosses
+ * them: then the gutter opens up so the label sits in the gap instead of on
+ * the panel borders (labels of lane steps sit in the lane's band instead).
+ */
+function gutterWidths(spec: NormalizedSpec, lines: NConnector[], index: SpecIndex): number[] {
+  const widths = new Array<number>(Math.max(0, spec.columns.length - 1)).fill(SPACE.gutter);
+  for (const line of lines) {
+    if (!line.label) continue;
+    const a = index.columnOf.get(line.from);
+    const b = index.columnOf.get(line.to);
+    if (a === undefined || b === undefined || Math.abs(a - b) !== 1) continue;
+    const inLane = (end: string, facesRight: boolean) => index.steps.has(resolveEnd(end, facesRight, index));
+    if (inLane(line.from, b > a) || inLane(line.to, a > b)) continue;
+    const g = Math.min(a, b);
+    widths[g] = Math.max(widths[g], Math.min(GUTTER_MAX, Math.ceil(measureText(line.label, TYPE.edgeLabel)) + 28));
+  }
+  return widths;
 }
 
 /** Splits `total` by weight while honouring each minimum. */
@@ -223,6 +257,7 @@ interface Measured {
   top: number;
   grid?: GridRow[];
   flow?: FlowMeasure;
+  zone?: { headerH: number };
 }
 
 function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: Map<string, number>, columnId: string): { measured: Measured; truncated: number } {
@@ -237,9 +272,29 @@ function measureItem(item: NItem, innerW: number, ctx: ContentContext, bandUse: 
     }
     case "grid":
       return measureGrid(item, innerW, ctx);
+    case "zone":
+      return measureZone(item, innerW, ctx);
     case "flow":
       return measureFlow(item, innerW, bandUse.get(`${columnId}.${item.id}`) ?? 0);
   }
+}
+
+/** A boundary: a header like a lane's (no letter), its cards in a grid, notes at the bottom. */
+function measureZone(zone: NZone, innerW: number, ctx: ContentContext, columns = zone.columns): { measured: Measured; truncated: number } {
+  const content = zoneContent(zone);
+  const header = laneHeaderBlock(content, innerW);
+  const footer = laneFooterBlock(content, innerW);
+  const hasFooter = laneHasFooter(content);
+  const cardsW = innerW - 2 * SPACE.lanePadX;
+  // Fewer columns rather than cramped cards.
+  let cols = Math.max(1, Math.min(columns, zone.items.length));
+  while (cols > 1 && (cardsW - (cols - 1) * SPACE.gridGap) / cols < GRID_CELL_MIN) cols--;
+  const grid = measureGrid({ type: "grid", id: zone.id, columns: cols, items: zone.items }, cardsW, ctx);
+  const h = header.height + grid.measured.h + (hasFooter ? SPACE.laneFootGap : 0) + footer.height;
+  return {
+    measured: { item: zone, natural: h, h, top: 0, grid: grid.measured.grid, zone: { headerH: header.height } },
+    truncated: header.truncated + footer.truncated + grid.truncated,
+  };
 }
 
 function gridRows(grid: NGrid, innerW: number, columns = grid.columns): { cards: NCard[]; cellW: number }[] {
@@ -311,6 +366,8 @@ interface ColumnPlan {
   /** Gap below each item but the last. */
   gaps: number[];
   contentH: number;
+  /** Width of the gutter to the right of this column. */
+  gutter: number;
 }
 
 interface Placed {
@@ -330,17 +387,23 @@ interface StepSlot {
   vertical: boolean;
 }
 
-function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext): Placed {
-  const n = spec.columns.length;
-  const innerTotal = pageW - 2 * SPACE.margin - Math.max(0, n - 1) * SPACE.gutter;
+/** Connector planning that doesn't depend on the page width. */
+interface Prepared {
+  index: SpecIndex;
+  chips: Map<string, string[]>;
+  lines: NConnector[];
+  bandUse: Map<string, number>;
+  gutters: number[];
+}
+
+function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext, prepared: Prepared): Placed {
+  const { index, chips, lines, bandUse, gutters } = prepared;
+  const innerTotal = pageW - 2 * SPACE.margin - gutters.reduce((a, b) => a + b, 0);
   const widths = distributeWidths(
     innerTotal,
     spec.columns.map((c) => SIZE_WEIGHT[c.size]),
     spec.columns.map(minColumnWidth),
   );
-  const index = indexSpec(spec);
-  const { chips, lines } = planConnectors(spec, index);
-  const bandUse = bandUsage(lines, index);
   let truncated = 0;
 
   // 1. Natural sizes, top-packed.
@@ -355,8 +418,9 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext): Placed
     });
     const gaps = column.items.slice(1).map((item, j) => (linkedItems(lines, `${column.id}.${column.items[j].id}`, `${column.id}.${item.id}`) ? SPACE.linkedGap : SPACE.itemGap));
     const contentH = items.reduce((sum, m) => sum + m.h, 0) + gaps.reduce((a, b) => a + b, 0);
-    const plan = { column, x, w, items, gaps, contentH };
-    x += w + SPACE.gutter;
+    const gutter = gutters[i] ?? SPACE.gutter;
+    const plan = { column, x, w, items, gaps, contentH, gutter };
+    x += w + gutter;
     return plan;
   });
 
@@ -370,14 +434,17 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext): Placed
   for (const plan of plans) {
     if (plan.contentH >= bodyH * (1 - SPARSE_SHARE)) continue;
     const innerW = plan.w - 2 * SPACE.panelPadX;
+    const remeasure = (item: NItem, columns?: number) =>
+      item.type === "grid" ? measureGrid(item, innerW, ctx, columns) : item.type === "zone" ? measureZone(item, innerW, ctx, columns) : null;
+    const original = plan.items;
     plan.items = plan.items.map((m) => {
-      if (m.item.type !== "grid" || m.item.columns < 2 || m.item.items.length < 2) return m;
-      const stacked = measureGrid(m.item, innerW, ctx, 1);
-      return stacked.truncated === 0 ? stacked.measured : m;
+      if ((m.item.type !== "grid" && m.item.type !== "zone") || m.item.columns < 2 || m.item.items.length < 2) return m;
+      const stacked = remeasure(m.item, 1);
+      return stacked && stacked.truncated === 0 ? stacked.measured : m;
     });
     const contentH = plan.items.reduce((sum, m) => sum + m.h, 0) + plan.gaps.reduce((a, b) => a + b, 0);
     if (contentH <= bodyH) plan.contentH = contentH;
-    else plan.items = plan.items.map((m, i) => (m.item.type === "grid" ? measureGrid(m.item as NGrid, innerW, ctx).measured : plan.items[i]));
+    else plan.items = original;
   }
   bodyH = Math.max(120, ...plans.map((p) => p.contentH));
 
@@ -418,7 +485,7 @@ function place(spec: NormalizedSpec, pageW: number, ctx: ContentContext): Placed
   }
 
   // 4. Connectors.
-  const edges = [...stepEdges(spec, nodes), ...routeConnectors(lines, nodes, slots, plans, panelTop, index)];
+  const edges = [...stepEdges(spec, nodes), ...routeConnectors(lines, nodes, slots, plans, panelTop, panelTop + panelH, index)];
   return { nodes, edges, width: pageW, height: bottom + SPACE.margin, truncated, chipped: chips.size };
 }
 
@@ -433,7 +500,7 @@ function footerContent(spec: NormalizedSpec): ContentNode {
 
 function hasUsedBy(item: NItem): boolean {
   if (item.type === "card") return item.usedBy.length > 0;
-  if (item.type === "grid") return item.items.some((c) => c.usedBy.length > 0);
+  if (item.type === "grid" || item.type === "zone") return item.items.some((c) => c.usedBy.length > 0);
   return false;
 }
 
@@ -464,8 +531,8 @@ function equalise(plan: ColumnPlan, top: number, bodyH: number, anchors: Map<str
     for (let i = 0; i < gaps.length; i++) gaps[i] += grow;
     extra -= grow * gaps.length;
   }
-  // …then slightly taller cards (grids share it across their rows).
-  const stretchable = items.filter((m) => m.item.type === "card" || m.item.type === "grid");
+  // …then slightly taller cards (grids and zones share it across their rows).
+  const stretchable = items.filter((m) => m.item.type === "card" || m.item.type === "grid" || m.item.type === "zone");
   if (stretchable.length && extra > 0.5) {
     const each = extra / stretchable.length;
     for (const m of stretchable) {
@@ -556,16 +623,13 @@ function emitItem(nodes: DiagramNode[], slots: Map<string, StepSlot>, plan: Colu
     }
     case "grid": {
       nodes.push(makeNode(id, plan.column.id, "grid", "", box, undefined, compact({ columns: item.columns }), true));
-      let y = m.top;
-      for (const row of m.grid!) {
-        let cx = x;
-        for (const card of row.cards) {
-          const c = cardContent(card);
-          nodes.push(makeNode(`${id}.${card.id}`, id, "card", c.label, { x: cx, y, w: row.cellW, h: row.h }, card.tone, c.content, false, c.icon));
-          cx += row.cellW + SPACE.gridGap;
-        }
-        y += row.h + SPACE.gridGap;
-      }
+      emitCards(nodes, id, m.grid!, x, m.top);
+      return;
+    }
+    case "zone": {
+      const c = zoneContent(item);
+      nodes.push(makeNode(id, plan.column.id, "zone", c.label, box, item.tone, c.content, true));
+      emitCards(nodes, id, m.grid!, x + SPACE.lanePadX, m.top + m.zone!.headerH);
       return;
     }
     case "flow": {
@@ -586,6 +650,19 @@ function emitItem(nodes: DiagramNode[], slots: Map<string, StepSlot>, plan: Colu
       });
       return;
     }
+  }
+}
+
+function emitCards(nodes: DiagramNode[], parentId: string, rows: GridRow[], x: number, top: number): void {
+  let y = top;
+  for (const row of rows) {
+    let cx = x;
+    for (const card of row.cards) {
+      const c = cardContent(card);
+      nodes.push(makeNode(`${parentId}.${card.id}`, parentId, "card", c.label, { x: cx, y, w: row.cellW, h: row.h }, card.tone, c.content, false, c.icon));
+      cx += row.cellW + SPACE.gridGap;
+    }
+    y += row.h + SPACE.gridGap;
   }
 }
 
@@ -621,6 +698,8 @@ export function styleFor(role: NodeRole, tone: Tone | undefined): NodeStyle {
       return { strokeWidth: 0, opacity: 0 };
     case "lane":
       return { fill: t.lane, stroke: t.laneStroke, strokeWidth: 1.5, borderRadius: SPACE.laneRadius, fontColor: PAGE.ink, bold: true };
+    case "zone":
+      return { fill: t.lane, stroke: t.main, strokeWidth: 1.5, strokeDash: 6, borderRadius: SPACE.laneRadius, fontColor: PAGE.ink, bold: true };
     case "banner":
       return { fill: t.fill, stroke: t.main, strokeWidth: 1.5, borderRadius: SPACE.bannerRadius, fontColor: PAGE.ink, bold: true };
     case "step":
@@ -663,7 +742,7 @@ function indexSpec(spec: NormalizedSpec): SpecIndex {
       const id = `${column.id}.${item.id}`;
       index.columnOf.set(id, i);
       if (item.type === "card") index.cards.add(id);
-      if (item.type === "grid") {
+      if (item.type === "grid" || item.type === "zone") {
         for (const card of item.items) {
           index.columnOf.set(`${id}.${card.id}`, i);
           index.cards.add(`${id}.${card.id}`);
@@ -698,8 +777,9 @@ function blockedStep(info: StepInfo | undefined, facesRight: boolean): boolean {
 }
 
 /**
- * Connectors from a flow to a card more than one column away would cross the
- * column between them. Like a designer, show them as used-by chips instead.
+ * A flow's link to a service card more than one column away would cross the
+ * column between them. Like a designer, show it as a used-by chip on the card
+ * instead. Links in the other direction (a caller starting a flow) stay lines.
  */
 function planConnectors(spec: NormalizedSpec, index: SpecIndex): { chips: Map<string, string[]>; lines: NConnector[] } {
   const chips = new Map<string, string[]>();
@@ -708,20 +788,12 @@ function planConnectors(spec: NormalizedSpec, index: SpecIndex): { chips: Map<st
     const a = index.columnOf.get(connector.from);
     const b = index.columnOf.get(connector.to);
     if (a === undefined || b === undefined) continue;
-    if (Math.abs(a - b) > 1) {
-      const pair = (
-        [
-          [connector.from, connector.to],
-          [connector.to, connector.from],
-        ] as const
-      ).find(([lane, card]) => index.laneLetter.has(lane) && index.cards.has(card));
-      if (pair) {
-        const letters = chips.get(pair[1]) ?? [];
-        const letter = index.laneLetter.get(pair[0])!;
-        if (!letters.includes(letter)) letters.push(letter);
-        chips.set(pair[1], letters);
-        continue;
-      }
+    if (Math.abs(a - b) > 1 && index.laneLetter.has(connector.from) && index.cards.has(connector.to)) {
+      const letters = chips.get(connector.to) ?? [];
+      const letter = index.laneLetter.get(connector.from)!;
+      if (!letters.includes(letter)) letters.push(letter);
+      chips.set(connector.to, letters);
+      continue;
     }
     lines.push(connector);
   }
@@ -737,8 +809,17 @@ function withChips(item: NItem, columnId: string, chips: Map<string, string[]>):
   };
   const id = `${columnId}.${item.id}`;
   if (item.type === "card") return addTo(item, id);
-  if (item.type === "grid") return { ...item, items: item.items.map((card) => addTo(card, `${id}.${card.id}`)) };
+  if (item.type === "grid" || item.type === "zone") return { ...item, items: item.items.map((card) => addTo(card, `${id}.${card.id}`)) };
   return item;
+}
+
+/**
+ * Which connector ends run through the band under a lane's steps: a step with
+ * other steps in the way, or any step end of a labelled connector (the label
+ * then sits in the band, clear of gutters and borders).
+ */
+function usesBand(line: NConnector, info: StepInfo | undefined, facesRight: boolean): boolean {
+  return Boolean(info && (blockedStep(info, facesRight) || line.label));
 }
 
 /** How many connector ends each lane routes through the call band under its steps. */
@@ -753,7 +834,7 @@ function bandUsage(lines: NConnector[], index: SpecIndex): Map<string, number> {
       [line.to, a > b],
     ] as const) {
       const info = index.steps.get(resolveEnd(end, facesRight, index));
-      if (info && blockedStep(info, facesRight)) use.set(info.lane, (use.get(info.lane) ?? 0) + 1);
+      if (info && usesBand(line, info, facesRight)) use.set(info.lane, (use.get(info.lane) ?? 0) + 1);
     }
   }
   return use;
@@ -838,7 +919,7 @@ interface PlannedLine {
   toGap: boolean;
 }
 
-function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<string, StepSlot>, plans: ColumnPlan[], panelTop: number, index: SpecIndex): DiagramEdge[] {
+function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<string, StepSlot>, plans: ColumnPlan[], panelTop: number, panelBottom: number, index: SpecIndex): DiagramEdge[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const sideCount = new Map<string, number>();
   const sideUse = new Map<string, number>();
@@ -858,10 +939,11 @@ function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<s
     if (!from || !to || from.id === to.id) continue;
     const inRow = (node: DiagramNode, facesRight: boolean) => {
       const slot = slots.get(node.id);
-      return Boolean(slot && !slot.vertical && blockedStep(index.steps.get(node.id), facesRight));
+      return Boolean(slot && !slot.vertical && usesBand(line, index.steps.get(node.id), facesRight));
     };
     const behindCell = (node: DiagramNode, facesRight: boolean) => {
-      if (!node.parent || byId.get(node.parent)?.role !== "grid") return false;
+      const role = node.parent ? byId.get(node.parent)?.role : undefined;
+      if (role !== "grid" && role !== "zone") return false;
       const b = node.box;
       return nodes.some((s) => s.parent === node.parent && s.id !== node.id && s.box.y < b.y + b.h && b.y < s.box.y + s.box.h && (facesRight ? s.box.x > b.x : s.box.x < b.x));
     };
@@ -909,12 +991,15 @@ function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<s
     return { points: [{ x: cx, y: box.y + box.h }, { x: cx, y: trackY }], trackY, lane };
   };
 
+  /** Centre of the gutter to the right of column `g`. */
+  const gutterCentre = (g: number): number => plans[g].x + plans[g].w + plans[g].gutter / 2;
+
   const gutterX = (a: number, b: number): number => {
     const g = Math.min(a, b);
     const count = gutterCount.get(g) ?? 1;
     const i = gutterUse.get(g) ?? 0;
     gutterUse.set(g, i + 1);
-    return plans[g].x + plans[g].w + SPACE.gutter / 2 + (i - (count - 1) / 2) * EDGE.trackGap;
+    return gutterCentre(g) + (i - (count - 1) / 2) * EDGE.trackGap;
   };
 
   const edges: DiagramEdge[] = [];
@@ -928,14 +1013,16 @@ function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<s
     const sb: Side = b > a ? "left" : "right";
 
     if (Math.abs(a - b) > 1) {
-      // Across a column: up the gutter, over the panels through the header gap, and down.
+      // Across a column: along the gutter, over (or under) the panels, and back.
+      // Whichever side is nearer to the two ends keeps the detour short.
       const s = port(from, sa);
       const e = port(to, sb);
-      const topY = panelTop - SPACE.headerGap / 2;
-      const gx1 = sa === "right" ? plans[a].x + plans[a].w + SPACE.gutter / 2 : plans[a].x - SPACE.gutter / 2;
-      const gx2 = sb === "left" ? plans[b].x - SPACE.gutter / 2 : plans[b].x + plans[b].w + SPACE.gutter / 2;
-      const route = [s, { x: gx1, y: s.y }, { x: gx1, y: topY }, { x: gx2, y: topY }, { x: gx2, y: e.y }, e];
-      edges.push(withLabelAt(makeEdge(from.id, to.id, line.kind, tone, route, edges, line.label), { x: (gx1 + gx2) / 2, y: topY - 8 }));
+      const below = (s.y + e.y) / 2 > (panelTop + panelBottom) / 2;
+      const passY = below ? panelBottom + SPACE.footerGap / 2 : panelTop - SPACE.headerGap / 2;
+      const gx1 = sa === "right" ? gutterCentre(a) : gutterCentre(a - 1);
+      const gx2 = sb === "left" ? gutterCentre(b - 1) : gutterCentre(b);
+      const route = [s, { x: gx1, y: s.y }, { x: gx1, y: passY }, { x: gx2, y: passY }, { x: gx2, y: e.y }, e];
+      edges.push(withLabelAt(makeEdge(from.id, to.id, line.kind, tone, route, edges, line.label), { x: (gx1 + gx2) / 2, y: passY - 8 }));
       continue;
     }
 
@@ -975,6 +1062,10 @@ function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<s
       const into = band(to);
       tail = [...into.points].reverse();
       endY = into.trackY;
+      if (!labelAt) {
+        const edgeX = sb === "right" ? into.lane.box.x + into.lane.box.w : into.lane.box.x;
+        labelAt = { x: (into.points[0].x + edgeX) / 2, y: into.trackY - 10 };
+      }
     } else if (toGap) {
       const cx = to.box.x + to.box.w / 2;
       endY = gapBelow(to);
@@ -988,15 +1079,19 @@ function routeConnectors(lines: NConnector[], nodes: DiagramNode[], slots: Map<s
       endY = e.y;
     }
     const target = to.box;
+    const gutterMid = gutterCentre(Math.min(a, b));
     if (!toBand && !toGap && startY >= target.y + 10 && startY <= target.y + target.h - 10) {
-      // The target spans the source's level: one straight run, no elbow.
+      // The target spans the source's level: one straight run, no elbow; the label sits in the gutter.
       points.push({ x: tail[0].x, y: startY });
+      labelAt ??= { x: gutterMid, y: startY - 10 };
     } else {
       const gx = gutterX(a, b);
       points.push({ x: gx, y: startY }, { x: gx, y: endY }, ...tail);
+      // The gutter was widened for this label: stand it on the vertical run, or above a short one.
+      labelAt ??= Math.abs(endY - startY) >= 28 ? { x: gx, y: (startY + endY) / 2 } : { x: gutterMid, y: Math.min(startY, endY) - 10 };
     }
     const edge = makeEdge(from.id, to.id, line.kind, tone, simplify(points), edges, line.label);
-    edges.push(withLabelAt(edge, labelAt ?? labelOnLongest(edge.route)));
+    edges.push(withLabelAt(edge, labelAt));
   }
   return edges;
 }
@@ -1033,19 +1128,6 @@ function sameColumnEdge(line: NConnector, from: DiagramNode, to: DiagramNode, pl
   const e = { x: tb.x + tb.w, y: tb.y + tb.h / 2 };
   const edge = makeEdge(from.id, to.id, line.kind, tone, [s, { x: bx, y: s.y }, { x: bx, y: e.y }, e], edges, line.label);
   return withLabelAt(edge, { x: bx, y: (s.y + e.y) / 2 });
-}
-
-function labelOnLongest(route: Point[]): Point {
-  let best = { x: route[0]?.x ?? 0, y: route[0]?.y ?? 0 };
-  let bestLen = -1;
-  for (let i = 0; i + 1 < route.length; i++) {
-    const len = Math.hypot(route[i + 1].x - route[i].x, route[i + 1].y - route[i].y);
-    if (len > bestLen) {
-      bestLen = len;
-      best = { x: (route[i].x + route[i + 1].x) / 2, y: (route[i].y + route[i + 1].y) / 2 - 10 };
-    }
-  }
-  return best;
 }
 
 /** Drops repeated points and the middle points of straight runs. */

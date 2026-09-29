@@ -169,3 +169,54 @@ describe("normalizeSpec", () => {
     expect(normalizeSpecText(JSON.stringify(input))).toEqual(normalizeSpec(input));
   });
 });
+
+describe("normalizeSpec: zones, letters and scoped references", () => {
+  it("turns boundary-like items into zones and keeps untitled card groups as grids", () => {
+    const { spec, warnings } = normalizeSpec({
+      title: "Zones",
+      columns: [
+        {
+          title: "Network",
+          items: [
+            { type: "vnet", title: "Hub VNet", subtitle: "10.0.0.0/16", items: [{ title: "Firewall" }, { title: "Bastion" }] },
+            { title: "Spoke", items: [{ title: "AKS" }] },
+            { items: [{ title: "Cosmos DB" }, { title: "Key Vault" }] },
+            { type: "subnet", title: "Empty subnet", text: "10.0.9.0/24" },
+          ],
+        },
+      ],
+    });
+    const items = spec.columns[0].items;
+    expect(items.map((i) => i.type)).toEqual(["zone", "zone", "grid", "banner"]);
+    expect(items[0]).toMatchObject({ type: "zone", title: "Hub VNet", subtitle: "10.0.0.0/16", tone: "gray", columns: 2 });
+    expect(items[3]).toMatchObject({ type: "banner", title: "Empty subnet", text: "10.0.9.0/24" });
+    expect(warnings).toContain("Converted empty zone Empty subnet to a banner");
+    expect(spec.columns[0].size).toBe("normal");
+  });
+
+  it("letters flows in reading order and remaps used-by chips", () => {
+    const { spec } = normalizeSpec({
+      title: "Letters",
+      columns: [
+        { title: "Flows", items: [{ type: "flow", label: "F", title: "First", steps: [{ title: "a" }] }, { type: "flow", label: "D", title: "Second", steps: [{ title: "b" }] }] },
+        { title: "Services", items: [{ title: "Store", usedBy: ["D", "F"] }] },
+      ],
+    });
+    const flows = spec.columns[0].items as Array<{ label: string; title: string }>;
+    expect(flows.map((f) => `${f.label}:${f.title}`)).toEqual(["A:First", "B:Second"]);
+    expect((spec.columns[1].items[0] as { usedBy: string[] }).usedBy).toEqual(["A", "B"]);
+  });
+
+  it("resolves flow.step references by the id the author wrote, even after deduplication", () => {
+    const { spec, warnings } = normalizeSpec({
+      title: "Dedup",
+      columns: [
+        { id: "primary", title: "Primary", items: [{ type: "flow", id: "pri", title: "Primary", steps: [{ id: "gateway", title: "Gateway" }] }] },
+        { id: "dr", title: "DR", items: [{ type: "flow", id: "dr-request", title: "DR", steps: [{ id: "gateway", title: "Gateway" }, { id: "app", title: "App" }] }] },
+      ],
+      connectors: [{ from: "pri.gateway", to: "dr-request.gateway", kind: "call" }],
+    });
+    expect(warnings).toEqual([]);
+    expect(spec.connectors).toEqual([{ from: "primary.pri.gateway", to: "dr.dr-request.gateway-2", kind: "call" }]);
+  });
+});

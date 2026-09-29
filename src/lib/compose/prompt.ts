@@ -16,10 +16,11 @@ const schema = `CompositionSpec {
   footer?: SpecFooter           // outcome sentence and current/target status
 }
 SpecColumn { id?: string; title: string; size?: "narrow"|"normal"|"wide"; items: SpecItem[] }
-SpecItem = SpecCard | SpecGrid | SpecBanner | SpecFlow
+SpecItem = SpecCard | SpecGrid | SpecBanner | SpecZone | SpecFlow
 SpecCard { type:"card"; id?: string; title: string; lines?: string[]; note?: string; tone?: Tone; icon?: string; usedBy?: string[] }
 SpecGrid { type:"grid"; id?: string; columns?: 2|3; items: SpecCard[] }
 SpecBanner { type:"banner"; id?: string; title: string; text?: string; tone?: Tone }
+SpecZone { type:"zone"; id?: string; title: string; subtitle?: string; tag?: string; tone?: Tone; columns?: 1|2|3; items: SpecCard[]; notes?: string[] } // a boundary (VNet, subnet, cluster, namespace, account, region) drawn as a dashed box around its cards
 SpecFlow { type:"flow"; id?: string; label?: string; title: string; subtitle?: string; tag?: string; tone?: Tone; steps: SpecStep[]; notes?: string[]; chips?: { label?: string; items: string[] } }
 SpecStep { id?: string; title: string; lines?: string[]; tone?: Tone; icon?: string }
 SpecConnector { from: string; to: string; kind?: "flow"|"call"; label?: string; tone?: Tone }
@@ -188,14 +189,25 @@ export const COMPOSER_EXAMPLES: CompositionSpec[] = [
         size: "normal",
         items: [
           {
+            type: "zone",
+            id: "analytics-account",
+            title: "Analytics Account",
+            subtitle: "account: analytics · eu-west-1",
+            tone: "teal",
+            columns: 2,
+            items: [
+              { type: "card", id: "timestream", title: "Timestream", lines: ["Recent metrics", "Device queries"], note: "Retention policy", tone: "teal", icon: "database", usedBy: ["A"] },
+              { type: "card", id: "raw-lake", title: "S3 Raw Lake", lines: ["Immutable events", "Batch analytics"], note: "Lifecycle to archive", tone: "teal", icon: "aws-s3", usedBy: ["A"] },
+            ],
+            notes: ["Cross-account writes use one scoped role."],
+          },
+          {
             type: "grid",
             id: "aws-services",
             columns: 2,
             items: [
               { type: "card", id: "kinesis", title: "Kinesis", lines: ["Ordered shards", "Replay window"], note: "Per-device partition key", tone: "purple", icon: "aws-kinesis", usedBy: ["A"] },
               { type: "card", id: "lambda", title: "Lambda", lines: ["Validation", "Enrichment"], note: "Reserved concurrency", tone: "blue", icon: "aws-lambda", usedBy: ["A", "B"] },
-              { type: "card", id: "timestream", title: "Timestream", lines: ["Recent metrics", "Device queries"], note: "Retention policy", tone: "teal", icon: "database", usedBy: ["A"] },
-              { type: "card", id: "raw-lake", title: "S3 Raw Lake", lines: ["Immutable events", "Batch analytics"], note: "Lifecycle to archive", tone: "teal", icon: "aws-s3", usedBy: ["A"] },
               { type: "card", id: "sns", title: "SNS Alerts", lines: ["Email · webhook", "Escalations"], note: "Topic policy locked", tone: "orange", icon: "aws-sns", usedBy: ["B"] },
               { type: "card", id: "cloudwatch", title: "CloudWatch", lines: ["Logs · alarms", "DLQ metrics"], note: "Dashboards per fleet", tone: "blue", icon: "aws-cloudwatch", usedBy: ["A", "B"] },
             ],
@@ -239,12 +251,14 @@ ${schema}
 DESIGN METHOD
 1. Decide the story left to right: who or what calls in (actors, clients, external systems) → the workload being described (widest column; one flow lane per end-to-end path, letters A, B, C) → what it depends on (shared platform services, data, identity, secrets, messaging, observability, network). Use 2 to 4 columns; the engine numbers them, so never put numbers in column titles. Sizes: "wide" for the workload, "narrow" for callers and external systems, "normal" for shared services.
 2. In the workload, open with a banner for hosting/runtime/network context when useful. Each flow has 3-5 verb-led steps (Authenticate, Validate, Resolve, Respond), a subtitle naming the trigger (route, function, topic, schedule), and one note stating the key invariant. Add a tag only for special status.
-3. Shared services are cards. Use a grid of 2 when there are 4+ small cards. Each card has 1-3 short lines for what it holds or does and a note for posture (private, RBAC, retention). Mark which flows use them with usedBy chips INSTEAD of drawing lines.
-4. Connectors are few and deliberate: one flow connector from each caller into the flow it starts; call connectors only for important dependency calls from a step to an external system, with a short label. Flow connectors need no label: the lane they enter already says what happens. Never connect everything. Typically use 2-8 connectors.
-5. Tones carry meaning and stay consistent: blue = primary request/sync path & core compute; purple = async/messaging/integration; green = identity, security, governance, success; orange = secrets, keys, controls, warnings, human actions; teal = data & analytics; red = threats/failure paths; gray = operators, tooling, boundaries, neutral. Use at most 5 tones in one spec.
-6. Text budgets: titles <= 28 chars, lines <= 44 chars, <= 3 lines per card, step lines <= 24 chars, notes <= 90 chars. Prefer concrete nouns over marketing. Use "·" to join short facts.
-7. Header: product/system name as title, one-sentence subtitle, badge = platform/runtime facts in CAPS. Footer: the outcome in one sentence + status (CURRENT STATE or TARGET STATE) with a short detail.
-8. Icons are optional. Use only keys from the provided list. Prefer icons on cards for well-known cloud services.
+3. Shared services are cards. Use a grid of 2 when there are 4+ small cards. Each card has 1-3 short lines for what it holds or does and a note for posture (private, RBAC, retention). Mark which flows use supporting services (identity, secrets, monitoring, shared storage) with usedBy chips INSTEAD of drawing lines.
+4. Show boundaries the reader needs (VNet or subnet, cluster or namespace, account, region, on-premises). When everything in a column sits inside one boundary, title the column by it and describe it in a banner. When a column holds several boundaries, or a boundary next to things outside it, use a zone: a dashed box with the components inside as cards and the facts (address range, namespace, region) as its subtitle. Never nest zones.
+5. Connectors carry the story and stay few: one flow connector from each caller into the flow it starts; a connector from the step that publishes to a queue, topic or event bus to the step or flow that consumes it; call connectors for important dependency calls from a step to an external system or data store, with a short label. Flow connectors need no label: the lane they enter already says what happens. Items linked inside one column should sit next to each other. Never connect everything. Typically use 3-10 connectors.
+6. Put every component in the column of its role: edge and global services (DNS, CDN, WAF, Front Door, API gateway at the edge) with the callers or entry; orchestration and processing in the workload; operators and tooling in operations. Don't split one service across columns.
+7. Tones carry meaning and stay consistent: blue = primary request/sync path & core compute; purple = async/messaging/integration; green = identity, security, governance, success; orange = secrets, keys, controls, warnings, human actions; teal = data & analytics; red = threats/failure paths; gray = operators, tooling, boundaries, neutral. Use at most 5 tones in one spec.
+8. Text budgets: titles <= 28 chars, lines <= 44 chars, <= 3 lines per card, step lines <= 24 chars, notes <= 90 chars. Prefer concrete nouns over marketing. Use "·" to join short facts.
+9. Header: product/system name as title, one-sentence subtitle, badge = platform/runtime facts in CAPS. Footer: the outcome in one sentence + status (CURRENT STATE or TARGET STATE) with a short detail.
+10. Icons are optional. Use only keys from the provided list. Prefer icons on cards for well-known cloud services.
 
 TONE LIST
 ${TONES.join(", ")}
@@ -303,7 +317,7 @@ export function specReviewFixPrompt(assessment: ReviewAssessment, quality: Quali
   return `A reviewer assessed the rendered composed diagram and found these issues (score ${assessment.score}/10):\n\nIssues:\n${numbered(issues.length > 0 ? issues : ["Improve completeness, clarity, and story flow"])}\n\nSuggested spec changes:\n${numbered(fixes.length > 0 ? fixes : ["Clarify flows, shared services, connector labels, and text density"])}\n\nRevise the CompositionSpec, not pixel positions. Shorten text that does not fit, split crowded columns, move shared services to cards with usedBy chips, reduce connectors, and add missing components when needed. Output the COMPLETE updated spec JSON only.`;
 }
 
-export const COMPOSED_ASSESSMENT_ADDENDUM = `\n\nFor composed diagrams: layout is produced by a deterministic engine from a JSON spec. Judge completeness, correctness, clarity, text density, and whether flows/connectors tell the story. Phrase fixes as spec changes such as renaming cards, shortening text, adding missing services, adjusting usedBy chips, or reducing connectors. Do not ask for pixel moves or manual layout nudges.`;
+export const COMPOSED_ASSESSMENT_ADDENDUM = `\n\nFor composed diagrams: layout is produced by a deterministic engine from a JSON spec. Read it with its visual language: numbered column panels are the zones of the architecture (the title names the zone or boundary); dashed tinted boxes are boundaries such as a VNet, subnet, cluster or account, and the cards inside them live inside that boundary; lettered lanes (A, B, …) are end-to-end flows whose steps run left to right; solid arrows are primary flows and dashed arrows are dependency calls; small lettered chips on a service card mean "used by flows A, B" and deliberately replace lines to shared services; banners give hosting or runtime context for their column. Judge completeness, correctness, clarity, text density, and whether flows and connectors tell the story. Phrase fixes as spec changes such as moving a card to another column or into a zone, renaming cards, shortening text, adding missing services or hand-off connectors, adjusting usedBy chips, or reducing connectors. Do not ask for pixel moves or manual layout nudges.`;
 
 export function cleanSpecOutput(raw: string): string {
   let text = raw.trimStart();

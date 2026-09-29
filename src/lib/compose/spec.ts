@@ -47,6 +47,22 @@ export interface SpecBanner {
   tone?: Tone;
 }
 
+/** A boundary that contains components: a VNet or subnet, a cluster or namespace, an account or region. */
+export interface SpecZone {
+  type: "zone";
+  id?: string;
+  title: string;
+  /** Boundary facts in monospace, e.g. an address range or namespace. */
+  subtitle?: string;
+  /** Short pill after the title, e.g. "PRIVATE". */
+  tag?: string;
+  tone?: Tone;
+  /** Card columns inside the zone (1–3, default 2). */
+  columns?: number;
+  items: SpecCard[];
+  notes?: string[];
+}
+
 export interface SpecStep {
   id?: string;
   title: string;
@@ -73,7 +89,7 @@ export interface SpecFlow {
   chips?: { label?: string; items: string[] };
 }
 
-export type SpecItem = SpecCard | SpecGrid | SpecBanner | SpecFlow;
+export type SpecItem = SpecCard | SpecGrid | SpecBanner | SpecZone | SpecFlow;
 
 export interface SpecColumn {
   id?: string;
@@ -141,6 +157,18 @@ export interface NBanner {
   tone: Tone;
 }
 
+export interface NZone {
+  type: "zone";
+  id: string;
+  title: string;
+  subtitle?: string;
+  tag?: string;
+  tone: Tone;
+  columns: number;
+  items: NCard[];
+  notes: string[];
+}
+
 export interface NStep {
   id: string;
   title: string;
@@ -162,7 +190,7 @@ export interface NFlow {
   chips?: { label?: string; items: string[] };
 }
 
-export type NItem = NCard | NGrid | NBanner | NFlow;
+export type NItem = NCard | NGrid | NBanner | NZone | NFlow;
 
 export interface NColumn {
   id: string;
@@ -195,6 +223,7 @@ export const SPEC_LIMITS = {
   itemsPerColumn: 10,
   gridItems: 9,
   gridColumns: 3,
+  zoneItems: 9,
   steps: 6,
   linesPerCard: 5,
   linesPerStep: 3,

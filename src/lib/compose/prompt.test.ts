@@ -16,7 +16,7 @@ const toneSet = new Set<string>(TONES);
 const iconSet = new Set(Object.keys(iconRegistry));
 
 function collectCards(item: SpecItem): SpecCard[] {
-  if (item.type === "grid") return item.items;
+  if (item.type === "grid" || item.type === "zone") return item.items;
   if (item.type === "card") return [item];
   return [];
 }
@@ -60,8 +60,8 @@ function validateExample(spec: CompositionSpec) {
       addTone(item.type === "grid" ? undefined : item.tone);
       if (item.type !== "grid") expect(item.title.length).toBeLessThanOrEqual(28);
       if (item.type === "banner" && item.text) expect(item.text.length).toBeLessThanOrEqual(44);
-      if (item.type === "grid") {
-        expect(item.items.length).toBeLessThanOrEqual(SPEC_LIMITS.gridItems);
+      if (item.type === "grid" || item.type === "zone") {
+        expect(item.items.length).toBeLessThanOrEqual(item.type === "grid" ? SPEC_LIMITS.gridItems : SPEC_LIMITS.zoneItems);
         expect(item.columns ?? 2).toBeLessThanOrEqual(SPEC_LIMITS.gridColumns);
       }
       for (const card of collectCards(item)) {

@@ -91,20 +91,20 @@ export const TONES: readonly Tone[] = ["blue", "purple", "green", "orange", "red
  * What a node is in a composed diagram (src/lib/compose). Absent on free-form
  * graph diagrams, and on nodes added by hand, which render as plain cards.
  */
-export type NodeRole = "header" | "footer" | "column" | "banner" | "card" | "grid" | "lane" | "step";
+export type NodeRole = "header" | "footer" | "column" | "banner" | "card" | "grid" | "zone" | "lane" | "step";
 
-export const NODE_ROLES: readonly NodeRole[] = ["header", "footer", "column", "banner", "card", "grid", "lane", "step"];
+export const NODE_ROLES: readonly NodeRole[] = ["header", "footer", "column", "banner", "card", "grid", "zone", "lane", "step"];
 
 /** Which legends a column shows in its title row. */
 export type LegendKind = "lines" | "usedBy";
 
 /** Text and decorations of a composed node beyond its label (the label is always the title). */
 export interface NodeContent {
-  /** header: subtitle · lane: code subtitle (trigger, route) · banner: detail text · footer: body text. */
+  /** header: subtitle · lane: code subtitle (trigger, route) · zone: boundary facts · banner: detail text · footer: body text. */
   subtitle?: string;
   /** card, step: body lines. */
   lines?: string[];
-  /** card: muted footnotes pinned to the bottom · lane: notes under the steps. */
+  /** card: muted footnotes pinned to the bottom · lane, zone: notes under the content. */
   notes?: string[];
   /** header: badge title · column: its number · lane: its letter. */
   badge?: string;
@@ -120,7 +120,7 @@ export interface NodeContent {
   usedBy?: string[];
   /** column: width hint. */
   size?: "narrow" | "normal" | "wide";
-  /** grid: number of card columns. */
+  /** grid, zone: number of card columns. */
   columns?: number;
   /** column: legends shown in the title row. */
   legend?: LegendKind[];
