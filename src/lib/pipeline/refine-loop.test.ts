@@ -331,4 +331,32 @@ describe("runDiagramPipeline", () => {
     expect(steps.generate).toHaveBeenCalledTimes(2);
     expect(events).toContainEqual({ type: "render_error", round: 1, message: "Renderer is busy, try again shortly" });
   });
+  it("uses an injected language for initial, render, structural, and review prompts", async () => {
+    const language = {
+      initialPrompt: vi.fn(() => "CUSTOM INITIAL"),
+      renderFixPrompt: vi.fn((message: string) => `CUSTOM RENDER ${message}`),
+      structuralFixPrompt: vi.fn(() => "CUSTOM STRUCTURAL"),
+      reviewFixPrompt: vi.fn(() => "CUSTOM REVIEW"),
+    };
+
+    const renderCase = makeSteps({ scores: [8], renderErrors: { v1: "bad spec" } });
+    renderCase.steps.language = language;
+    await runDiagramPipeline(renderCase.steps, { prompt: "p", analysis: { domain: "x" }, maxRefinements: 1 });
+    expect(language.initialPrompt).toHaveBeenCalledWith("p", { components: [] }, { domain: "x" });
+    expect(language.renderFixPrompt).toHaveBeenCalledWith("bad spec");
+    expect(renderCase.prompts).toEqual(["CUSTOM INITIAL", "CUSTOM RENDER bad spec"]);
+
+    const structuralCase = makeSteps({ withAssess: false, qualities: { v1: brokenQuality } });
+    structuralCase.steps.language = language;
+    await runDiagramPipeline(structuralCase.steps, { prompt: "p", maxRefinements: 1 });
+    expect(language.structuralFixPrompt).toHaveBeenCalledWith(brokenQuality);
+    expect(structuralCase.prompts[1]).toBe("CUSTOM STRUCTURAL");
+
+    const reviewCase = makeSteps({ scores: [5, 8] });
+    reviewCase.steps.language = language;
+    await runDiagramPipeline(reviewCase.steps, { prompt: "p", maxRefinements: 1 });
+    expect(language.reviewFixPrompt).toHaveBeenCalled();
+    expect(reviewCase.prompts[1]).toBe("CUSTOM REVIEW");
+  });
+
 });

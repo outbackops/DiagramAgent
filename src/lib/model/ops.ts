@@ -216,11 +216,17 @@ export function clearAffectedRoutes(prev: DiagramModel, next: DiagramModel): Dia
   });
   if (changedBoxes.length === 0) return next;
   const changedIds = new Set(changedBoxes.map((node) => node.id));
+  // A re-routed line needs its label placed again, so the old label spot goes with the old route.
+  const unrouted = (edge: DiagramEdge): DiagramEdge => {
+    const next = { ...edge, route: [] };
+    delete next.labelAt;
+    return next;
+  };
   const edges = next.edges.map((edge) => {
     if (edge.route.length === 0) return edge;
-    if (changedIds.has(edge.from) || changedIds.has(edge.to)) return { ...edge, route: [] };
+    if (changedIds.has(edge.from) || changedIds.has(edge.to)) return unrouted(edge);
     for (const node of changedBoxes) {
-      if (!routeIgnores(nextIndex, edge, node.id) && polylineHitsBox(edge.route, node.box)) return { ...edge, route: [] };
+      if (!routeIgnores(nextIndex, edge, node.id) && polylineHitsBox(edge.route, node.box)) return unrouted(edge);
     }
     return edge;
   });

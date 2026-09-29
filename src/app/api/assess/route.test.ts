@@ -33,6 +33,17 @@ describe("POST /api/assess", () => {
     expect(call.prompt).toContain("a -> b");
   });
 
+
+  it("adds composition assessment guidance only for composition", async () => {
+    await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x", d2Code: "{}" }));
+    expect(llm.lastCall().system).not.toContain("deterministic engine from a JSON spec");
+
+    await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x", d2Code: "{}", format: "composition" }));
+    const call = llm.lastCall();
+    expect(call.system).toContain("deterministic engine from a JSON spec");
+    expect(call.prompt).toContain("Current diagram spec (JSON)");
+  });
+
   it("recomputes pass server-side from the score", async () => {
     llm.text = JSON.stringify({ ...VALID_ASSESSMENT, score: 8, pass: false });
     expect((await (await POST(makeJsonRequest({ svg: SAMPLE_SVG, prompt: "x" }))).json()).assessment).toMatchObject({ score: 8, pass: true });

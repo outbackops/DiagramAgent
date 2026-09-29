@@ -21,12 +21,13 @@ import { Button } from "@/components/ui/primitives";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { useCopilotSession, useModelChoice } from "@/hooks/useCopilot";
 import { useDiagramAgent, type AgentDocument } from "@/hooks/useDiagramAgent";
-import { suggestsTidyUp, useDiagramDocument } from "@/hooks/useDiagramDocument";
+import { looksLikeSpec, suggestsTidyUp, useDiagramDocument } from "@/hooks/useDiagramDocument";
 import { useLiveRender } from "@/hooks/useLiveRender";
 import { useModelQuality } from "@/hooks/useModelQuality";
 import { useTheme } from "@/hooks/useTheme";
 import { useViewportWidth } from "@/hooks/useViewportWidth";
 import { connect } from "@/lib/model/ops";
+import { pageWidthOf } from "@/lib/compose";
 import { modelToMermaid } from "@/lib/model/to-mermaid";
 import type { DiagramModel } from "@/lib/model/types";
 import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
@@ -73,11 +74,17 @@ function Workspace() {
   }, [doc]);
 
   const agentDocument: AgentDocument = {
-    currentCode: () => (doc.model ? doc.d2 : null),
+    currentCode: () => (doc.model ? (doc.model.composed ? doc.specText : doc.d2) : null),
+    currentFormat: () => (doc.model ? (doc.model.composed ? "composition" : "d2") : undefined),
+    pageWidth: () => pageWidthOf(doc.model),
     onKeep: async (code, info) => {
-      const result = await doc.acceptRunCode(code, info.layout);
+      const result = info.format === "composition" ? doc.acceptRunSpec(code) : await doc.acceptRunCode(code, info.layout);
       if (result.warnings.length > 0) {
-        toast({ tone: "info", title: "Some parts of the diagram weren't imported", description: result.warnings.slice(0, 3).join(" · ") });
+        toast({
+          tone: "info",
+          title: info.format === "composition" ? "Some parts of the spec were adjusted" : "Some parts of the diagram weren't imported",
+          description: result.warnings.slice(0, 3).join(" · "),
+        });
       }
       // Stable merges tuck new items in around the existing layout; many of them deserve a fresh layout (R16).
       if (suggestsTidyUp(result, info.layout)) {
@@ -408,7 +415,14 @@ function Workspace() {
                 tab={tab}
                 onTabChange={setTab}
                 onClose={() => setInspectorVisible(false)}
-                d2={doc.d2 || agent.code}
+                d2={doc.d2 || (looksLikeSpec(agent.code) ? "" : agent.code)}
+                spec={
+                  doc.model?.composed
+                    ? doc.specText
+                    : (!doc.model || (running && latestRun?.format === "composition")) && looksLikeSpec(agent.code)
+                      ? agent.code
+                      : null
+                }
                 mermaid={doc.model ? modelToMermaid(doc.model) : ""}
                 streamingCode={running ? agent.code : null}
                 theme={theme.resolved}

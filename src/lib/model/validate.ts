@@ -1,5 +1,5 @@
 import { ensureParentsFirst } from "./query";
-import type { Arrowhead, Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle, Point, Size } from "./types";
+import { NODE_ROLES, TONES, type Arrowhead, type Box, type DiagramEdge, type DiagramModel, type DiagramNode, type EdgeKind, type EdgeStyle, type LayoutHints, type NodeContent, type NodeStyle, type Point, type Size } from "./types";
 
 /**
  * Strict validation for models that arrive from outside (browser storage, API
@@ -36,6 +36,9 @@ const ARROWHEADS: readonly Arrowhead[] = [
   "cf-many-required",
 ];
 const DIRECTIONS = ["up", "down", "left", "right"] as const;
+const EDGE_KINDS: readonly EdgeKind[] = ["flow", "call", "step"];
+const LEGEND_KINDS = ["lines", "usedBy"] as const;
+const NODE_SIZES = ["narrow", "normal", "wide"] as const;
 
 export type ValidationResult = { ok: true; model: DiagramModel } | { ok: false; error: string };
 
@@ -70,6 +73,18 @@ function optBool(v: unknown, where: string): boolean | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== "boolean") fail(`${where} must be a boolean`);
   return v as boolean;
+}
+
+function optEnum<T extends string>(v: unknown, where: string, values: readonly T[]): T | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || !values.includes(v as T)) fail(`${where} is invalid`);
+  return v as T;
+}
+
+function optInt(v: unknown, where: string, { min, max }: { min: number; max: number }): number | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) fail(`${where} must be an integer from ${min} to ${max}`);
+  return v as number;
 }
 
 function box(v: unknown, where: string): Box {
@@ -164,6 +179,43 @@ function stringList(v: unknown, where: string): string[] | undefined {
   return (v as unknown[]).map((item, i) => str(item, `${where}[${i}]`, 200));
 }
 
+function boundedStringList(v: unknown, where: string, maxItems: number, maxLength: number): string[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > maxItems) fail(`${where} must be a list of at most ${maxItems} strings`);
+  return (v as unknown[]).map((item, i) => str(item, `${where}[${i}]`, maxLength));
+}
+
+function legendList(v: unknown, where: string): NodeContent["legend"] {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > LEGEND_KINDS.length) fail(`${where} must be a short list`);
+  return (v as unknown[]).map((item, i) => {
+    if (typeof item !== "string" || !LEGEND_KINDS.includes(item as (typeof LEGEND_KINDS)[number])) fail(`${where}[${i}] is invalid`);
+    return item as (typeof LEGEND_KINDS)[number];
+  });
+}
+
+function nodeContent(v: unknown, where: string): NodeContent | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const c = v as Record<string, unknown>;
+  return compact({
+    subtitle: optStr(c.subtitle, `${where}.subtitle`, 200),
+    lines: boundedStringList(c.lines, `${where}.lines`, 8, 200),
+    notes: boundedStringList(c.notes, `${where}.notes`, 6, 200),
+    // Short on lanes and columns (a letter, a number); a phrase on the page header.
+    badge: optStr(c.badge, `${where}.badge`, 60),
+    badgeDetail: optStr(c.badgeDetail, `${where}.badgeDetail`, 80),
+    tag: optStr(c.tag, `${where}.tag`, 60),
+    chips: boundedStringList(c.chips, `${where}.chips`, 12, 60),
+    chipsLabel: optStr(c.chipsLabel, `${where}.chipsLabel`, 60),
+    usedBy: boundedStringList(c.usedBy, `${where}.usedBy`, 40, 4),
+    size: optEnum(c.size, `${where}.size`, NODE_SIZES),
+    columns: optInt(c.columns, `${where}.columns`, { min: 1, max: 4 }),
+    legend: legendList(c.legend, `${where}.legend`),
+    vertical: optBool(c.vertical, `${where}.vertical`),
+  });
+}
+
 function validateNode(v: unknown, i: number): DiagramNode {
   const where = `nodes[${i}]`;
   if (!isObject(v)) fail(`${where} must be an object`);
@@ -185,6 +237,9 @@ function validateNode(v: unknown, i: number): DiagramNode {
     layout: layoutHints(n.layout, `${where}.layout`),
     tooltip: optStr(n.tooltip, `${where}.tooltip`, MODEL_LIMITS.labelLength),
     link: optStr(n.link, `${where}.link`, 2000),
+    role: optEnum(n.role, `${where}.role`, NODE_ROLES),
+    tone: optEnum(n.tone, `${where}.tone`, TONES),
+    content: nodeContent(n.content, `${where}.content`),
   }) as DiagramNode;
 }
 
@@ -203,6 +258,10 @@ function validateEdge(v: unknown, i: number): DiagramEdge {
     dstArrow: arrowhead(e.dstArrow ?? "triangle", `${where}.dstArrow`),
     style: edgeStyle(e.style, `${where}.style`),
     route: (e.route as unknown[]).map((p, j) => point(p, `${where}.route[${j}]`)),
+    kind: optEnum(e.kind, `${where}.kind`, EDGE_KINDS),
+    tone: optEnum(e.tone, `${where}.tone`, TONES),
+    curve: optBool(e.curve, `${where}.curve`),
+    labelAt: e.labelAt === undefined ? undefined : point(e.labelAt, `${where}.labelAt`),
   }) as DiagramEdge;
 }
 
@@ -235,6 +294,7 @@ export function validateModel(input: unknown): ValidationResult {
       nodes,
       edges,
       handArranged: optBool(m.handArranged, "handArranged"),
+      composed: optBool(m.composed, "composed"),
     });
     return { ok: true, model };
   } catch (err) {

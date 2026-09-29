@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Box, ImageIcon, Link2, Trash2, X } from "lucide-react";
-import type { DiagramModel } from "@/lib/model/types";
+import { canTone, detailsOf, hasDetails, setDetails, setTone } from "@/lib/compose/edit";
+import { TONE_COLORS } from "@/lib/compose/theme";
+import { TONES, type DiagramModel, type DiagramNode } from "@/lib/model/types";
 import { deleteItems, renameItem, setIcon } from "@/lib/model/ops";
 import { indexModel } from "@/lib/model/query";
 import { MODEL_LIMITS } from "@/lib/model/validate";
@@ -153,8 +155,93 @@ export default function ElementEditor({ model, selection, readOnly, connectFrom,
         {selectedNode && <IconButton label="Connect to another node" onClick={() => onStartConnect(selectedNode.id)}><Link2 className="size-4" /></IconButton>}
         <IconButton label="Delete" onClick={() => onApply((m) => deleteItems(m, [selectedId]))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-4" /></IconButton>
       </div>
-      {selectedNode && <p className="mt-2 text-[11px] text-zinc-400">Tip: drag the selected node onto another container to move it.</p>}
+      {selectedNode && hasDetails(selectedNode) && <ComposedFields key={selectedNode.id} node={selectedNode} onApply={onApply} />}
+      {selectedNode && (
+        <p className="mt-2 text-[11px] text-zinc-400">
+          {model.composed ? "Tip: moved items snap back into the layout with Tidy up." : "Tip: drag the selected node onto another container to move it."}
+        </p>
+      )}
       {selectedEdge && <div className="mt-2"><Button variant="ghost" size="xs" onClick={() => onApply((m) => deleteItems(m, [selectedEdge.id]))}>Delete connection</Button></div>}
+    </div>
+  );
+}
+
+const DETAILS_LABEL: Record<string, string> = {
+  card: "Details, one per line",
+  step: "Details, one per line",
+  lane: "Trigger (route, topic, schedule)",
+  banner: "Detail",
+  header: "Subtitle",
+  footer: "Outcome",
+};
+
+/** Detail text and colour of a composed item. Keyed by node id, so a draft never lands on another item. */
+function ComposedFields({ node, onApply }: { node: DiagramNode; onApply: ElementEditorProps["onApply"] }) {
+  const saved = detailsOf(node);
+  // `base` is the saved text the draft started from: when undo, redo or an AI edit changes the
+  // text under an unedited field, the field follows; an edit in progress is kept.
+  const [draft, setDraft] = useState({ base: saved, value: saved });
+  if (draft.base !== saved && draft.value === draft.base) setDraft({ base: saved, value: saved });
+  const pending = useRef({ id: node.id, value: draft.value, dirty: false, onApply });
+  useEffect(() => {
+    pending.current = { id: node.id, value: draft.value, dirty: draft.value !== saved, onApply };
+  });
+  // Clicking another item unmounts this field before blur fires: save what was typed.
+  useEffect(
+    () => () => {
+      const { id, value, dirty, onApply: apply } = pending.current;
+      if (dirty) apply((m) => setDetails(m, id, value), { coalesceKey: `details:${id}` });
+    },
+    [],
+  );
+  const commit = () => {
+    if (draft.value === saved) return;
+    onApply((m) => setDetails(m, node.id, draft.value), { coalesceKey: `details:${node.id}` });
+    pending.current = { ...pending.current, dirty: false };
+    setDraft((d) => ({ base: d.value, value: d.value }));
+  };
+  const multiline = node.role === "card" || node.role === "step";
+  return (
+    <div className="mt-2 space-y-2">
+      <textarea
+        value={draft.value}
+        onChange={(e) => {
+          const value = e.target.value;
+          setDraft((d) => ({ ...d, value }));
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            setDraft({ base: saved, value: saved });
+          } else if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+        rows={multiline ? 3 : 1}
+        aria-label={DETAILS_LABEL[node.role ?? ""] ?? "Details"}
+        placeholder={DETAILS_LABEL[node.role ?? ""] ?? "Details"}
+        className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[12px] leading-snug text-zinc-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+      />
+      {canTone(node) && (
+        <div role="radiogroup" aria-label="Colour" className="flex items-center gap-1.5">
+          {TONES.map((tone) => (
+            <button
+              key={tone}
+              type="button"
+              role="radio"
+              aria-checked={node.tone === tone}
+              aria-label={tone}
+              title={tone}
+              onClick={() => onApply((m) => setTone(m, node.id, tone))}
+              className="size-5 rounded-full border-2 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70 aria-checked:ring-2 aria-checked:ring-zinc-400 aria-checked:ring-offset-1 dark:aria-checked:ring-offset-zinc-900"
+              style={{ background: TONE_COLORS[tone].fill, borderColor: TONE_COLORS[tone].main }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

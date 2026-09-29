@@ -6,6 +6,7 @@ import path from "node:path";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 
+import { composeText } from "@/lib/compose";
 import { compileD2 } from "../d2-render";
 import { iconBox } from "./render-svg";
 import { modelFromCompiled } from "./from-d2";
@@ -178,6 +179,11 @@ function edgeCaseModel(): DiagramModel {
       },
     ],
   };
+}
+
+async function composedFixtureModel(): Promise<DiagramModel> {
+  const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "compositions", "knowledge-assistant.json"), "utf8");
+  return composeText(fixture).model;
 }
 
 interface Cell {
@@ -391,6 +397,41 @@ describe("model exports", () => {
       expect(shape.width).toBeCloseTo(node.box.w / PX_PER_IN, 3);
       expect(shape.height).toBeCloseTo(node.box.h / PX_PER_IN, 3);
     }
+  });
+
+  it("exports composed draw.io labels with detail lines and node style colours", async () => {
+    const model = await composedFixtureModel();
+    const xml = await modelToDrawio(model, { embedIcons: false });
+    const cells = parseCells(xml);
+    const employee = cells.find((cell) => cell.value.startsWith("Employees&lt;br&gt;Web chat and Teams app"));
+    expect(employee).toBeDefined();
+    expect(employee!.value).toContain("Ask questions in plain language");
+    expect(employee!.value).toContain("Entra ID sign-in");
+    expect(employee!.style).toContain("fillColor=#e8f3fc");
+    expect(employee!.style).toContain("strokeColor=#0078d4");
+
+    const lane = cells.find((cell) => cell.value.startsWith("Answer a question&lt;br&gt;POST /api/chat"));
+    expect(lane).toBeDefined();
+  });
+
+  it("escapes composed draw.io label text as HTML, so only the line breaks are markup", async () => {
+    const model = await composedFixtureModel();
+    const target = model.nodes.find((node) => node.role === "card")!;
+    target.label = "R&D <b>team</b>";
+    const xml = await modelToDrawio(model, { embedIcons: false });
+    const cell = parseCells(xml).find((candidate) => candidate.value.startsWith("R&amp;amp;D"));
+    expect(cell?.value.startsWith("R&amp;amp;D &amp;lt;b&amp;gt;team&amp;lt;/b&amp;gt;&lt;br&gt;")).toBe(true);
+  });
+
+  it("exports composed VSDX text with detail lines and node style colours", async () => {
+    const model = await composedFixtureModel();
+    const buffer = await modelToVsdx(model);
+    const zip = await JSZip.loadAsync(buffer);
+    const page = await zip.file("visio/pages/page1.xml")!.async("string");
+    expect(page).toContain("<Text>Employees\nWeb chat and Teams app\nAsk questions in plain language\nEntra ID sign-in");
+    expect(page).toContain('<Cell N="FillForegnd" V="#e8f3fc"/>');
+    expect(page).toContain('<Cell N="LineColor" V="#0078d4"/>');
+    expect(page).toContain("Answer a question\nPOST /api/chat");
   });
 
   it("exports deterministic Mermaid with groups, safe unique ids, labels and dashed edges", () => {

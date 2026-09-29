@@ -1,0 +1,490 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/outbackops/DiagramAgent/docs/composition.schema.json",
+  "title": "DiagramAgent CompositionSpec",
+  "description": "Portable semantic JSON for composed architecture diagrams. Describe structure and intent; DiagramAgent handles layout, routing, numbering, wrapping and rendering.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Optional grammar version marker. Omit or set to 1."
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "Page title: concise system or product name."
+    },
+    "subtitle": {
+      "type": "string",
+      "maxLength": 140,
+      "description": "One-sentence purpose and scope for the diagram."
+    },
+    "badge": {
+      "$ref": "#/$defs/Badge",
+      "description": "Optional header badge with platform/runtime facts."
+    },
+    "columns": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/Column"
+      },
+      "description": "Left-to-right story columns. Use 2-4 when possible."
+    },
+    "connectors": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/Connector"
+      },
+      "description": "Few deliberate connectors. Step arrows inside flows are automatic."
+    },
+    "footer": {
+      "$ref": "#/$defs/Footer",
+      "description": "Optional outcome/status footer."
+    }
+  },
+  "required": [
+    "title",
+    "columns"
+  ],
+  "$defs": {
+    "Tone": {
+      "type": "string",
+      "enum": [
+        "blue",
+        "purple",
+        "green",
+        "orange",
+        "red",
+        "teal",
+        "gray"
+      ],
+      "description": "Semantic colour tone: blue request/core compute, purple async/integration, green identity/governance/success, orange controls/warnings/human action, red threats/failure, teal data/analytics, gray neutral/tooling/boundary."
+    },
+    "Card": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A service, actor, system, datastore or shared dependency card.",
+      "properties": {
+        "type": {
+          "const": "card",
+          "description": "Discriminator for a card item."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Card title: a concise service, actor, system or datastore name."
+        },
+        "lines": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "maxLength": 90,
+            "description": "Short body line; prefer concrete facts."
+          },
+          "description": "Short body lines describing what this card is or holds."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Muted footnote for posture, constraints, ownership or retention."
+        },
+        "tone": {
+          "$ref": "#/$defs/Tone",
+          "description": "Semantic colour tone for the card."
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Icon key from the vendored icon registry."
+        },
+        "usedBy": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "Flow id, label or title that uses this card."
+          },
+          "description": "Flow references shown as used-by chips instead of dependency lines."
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ]
+    },
+    "Grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A compact 2- or 3-column grid of cards.",
+      "properties": {
+        "type": {
+          "const": "grid",
+          "description": "Discriminator for a grid item."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 3,
+          "default": 2,
+          "description": "Number of card columns in this grid; use 2 unless the cards are very small."
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/$defs/Card"
+          },
+          "description": "Cards in reading order."
+        }
+      },
+      "required": [
+        "type",
+        "items"
+      ]
+    },
+    "Banner": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A full-width strip for hosting, runtime, network or boundary context.",
+      "properties": {
+        "type": {
+          "const": "banner",
+          "description": "Discriminator for a banner item."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Banner title naming the context or boundary."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Short detail line shown under the banner title."
+        },
+        "tone": {
+          "$ref": "#/$defs/Tone",
+          "description": "Semantic colour tone for the banner."
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ]
+    },
+    "Zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A boundary that contains components, drawn as a dashed box around its cards: a VNet or subnet, a cluster or namespace, an account, a region or an on-premises site. Zones don't nest.",
+      "properties": {
+        "type": { "const": "zone", "description": "Discriminator for a zone item." },
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 40, "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles." },
+        "title": { "type": "string", "maxLength": 60, "description": "Name of the boundary, e.g. 'Hub VNet' or 'Production cluster'." },
+        "subtitle": { "type": "string", "maxLength": 140, "description": "Boundary facts shown in monospace, e.g. an address range, namespace or region." },
+        "tag": { "type": "string", "maxLength": 40, "description": "Optional short status pill after the title, e.g. 'PRIVATE'." },
+        "tone": { "$ref": "#/$defs/Tone", "description": "Colour of the boundary; gray by default." },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 3, "default": 2, "description": "Card columns inside the zone; the engine uses fewer when the column is narrow." },
+        "items": { "type": "array", "minItems": 1, "maxItems": 9, "items": { "$ref": "#/$defs/Card" }, "description": "Components inside the boundary, as cards in reading order." },
+        "notes": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 140 }, "description": "One-line facts about the boundary shown under its cards." }
+      },
+      "required": ["type", "title", "items"]
+    },
+    "Flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An end-to-end flow lane with a letter badge, trigger subtitle, ordered steps and invariant notes.",
+      "properties": {
+        "type": {
+          "const": "flow",
+          "description": "Discriminator for a flow lane item."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Optional lane label such as A or B; assigned automatically when omitted."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Flow title naming the path or job."
+        },
+        "subtitle": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Trigger such as route, function, topic, event or schedule."
+        },
+        "tag": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Small status pill; use only for special status such as ASYNC or Human in the loop."
+        },
+        "tone": {
+          "$ref": "#/$defs/Tone",
+          "description": "Semantic colour tone for the lane."
+        },
+        "steps": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "description": "Ordered flow steps; use 3-5 verb-led steps when possible."
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "maxLength": 140,
+            "description": "One-line invariant or guarantee for the flow."
+          },
+          "description": "Invariant notes shown below the steps."
+        },
+        "chips": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Small chips under the lane for tracked outputs or key facts.",
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 60,
+              "description": "Optional label before the chips."
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "Chip text."
+              },
+              "description": "Chip texts shown under the lane."
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "title",
+        "steps"
+      ]
+    },
+    "Step": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One verb-led action inside a flow lane.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Verb-led step title, for example Authenticate or Index."
+        },
+        "lines": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "maxLength": 90,
+            "description": "Terse step detail line."
+          },
+          "description": "Terse details for the step."
+        },
+        "tone": {
+          "$ref": "#/$defs/Tone",
+          "description": "Semantic colour tone for the step; defaults to the flow tone."
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Icon key from the vendored icon registry."
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "Column": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One numbered left-to-right story column.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 40,
+          "description": "Optional stable kebab-case id. Keep it stable across edits; omitted ids are derived from titles."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Column heading; do not include numbering because the engine adds it."
+        },
+        "size": {
+          "type": "string",
+          "enum": [
+            "narrow",
+            "normal",
+            "wide"
+          ],
+          "default": "normal",
+          "description": "Width hint: narrow for callers, wide for the main workload, normal for shared services."
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/Item"
+          },
+          "description": "Items stacked in reading order within the column."
+        }
+      },
+      "required": [
+        "title",
+        "items"
+      ]
+    },
+    "Connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A deliberate connector between cards, flows or steps. Use few connectors; prefer usedBy chips for shared services.",
+      "properties": {
+        "from": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Source reference: id, full model id, flow.step, flow label, or unique title."
+        },
+        "to": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Target reference: id, full model id, flow.step, flow label, or unique title."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "flow",
+            "call"
+          ],
+          "default": "flow",
+          "description": "flow for caller-to-lane arrows; call for dependency calls from a step to another system."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Short connector label, especially for call connectors."
+        },
+        "tone": {
+          "$ref": "#/$defs/Tone",
+          "description": "Optional semantic colour tone for the connector."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ]
+    },
+    "Footer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Outcome and status band at the bottom of the page.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Footer label such as Outcome."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "One sentence describing the business or operational outcome."
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Short state label such as CURRENT STATE, TARGET STATE or PILOT."
+        },
+        "statusDetail": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Short detail for the status."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "Badge": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Compact platform/runtime badge in the header.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Badge title, often the platform or runtime."
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Badge detail with compact facts."
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "Item": {
+      "description": "A column item. Pick one object with a type discriminator.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Card"
+        },
+        {
+          "$ref": "#/$defs/Grid"
+        },
+        {
+          "$ref": "#/$defs/Banner"
+        }, { "$ref": "#/$defs/Zone" },
+        {
+          "$ref": "#/$defs/Flow"
+        }
+      ]
+    }
+  }
+}

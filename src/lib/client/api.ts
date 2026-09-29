@@ -149,9 +149,10 @@ export interface GenerateInput {
   prompt: string;
   existingCode: string;
   history: ChatTurn[];
+  format?: "d2" | "composition";
 }
 
-/** Stream D2 from /api/generate, calling onDelta with each chunk. Resolves with the full raw text. */
+/** Stream diagram source from /api/generate, calling onDelta with each chunk. Resolves with the full raw text. */
 async function generate(
   input: GenerateInput,
   model: ModelSelection,
@@ -217,7 +218,7 @@ export const api = {
     postJson<ClarifyResponseDto>("/api/clarify", { prompt, model }, signal),
   plan: (prompt: string, analysis: unknown, model: ModelSelection, signal?: AbortSignal) =>
     postJson<{ plan: Record<string, unknown> }>("/api/plan", { prompt, analysis: analysis ?? undefined, model }, signal),
-  assess: (input: { svg: string; prompt: string; d2Code: string }, model: ModelSelection, signal?: AbortSignal) =>
+  assess: (input: { svg: string; prompt: string; d2Code: string; format?: "d2" | "composition" }, model: ModelSelection, signal?: AbortSignal) =>
     postJson<{ assessment: ReviewAssessment }>("/api/assess", { ...input, model }, signal),
   render,
   /** Scores (and renders) an edited model exactly as it is on the canvas. */

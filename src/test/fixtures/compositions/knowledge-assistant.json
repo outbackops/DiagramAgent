@@ -1,0 +1,101 @@
+{
+  "title": "Knowledge Assistant",
+  "subtitle": "Grounded answers over company documents, with ingestion and feedback loops on Azure",
+  "badge": { "title": "Azure · Container Apps", "detail": "4 services · private · passwordless" },
+  "columns": [
+    {
+      "id": "callers",
+      "title": "Callers and sources",
+      "size": "narrow",
+      "items": [
+        { "type": "card", "id": "employees", "title": "Employees", "lines": ["Web chat and Teams app", "Ask questions in plain language"], "note": "Entra ID sign-in · conditional access", "tone": "blue", "icon": "azure-active-directory" },
+        { "type": "card", "id": "sharepoint", "title": "SharePoint Online", "lines": ["Policies, runbooks, specs", "Change notifications"], "note": "Read-only via Graph", "tone": "purple" },
+        { "type": "card", "id": "reviewers", "title": "Content reviewers", "lines": ["Triage flagged answers", "Approve source updates"], "note": "Weekly review cadence", "tone": "gray" }
+      ]
+    },
+    {
+      "id": "platform",
+      "title": "Assistant platform",
+      "size": "wide",
+      "items": [
+        { "type": "banner", "id": "hosting", "title": "Azure Container Apps · VNet integrated", "text": "Managed identity on every call · private endpoints only · scale to zero overnight" },
+        {
+          "type": "flow",
+          "id": "ask",
+          "title": "Answer a question",
+          "subtitle": "POST /api/chat · streaming",
+          "tone": "blue",
+          "steps": [
+            { "id": "authenticate", "title": "Authenticate", "lines": ["Entra token", "tenant + role"] },
+            { "id": "retrieve", "title": "Retrieve", "lines": ["hybrid search", "top 8 chunks"] },
+            { "id": "ground", "title": "Ground", "lines": ["prompt + citations"] },
+            { "id": "answer", "title": "Answer", "lines": ["stream tokens", "log trace"], "tone": "green" }
+          ],
+          "notes": ["Answers cite at least one source or say they don't know"]
+        },
+        {
+          "type": "flow",
+          "id": "ingest",
+          "title": "Ingest documents",
+          "subtitle": "graph-webhook → ingest-worker",
+          "tone": "purple",
+          "steps": [
+            { "id": "notify", "title": "Notify", "lines": ["webhook → queue"] },
+            { "id": "extract", "title": "Extract", "lines": ["layout + tables"] },
+            { "id": "chunk", "title": "Chunk & embed", "lines": ["512 tokens", "overlap 64"] },
+            { "id": "index", "title": "Index", "lines": ["upsert by doc id"] }
+          ],
+          "notes": ["Deleted documents are purged from the index within 15 minutes"]
+        },
+        {
+          "type": "flow",
+          "id": "feedback",
+          "title": "Feedback loop",
+          "subtitle": "POST /api/feedback",
+          "tag": "Human in the loop",
+          "tone": "green",
+          "steps": [
+            { "id": "flag", "title": "Flag", "lines": ["thumbs down + reason"] },
+            { "id": "triage", "title": "Triage", "lines": ["reviewer queue"] },
+            { "id": "fix", "title": "Fix source", "lines": ["update or retire"], "tone": "orange" }
+          ],
+          "chips": { "label": "Tracked:", "items": ["Answer quality", "Missing sources", "Stale content"] },
+          "notes": ["Every fix re-runs ingestion for the changed document"]
+        }
+      ]
+    },
+    {
+      "id": "shared",
+      "title": "Shared Azure services",
+      "size": "normal",
+      "items": [
+        {
+          "type": "grid",
+          "id": "services",
+          "columns": 2,
+          "items": [
+            { "type": "card", "id": "search", "title": "AI Search", "lines": ["Hybrid + semantic", "Per-tenant index"], "note": "Private endpoint", "tone": "blue", "icon": "azure-search", "usedBy": ["A", "B"] },
+            { "type": "card", "id": "openai", "title": "Azure OpenAI", "lines": ["Chat + embeddings", "PTU deployment"], "note": "No data retention", "tone": "purple", "icon": "azure-cognitive-services", "usedBy": ["A", "B"] },
+            { "type": "card", "id": "vault", "title": "Key Vault", "lines": ["Webhook secret", "Graph client cert"], "note": "RBAC · purge protection", "tone": "orange", "icon": "azure-key-vault", "usedBy": ["B"] },
+            { "type": "card", "id": "identity", "title": "Managed identity", "lines": ["Search · OpenAI · Storage"], "note": "Least privilege", "tone": "green", "usedBy": ["A", "B", "C"] }
+          ]
+        },
+        { "type": "card", "id": "storage", "title": "Blob Storage", "lines": ["Raw documents and extracted text", "Versioned, 90-day soft delete"], "note": "Private · customer-managed keys", "tone": "teal", "icon": "azure-blob-storage" },
+        { "type": "card", "id": "insights", "title": "Application Insights", "lines": ["Traces, token usage, latency", "Answer-quality dashboard"], "note": "Prompts are redacted before logging", "tone": "gray", "icon": "azure-app-insights" }
+      ]
+    }
+  ],
+  "connectors": [
+    { "from": "employees", "to": "ask", "kind": "flow" },
+    { "from": "sharepoint", "to": "ingest", "kind": "flow" },
+    { "from": "reviewers", "to": "feedback", "kind": "flow" },
+    { "from": "extract", "to": "sharepoint", "kind": "call", "label": "Fetch file content through Graph" },
+    { "from": "chunk", "to": "storage", "kind": "call", "label": "Store text" }
+  ],
+  "footer": {
+    "title": "Outcome",
+    "text": "Cited answers in under 3 seconds · sources refreshed within 15 minutes · every bad answer becomes a tracked fix",
+    "status": "Target state",
+    "statusDetail": "Pilot with two departments"
+  }
+}

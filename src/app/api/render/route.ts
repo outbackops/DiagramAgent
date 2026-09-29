@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApiRequest, jsonError, readJsonBody } from "@/lib/api/http";
 import { getRequestCredentials } from "@/lib/auth/session";
+import { scoreComposition } from "@/lib/compose/quality";
 import { compileD2, D2BusyError, D2RenderError } from "@/lib/d2-render";
 import { LlmError } from "@/lib/llm/errors";
 import { modelFromCompiled } from "@/lib/model/from-d2";
@@ -51,7 +52,8 @@ export async function POST(request: NextRequest) {
     const result = validateModel(body.model);
     if (!result.ok) return NextResponse.json({ error: `Invalid diagram: ${result.error}` }, { status: 400 });
     const model = routeModelEdges(result.model, { fallbackOnly: true });
-    return NextResponse.json({ svg: renderModelSvg(model), quality: score(modelToD2(model), modelToCompiled(model)) });
+    const quality = model.composed ? scoreComposition(model) : score(modelToD2(model), modelToCompiled(model));
+    return NextResponse.json({ svg: renderModelSvg(model), quality });
   }
 
   const code = body?.code;

@@ -51,6 +51,22 @@ export default function SettingsMenu({
     >
       <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Generation settings</p>
       <div className="mt-1 divide-y divide-zinc-100 dark:divide-zinc-800">
+        <div className="py-2.5">
+          <p className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">Diagram style</p>
+          <p className="mb-2 mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+            Composed diagrams are laid out like a designed poster: columns, flow lanes and service cards. Graph lets D2 place a free-form graph.
+          </p>
+          <Segmented
+            ariaLabel="Diagram style"
+            value={settings.style ?? "composed"}
+            options={[
+              { value: "composed", label: "Composed" },
+              { value: "graph", label: "Graph" },
+            ]}
+            disabled={disabled}
+            onChange={(style) => onChange({ ...settings, style })}
+          />
+        </div>
         <Row title="Clarifying questions" hint="Ask a few targeted questions before drawing a new diagram.">
           <Switch label="Clarifying questions" checked={settings.clarify} disabled={disabled} onChange={(clarify) => onChange({ ...settings, clarify })} />
         </Row>

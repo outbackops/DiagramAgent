@@ -42,16 +42,36 @@ describe("useDiagramAgent and the document", () => {
     const onKeep = vi.fn();
     await sendWith({ currentCode: () => "a -> b", onKeep }, "add a cache");
     expect(api.plan).not.toHaveBeenCalled();
-    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "a -> b" });
-    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "stable", status: "done" });
+    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "a -> b", format: "d2" });
+    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "stable", status: "done", format: "d2" });
   });
 
-  it("starts a new diagram when the canvas was emptied, instead of editing the last run", async () => {
+  it("starts a new graph diagram when the canvas was emptied, instead of editing the last run", async () => {
+    window.localStorage.setItem("diagramAgent.settings.v2", JSON.stringify({ clarify: false, review: false, refinements: 0, style: "graph" }));
     const onKeep = vi.fn();
     await sendWith({ currentCode: () => "", onKeep }, "draw a data pipeline");
     expect(api.plan).toHaveBeenCalled();
-    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "" });
-    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "full", status: "done" });
+    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "", format: "d2" });
+    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "full", status: "done", format: "d2" });
+  });
+
+  it("composes new diagrams by default: no D2 planner, the spec renders in the browser", async () => {
+    const spec = { title: "Pipeline", columns: [{ title: "Sources", items: [{ title: "Sensors" }, { title: "Gateway" }] }, { title: "Cloud", items: [{ title: "Ingest" }, { title: "Store" }] }] };
+    api.generate.mockResolvedValue({ text: `Here you go:\n\`\`\`json\n${JSON.stringify(spec)}\n\`\`\`` });
+    const onKeep = vi.fn();
+    await sendWith({ currentCode: () => "", onKeep }, "draw a data pipeline");
+    expect(api.plan).not.toHaveBeenCalled();
+    expect(api.render).not.toHaveBeenCalled();
+    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: "", format: "composition" });
+    expect(onKeep).toHaveBeenCalledWith(expect.stringContaining('"title": "Pipeline"'), { layout: "full", status: "done", format: "composition" });
+  });
+
+  it("edits a composed diagram in its spec", async () => {
+    api.generate.mockResolvedValue({ text: JSON.stringify({ title: "Edited", columns: [{ title: "Only", items: [{ title: "Card" }] }] }) });
+    const onKeep = vi.fn();
+    await sendWith({ currentCode: () => '{"title":"Old","columns":[]}', currentFormat: () => "composition", onKeep }, "rename it");
+    expect(api.generate.mock.calls[0][0]).toMatchObject({ existingCode: '{"title":"Old","columns":[]}', format: "composition" });
+    expect(onKeep).toHaveBeenCalledWith(expect.stringContaining('"Edited"'), { layout: "stable", status: "done", format: "composition" });
   });
 
   it("re-lays out when applying the reviewer's fixes", async () => {
@@ -62,7 +82,7 @@ describe("useDiagramAgent and the document", () => {
       result.current.applyReview({ score: 5, pass: false, layout_issues: ["too wide"], specific_fixes: ["stack vertically"] });
     });
     await waitFor(() => expect(result.current.busy).toBe("idle"));
-    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "full", status: "done" });
+    expect(onKeep).toHaveBeenCalledWith("a -> b", { layout: "full", status: "done", format: "d2" });
   });
 
   it("reports when the result can't be put on the canvas", async () => {

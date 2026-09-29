@@ -30,7 +30,16 @@ export interface ConversationTurn {
   content: string;
 }
 
+export interface PipelineLanguage {
+  initialPrompt(prompt: string, plan: Record<string, unknown> | null, analysis: unknown): string;
+  renderFixPrompt(message: string): string;
+  structuralFixPrompt(quality: QualityReport): string;
+  reviewFixPrompt(assessment: ReviewAssessment, quality: QualityReport | null): string;
+}
+
 export interface PipelineSteps {
+  /** Prompt language for generation and repair. Defaults to D2. */
+  language?: PipelineLanguage;
   /** Architecture plan for new diagrams. Failures are non-fatal. */
   plan?: (prompt: string, analysis: unknown, signal?: AbortSignal) => Promise<Record<string, unknown> | null>;
   /** Returns the complete, cleaned D2 code (implementations may stream as they go). */
@@ -170,6 +179,13 @@ If the issues mention extreme aspect ratio, long horizontal strip, backward flow
 Output the COMPLETE updated D2 code.`;
 }
 
+export const D2_LANGUAGE: PipelineLanguage = {
+  initialPrompt: (prompt, plan) => composeGenerationPrompt(prompt, plan),
+  renderFixPrompt,
+  structuralFixPrompt,
+  reviewFixPrompt,
+};
+
 interface Candidate {
   round: number;
   code: string;
@@ -203,6 +219,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   const emit = (event: PipelineEvent) => onEvent?.(event);
   const existingCode = options.existingCode ?? "";
   const maxRefinements = Math.max(0, Math.min(5, Math.floor(options.maxRefinements)));
+  const language = steps.language ?? D2_LANGUAGE;
 
   let best: Candidate | null = null;
   // Candidates only compete once reviewed; a cancel mid-review still keeps the draft that rendered.
@@ -235,7 +252,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   try {
     code = await steps.generate(
       {
-        prompt: existingCode ? options.prompt : composeGenerationPrompt(options.prompt, plan),
+        prompt: existingCode ? options.prompt : language.initialPrompt(options.prompt, plan, options.analysis ?? null),
         existingCode,
         history: options.history ?? [],
       },
@@ -290,7 +307,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
       if (refinements >= maxRefinements) break;
       refinements++;
       emit({ type: "phase", phase: "fixing", round: round + 1 });
-      const fixed = await regenerate(renderFixPrompt(message), round + 1);
+      const fixed = await regenerate(language.renderFixPrompt(message), round + 1);
       if (fixed === null) break;
       code = fixed;
       continue;
@@ -337,7 +354,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
 
     refinements++;
     emit({ type: "phase", phase: "refining", round: round + 1 });
-    const prompt = assessment ? reviewFixPrompt(assessment, rendered.quality) : structuralFixPrompt(rendered.quality!);
+    const prompt = assessment ? language.reviewFixPrompt(assessment, rendered.quality) : language.structuralFixPrompt(rendered.quality!);
     const next = await regenerate(prompt, round + 1);
     if (next === null) break;
     code = next;

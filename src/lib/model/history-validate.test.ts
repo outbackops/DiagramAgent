@@ -79,6 +79,48 @@ describe("validateModel", () => {
     expect(result.model.edges[0].style).toEqual({ strokeDash: 3 });
   });
 
+  it("accepts bounded composed fields and drops unknown content keys", () => {
+    const input = {
+      ...validModel(),
+      composed: true,
+      nodes: [
+        {
+          ...validModel().nodes[0],
+          role: "column",
+          tone: "blue",
+          content: {
+            subtitle: "A short subtitle",
+            lines: ["first", "second"],
+            notes: ["note"],
+            badge: "01",
+            badgeDetail: "prod",
+            tag: "sync",
+            chips: ["event"],
+            chipsLabel: "Emits",
+            usedBy: ["A"],
+            size: "wide",
+            columns: 3,
+            legend: ["lines", "usedBy"],
+            vertical: true,
+            unknown: "dropped",
+          },
+        },
+        validModel().nodes[1],
+        validModel().nodes[2],
+      ],
+      edges: [{ ...validModel().edges[0], kind: "flow", tone: "purple", curve: true, labelAt: { x: 10, y: 20 } }],
+    };
+    const result = validateModel(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.model.composed).toBe(true);
+    expect(result.model.nodes[0].role).toBe("column");
+    expect(result.model.nodes[0].tone).toBe("blue");
+    expect(result.model.nodes[0].content).toMatchObject({ size: "wide", columns: 3, legend: ["lines", "usedBy"], vertical: true });
+    expect("unknown" in (result.model.nodes[0].content ?? {})).toBe(false);
+    expect(result.model.edges[0]).toMatchObject({ kind: "flow", tone: "purple", curve: true, labelAt: { x: 10, y: 20 } });
+  });
+
   it.each([
     ["a non-object", "nope"],
     ["the wrong version", { ...validModel(), version: 2 }],
@@ -102,6 +144,13 @@ describe("validateModel", () => {
     ["an oversized label", { ...validModel(), nodes: [{ ...validModel().nodes[0], label: "x".repeat(MODEL_LIMITS.labelLength + 1) }], edges: [] }],
     ["too many route points", { ...validModel(), edges: [{ ...validModel().edges[0], route: Array.from({ length: MODEL_LIMITS.routePoints + 1 }, () => ({ x: 0, y: 0 })) }] }],
     ["a bad layout direction", { ...validModel(), layout: { direction: "diagonal" } }],
+    ["a bad composed role", { ...validModel(), nodes: [{ ...validModel().nodes[0], role: "cluster" }], edges: [] }],
+    ["a bad composed tone", { ...validModel(), nodes: [{ ...validModel().nodes[0], tone: "magenta" }], edges: [] }],
+    ["over-long composed content", { ...validModel(), nodes: [{ ...validModel().nodes[0], content: { subtitle: "x".repeat(201) } }], edges: [] }],
+    ["too many composed lines", { ...validModel(), nodes: [{ ...validModel().nodes[0], content: { lines: Array.from({ length: 9 }, () => "x") } }], edges: [] }],
+    ["a bad edge kind", { ...validModel(), edges: [{ ...validModel().edges[0], kind: "dependency" }] }],
+    ["a non-finite edge labelAt", { ...validModel(), edges: [{ ...validModel().edges[0], labelAt: { x: 1, y: Number.NaN } }] }],
+    ["a bad model composed flag", { ...validModel(), composed: "yes" }],
   ])("rejects %s", (_label, input) => {
     expect(validateModel(input).ok).toBe(false);
   });

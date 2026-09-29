@@ -19,15 +19,17 @@ interface CodeEditorProps {
   onChange: (code: string) => void;
   readOnly?: boolean;
   theme: "light" | "dark";
+  /** Monaco language id; D2 by default. */
+  language?: string;
 }
 
-export default function CodeEditor({ code, onChange, readOnly = false, theme }: CodeEditorProps) {
+export default function CodeEditor({ code, onChange, readOnly = false, theme, language = "d2" }: CodeEditorProps) {
   const handleChange = useCallback((value: string | undefined) => onChange(value ?? ""), [onChange]);
 
   return (
     <MonacoEditor
       height="100%"
-      language="d2"
+      language={language}
       theme={theme === "dark" ? "diagram-dark" : "diagram-light"}
       value={code}
       onChange={handleChange}

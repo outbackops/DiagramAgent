@@ -148,13 +148,16 @@ describe("ElementEditor", () => {
 
 describe("DiagramCanvas", () => {
   it("disables export without a model and calls PNG export with the model", async () => {
-    const { api } = await import("@/lib/client/api");
+    const { api, downloadBlob } = await import("@/lib/client/api");
     const { rerender } = render(withToast(<DiagramCanvas canvas={<div>Canvas</div>} exportModel={null} title="T" streaming={false} busy={false} quality={null} qualityLoading={false} renderError={null} renderErrorKind={null} onRetryRender={() => {}} onFixError={() => {}} onShowCode={() => {}} onShowQuality={() => {}} />));
     expect(screen.getByRole("button", { name: "Export" })).toHaveProperty("disabled", true);
     rerender(withToast(<DiagramCanvas canvas={<div>Canvas</div>} exportModel={model()} title="T" streaming={false} busy={false} quality={null} qualityLoading={false} renderError={null} renderErrorKind={null} onRetryRender={() => {}} onFixError={() => {}} onShowCode={() => {}} onShowQuality={() => {}} />));
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /PNG/ }));
     await waitFor(() => expect(api.exportPng).toHaveBeenCalledWith(expect.objectContaining({ version: 1 })));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Excalidraw/ }));
+    expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "T.excalidraw");
   });
 });
 
@@ -162,13 +165,13 @@ describe("ImportD2Dialog", () => {
   it("shows warnings and errors", async () => {
     const onImport = vi.fn(async () => ["Unsupported table"]);
     render(<ImportD2Dialog open onClose={() => {}} onImport={onImport} />);
-    fireEvent.change(screen.getByLabelText("D2 source"), { target: { value: "x -> y" } });
+    fireEvent.change(screen.getByLabelText("Diagram source"), { target: { value: "x -> y" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(await screen.findByText(/Unsupported table/)).toBeTruthy();
     cleanup();
 
     render(<ImportD2Dialog open onClose={() => {}} onImport={async () => { throw new Error("Bad D2"); }} />);
-    fireEvent.change(screen.getByLabelText("D2 source"), { target: { value: "bad" } });
+    fireEvent.change(screen.getByLabelText("Diagram source"), { target: { value: "bad" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(await screen.findByText("Bad D2")).toBeTruthy();
   });

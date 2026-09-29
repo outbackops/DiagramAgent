@@ -1,17 +1,25 @@
 # DiagramAgent
 
-Describe a system in plain language and get a clean, editable architecture diagram — planned, drawn, rendered, reviewed and refined by the **GitHub Copilot models your account already has** (Claude Opus 5.5 at medium reasoning by default). No API keys.
+Describe a system in plain language and get a polished, editable architecture diagram, composed the way a designer lays out a solution poster: a header band, numbered columns, lettered flow lanes, service cards and boundaries. It is planned, drawn, reviewed and refined by the **GitHub Copilot models your account already has** (Claude Opus 5.5 at medium reasoning by default). No API keys.
 
-![DiagramAgent](docs/images/app-light.png)
+![A composed architecture diagram](docs/images/composed-knowledge-assistant.png)
 
 ## Highlights
 
+- **Designed, not auto-laid-out** — the model writes a small semantic *composition spec* (columns, flows, cards, boundaries, connectors with intent) and a deterministic engine lays it out on a grid:
+  - measured text
+  - equal-height panels
+  - S-curves for flows, dashed calls through lane bands and gutters
+  - used-by chips instead of lines to every shared service
+
+  Any model that can write JSON produces the same finish; the [composition guide](docs/composition-guide.md) and [JSON Schema](docs/composition.schema.json) make the language usable by other agents too.
 - **Sign in with your GitHub/Copilot identity** — uses the account signed in on your machine (`gh auth login` / `copilot login`), or an in-app *Sign in with GitHub* device-code flow. Organizations that federate GitHub with **Microsoft Entra ID** sign in through Entra as part of GitHub's normal sign-in.
 - **Pick any model you're entitled to** — the model picker lists your Copilot catalog (Claude, GPT, Grok and more — whatever your plan includes) with vision/reasoning badges and a reasoning-effort control. Default: `claude-opus-5.5` @ `medium`.
-- **A real pipeline, not a single prompt** — optional clarifying questions → architecture plan → D2 generation (streamed live) → render → deterministic quality checks → vision review → targeted refinement. Every refinement is re-checked and the best version wins.
-- **Quality you can see** — a *Quality* tab scores every render (0–100) with 16 deterministic checks (phantom nodes, unknown icons, overlaps, edges through nodes, crossings, aspect ratio, orphans, label coverage, …); a *Review* tab shows the vision model's score, findings and fixes per round.
-- **Edit by hand or by chat** — drag nodes and groups, drop them into other groups, resize groups, add nodes from an icon palette, connect, rename, change icons, align and distribute, with full undo/redo. Ask in chat ("add a Redis cache") and the change is merged into your layout: nothing you arranged moves. *Tidy up* re-runs the automatic layout when you want it.
-- **Export what you see** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io and native Visio `.vsdx` at the positions on your canvas, plus D2 and Mermaid source.
+- **A real pipeline, not a single prompt** — optional clarifying questions → composition spec (streamed live, the diagram builds up as it arrives) → layout → deterministic quality checks → vision review → targeted refinement. Every refinement is re-checked and the best version wins.
+- **Quality you can see** — a *Quality* tab scores every render (0–100) with deterministic checks (text fit, overlaps, connectors through cards, aspect ratio, crossings, density, balance, …); a *Review* tab shows the vision model's score, findings and fixes per round.
+- **Edit by hand or by chat** — drag, resize, rename, recolour, edit details, add, connect and delete on the canvas, with full undo/redo. Ask in chat ("add a Redis cache") and the AI edits the spec; the layout is deterministic, so what you didn't touch stays put. *Tidy up* snaps hand-moved items back into the composition.
+- **Export what you see** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io, native Visio `.vsdx` and Excalidraw, plus the spec, D2 and Mermaid source.
+- **Graph style when you want it** — switch *Diagram style* to *Graph* in settings for free-form diagrams laid out by D2; imported D2 opens as a graph too.
 - **Polished UX** — resizable panels, light/dark/system themes, live progress with timings, stop at any time (<kbd>Esc</kbd>), keyboard shortcuts, and state that survives reloads.
 
 ## Quick start
@@ -62,22 +70,41 @@ DIAGRAM_AGENT_SESSION_SECRET=<32+ random characters>  # required in production
 ## How it works
 
 ```
-prompt ──► clarify (optional) ──► plan ──► generate D2 (streamed) ──► layout (D2 WASM, ELK) ──► diagram model
-                                                     ▲                                             │
-                                                     │                         quality checks + model renderer
-                                                     │                                             │
-                                             refine with findings ◄──────────────── vision review (score /10)
-                                                     │
-                                          best candidate ──► canvas (hand edits, undo) ──► exports
+prompt ──► clarify (optional) ──► composition spec (streamed) ──► composition engine ──► diagram model
+                                         ▲                                                    │
+                                         │                          quality checks + composed renderer
+                                         │                                                    │
+                                 refine the spec ◄───────────────────────── vision review (score /10)
+                                         │
+                              best candidate ──► canvas (hand edits, undo) ──► exports
 ```
 
-- **Plan** — an architecture blueprint (components, hierarchy, zones, connections, HA/DR mirroring) plus a deterministic D2 scaffold so the generator refines a complete skeleton instead of dropping components.
-- **Quality checks** — computed from the compiled layout on every render, no model involved. Critical failures (e.g. duplicate nodes created by unqualified connection paths) are fixed before spending a vision review.
-- **Vision review** — the reviewer model looks at a PNG of the diagram (icons and fonts embedded) and scores intent coverage, flow, grouping, routing and style. Pass = 7/10, computed server-side.
-- **Refinement** — review findings plus failed checks are fed back; every refined candidate is rendered and reviewed again, and a regression guard keeps the best one.
-- **Diagram model** — D2 is the layout engine and the language the AI writes, but the app works on a diagram model (nodes, groups, connections, icons, styles and positions) imported from D2's compiled layout. One renderer draws the model for the canvas, the exports and the vision reviewer, so they always match. Hand edits change the model directly and lines re-route around nodes that don't move.
-- **Chat edits keep your layout** — for an edit, the current model is exported to D2, the AI changes it, and the result is merged back by node id: existing items keep their positions, new ones are placed next to what they connect to, and groups grow to make room. New diagrams, *Tidy up* and *Apply suggested fixes* use a fresh full layout (fixes ask first if you've arranged things by hand). Everything is undoable.
-- **Code tab** — shows the D2 and Mermaid generated from the model (read-only), and *Import D2…* opens D2 from elsewhere. Diagrams saved by earlier versions are imported automatically.
+- **Composition spec** — the model describes the diagram, not its geometry. Items:
+  - `columns` of items: `card`, `grid`, `banner`, `zone` (a boundary such as a VNet, cluster or account) and `flow` (a lettered lane with steps)
+  - `connectors` with an intent: `flow` or `call`
+  - a header and a footer
+
+  Parsing is lenient: aliases, missing ids and references by title are repaired and reported. See the [composition guide](docs/composition-guide.md).
+- **Composition engine** (`src/lib/compose`) — deterministic layout on a grid.
+  - Column widths from size hints and content.
+  - A page width chosen for a presentable aspect ratio.
+  - Text measured and wrapped (nothing overflows); equal-height panels.
+  - Connectors routed by intent: S-curves into lanes, dashed elbows through a lane's call band and the gutters, brackets down a column margin, and chips where a line would cross a column.
+  - The same spec always gives the same diagram, so a chat edit only moves what it changed.
+- **Quality checks** — composition-aware and computed on every render with no model involved: text fit, overlaps, connectors through cards, aspect ratio, crossings, density, balance and repaired references.
+- **Vision review** — the reviewer model looks at a PNG of the diagram (icons and fonts embedded), is told the visual language, and scores intent coverage, clarity and story. Pass = 7/10, computed server-side.
+- **Refinement** — review findings and failed checks go back to the model as spec edits; every refined candidate is rendered and reviewed again, and a regression guard keeps the best one.
+- **Diagram model** — composed diagrams land on the same editable model as everything else: one renderer draws it for the canvas, the exports and the reviewer, so they always match. The spec is derived back from the model, so hand edits (renames, details, colours, moves between columns) carry into the next AI edit, and *Tidy up* recomposes.
+- **Graph style** — with *Diagram style: Graph*, the model writes D2 instead: plan → D2 → automatic layout (D2 WASM, ELK) → the same model and canvas. Chat edits merge into your arrangement by node id, and *Tidy up* re-runs D2's layout.
+- **Code tab** — shows the spec (composed diagrams), D2 and Mermaid generated from the model (read-only). *Import…* opens a spec or D2 from elsewhere, and diagrams saved by earlier versions are imported automatically.
+
+### Composed diagrams
+
+- **Portable language:** the [composition guide](docs/composition-guide.md) and [JSON Schema](docs/composition.schema.json) describe the spec for people and for other models or agents.
+- **Render a spec from the command line:** `npm run compose -- src/test/fixtures/compositions/knowledge-assistant.json -o knowledge-assistant.svg` (or `.png`). It prints the page size, any repairs and the quality score. For agents, `--json` prints a machine-readable report and `--strict` exits with code 2 until the spec needs no repairs (see the [guide](docs/composition-guide.md#rendering-it)).
+- **Hand edits on the canvas:** select an item to edit its title, details and colour. Drag items between columns; *Tidy up* snaps them into the grid.
+
+![Composed diagram in the app, with its spec](docs/images/app-composed.png)
 
 Model calls run in isolated, tool-less Copilot sessions (`mode: "empty"`, replaced system prompt, no filesystem or shell access) with their state kept outside your `~/.copilot`.
 
@@ -90,10 +117,41 @@ npx tsc --noEmit
 npm run eval:diagrams     # live end-to-end eval against real Copilot models (see below)
 ```
 
+- **Composition fixtures** — `src/test/fixtures/compositions/*.json` are original specs (a RAG assistant, a hub-and-spoke network, a fleet telemetry pipeline, a small web app) plus the composer prompt's two examples. `src/test/composition-fixtures.test.ts` checks that each one:
+  - normalises without repairs and lays out without cutting text
+  - scores 90 or more with no failed checks
+  - keeps a presentable aspect ratio
+  - renders byte-identically twice and passes model validation
+  - round-trips through the spec derived from its model to the identical layout
 - **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` lays each out with the real D2 engine (no network), imports it into the model, and asserts quality score, no critical failures, that scoring the model matches scoring the compiled layout, keyword coverage (also in the D2 exported from the model), and that draw.io/Visio export works. `src/lib/model/d2-convert.test.ts` round-trips every fixture through D2 export and re-import with the same ids, groups, labels, styles and connections.
-- **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures`.
+- **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--format composition|d2` (default `composition`), `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures` (with `--format d2`; refreshes the D2 golden fixtures).
 
-### Latest eval (2026-09-28)
+### Latest eval: composed diagrams (2026-09-29)
+
+10 cases, composition format, 1 refinement round. Each model generated and reviewed its own diagrams:
+
+| Case | Claude Opus 5.5: quality | review | GPT-6 Sol: quality | review |
+|------|---------:|-------:|---------:|-------:|
+| azure-sql-always-on-hadr | 89 (B) | 8/10 | 94 (A) | 8/10 |
+| aws-three-tier-web | 100 (A) | 7/10 | 100 (A) | 8/10 |
+| aws-serverless-events | 91 (A) | 7/10 | 93 (A) | 8/10 |
+| kubernetes-microservices-mesh | 98 (A) | 7/10 | 94 (A) | 8/10 |
+| github-actions-aks-cicd | 98 (A) | — ¹ | 96 (A) | 8/10 |
+| streaming-kafka-spark-lakehouse | 98 (A) | 7/10 | 98 (A) | 9/10 |
+| azure-hub-spoke-network | 98 (A) | 8/10 | 77 (C) | 7/10 |
+| azure-rag-llm-app | 94 (A) | 7/10 | 79 (C) | 9/10 |
+| gcp-analytics-platform | 98 (A) | 8/10 | 96 (A) | 8/10 |
+| iot-edge-cloud-telemetry | 96 (A) | 7/10 | 84 (B) | 8/10 |
+
+¹ The review call timed out (180 s); the diagram rendered and scored 98.
+
+- **GPT-6 Sol:** 10 of 10 pass review, averaging **8.1/10**. Every spec was valid on the first attempt, and keyword coverage was 8/8 in every case.
+- **Claude Opus 5.5:** its stricter self-review passes every reviewed case (9 of 9), averaging **7.3/10**. Keyword coverage was 8/8 in 9 of 10 cases.
+- **The graph pipeline below:** it never passed review, stuck at 6/10.
+
+The reviewers' remaining findings are about content rather than layout: a missing hand-off connector, a card that would read better inside a boundary, a redundant card. The refine loop can act on those.
+
+### Graph pipeline baseline (2026-09-28)
 
 10 cases, `claude-opus-5.5` @ medium for every step (plan, generate, review), 1 refinement round:
 
@@ -110,11 +168,17 @@ npm run eval:diagrams     # live end-to-end eval against real Copilot models (se
 | gcp-analytics-platform | 88 (B) | 6/10 | 5.44:1 | 8/8 | 4.6 min |
 | iot-edge-cloud-telemetry | 89 (B) | 6/10 | 0.84:1 | 8/8 | 4.2 min |
 
-Every case renders, covers at least 7 of 8 required components and scores 82–90 on the deterministic checks. The vision reviewer consistently rates them **6/10 — "usable but needs work"**: its recurring findings are wide layouts (5 of 10 are wider than 3.5:1), long edges looping across containers, and colliding labels in dense areas. No run reached the 7/10 pass mark, so the app reports *Reviewed* with the findings and an **Apply suggested fixes** action rather than *Passed review*. Better automatic layout for large systems is the main open quality item.
+Every case renders, covers at least 7 of 8 required components and scores 82–90 on the deterministic checks. The vision reviewer consistently rates them **6/10 — "usable but needs work"**: its recurring findings are wide layouts (5 of 10 are wider than 3.5:1), long edges looping across containers, and colliding labels in dense areas. No run reached the 7/10 pass mark, so the app reports *Reviewed* with the findings and an **Apply suggested fixes** action rather than *Passed review*. This is why new diagrams are now composed; *Graph* remains available in settings.
 
 ### Example output
 
-Real pipeline output (golden fixtures), rendered by the app:
+Composed diagrams, rendered from the spec fixtures by the app's engine:
+
+| A RAG assistant (flows, a card grid, dashed calls) | A hub-and-spoke network (zones as boundaries) |
+|---|---|
+| ![Knowledge assistant](docs/images/composed-knowledge-assistant.png) | ![Hub-and-spoke network](docs/images/composed-hub-spoke-network.png) |
+
+Graph-style output from the D2 pipeline (golden fixtures):
 
 | IoT edge-to-cloud | Kubernetes microservices | RAG chat app on Azure |
 |---|---|---|
@@ -161,7 +225,8 @@ src/
 ├── components/                  # UI (ModelCanvas, CanvasToolbar, ElementEditor, ConversationPanel, RunCard, Inspector, …)
 ├── hooks/                       # useDiagramDocument (model + undo), useDiagramAgent (conversation + pipeline), useCopilot, …
 └── lib/
-    ├── model/                   # diagram model: operations, stable merge, router, renderer, D2 import/export, draw.io/Visio/Mermaid
+    ├── compose/                 # composition spec: normaliser, layout engine, content layout, theme, quality, composer prompt
+    ├── model/                   # diagram model: operations, stable merge, router, renderers, D2 import/export, draw.io/Visio/Mermaid/Excalidraw
     ├── llm/                     # Copilot SDK provider, optional Azure provider, model selection
     ├── auth/                    # device flow, sealed session cookie, machine-login policy
     ├── pipeline/                # prompts, server steps, pure refine loop shared by UI and evals

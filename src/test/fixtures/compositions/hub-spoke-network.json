@@ -1,0 +1,83 @@
+{
+  "title": "Hub-and-Spoke Network",
+  "subtitle": "Branches and the datacenter reach workload spokes only through the hub firewall",
+  "badge": { "title": "Azure · West Europe", "detail": "hub + 2 spokes · forced tunnelling" },
+  "columns": [
+    {
+      "id": "onprem",
+      "title": "On-premises",
+      "size": "narrow",
+      "items": [
+        { "type": "card", "id": "branches", "title": "Branch offices", "lines": ["40 sites on SD-WAN", "Staff laptops and printers"], "note": "IPsec to the hub", "tone": "gray" },
+        { "type": "card", "id": "datacenter", "title": "Datacenter", "lines": ["ExpressRoute 1 Gbps", "Directory and file servers"], "note": "Private peering only", "tone": "gray" }
+      ]
+    },
+    {
+      "id": "hub",
+      "title": "Hub",
+      "size": "normal",
+      "items": [
+        {
+          "type": "zone",
+          "id": "hub-vnet",
+          "title": "Hub VNet",
+          "subtitle": "10.0.0.0/16",
+          "tag": "Shared",
+          "tone": "blue",
+          "columns": 1,
+          "items": [
+            { "type": "card", "id": "gateway", "title": "VPN and ER gateways", "lines": ["Zone-redundant", "BGP to branches"], "tone": "blue", "icon": "azure-vpn-gateway" },
+            { "type": "card", "id": "firewall", "title": "Azure Firewall", "lines": ["Forced tunnelling", "Threat intelligence: deny"], "tone": "orange", "icon": "azure-firewall" },
+            { "type": "card", "id": "bastion", "title": "Bastion", "lines": ["Admin access without public IPs"], "tone": "green", "icon": "azure-bastion" }
+          ],
+          "notes": ["Every spoke route points at the firewall"]
+        },
+        { "type": "card", "id": "logs", "title": "Log Analytics", "lines": ["Firewall and flow logs", "90-day retention"], "tone": "gray", "icon": "azure-log-analytics" }
+      ]
+    },
+    {
+      "id": "spokes",
+      "title": "Workload spokes",
+      "size": "wide",
+      "items": [
+        {
+          "type": "zone",
+          "id": "prod",
+          "title": "Production spoke",
+          "subtitle": "10.1.0.0/16 · peered to hub",
+          "tone": "green",
+          "columns": 3,
+          "items": [
+            { "type": "card", "id": "appgw", "title": "App Gateway", "lines": ["WAF v2", "Private listener"], "tone": "blue", "icon": "azure-application-gateway" },
+            { "type": "card", "id": "aks", "title": "AKS", "lines": ["Private cluster", "Azure CNI overlay"], "tone": "blue", "icon": "azure-kubernetes-service" },
+            { "type": "card", "id": "sqlmi", "title": "SQL Managed Instance", "lines": ["Business critical", "Failover group"], "tone": "teal", "icon": "azure-sql-managed-instance" }
+          ],
+          "notes": ["No public IPs; ingress only through the App Gateway"]
+        },
+        {
+          "type": "zone",
+          "id": "dev",
+          "title": "Development spoke",
+          "subtitle": "10.2.0.0/16 · peered to hub",
+          "tone": "teal",
+          "columns": 2,
+          "items": [
+            { "type": "card", "id": "appsvc", "title": "App Service", "lines": ["VNet integrated", "Deployment slots"], "tone": "blue", "icon": "azure-app-service" },
+            { "type": "card", "id": "sqldb", "title": "Azure SQL", "lines": ["Serverless tier", "Private endpoint"], "tone": "teal", "icon": "azure-sql-database" }
+          ]
+        }
+      ]
+    }
+  ],
+  "connectors": [
+    { "from": "branches", "to": "gateway", "kind": "flow" },
+    { "from": "datacenter", "to": "gateway", "kind": "flow" },
+    { "from": "firewall", "to": "prod", "kind": "call", "label": "Peering · UDR" },
+    { "from": "firewall", "to": "dev", "kind": "call", "label": "Peering · UDR" }
+  ],
+  "footer": {
+    "text": "All spoke traffic is inspected by the hub firewall · no workload has a public IP",
+    "status": "Target state",
+    "statusDetail": "Landing zone v2"
+  }
+}

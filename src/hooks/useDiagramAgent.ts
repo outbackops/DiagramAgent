@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClarifyAnswers, ClarifyQuestion } from "@/components/ClarifyPanel";
 import { resolveAnswerSpecs } from "@/lib/clarify-utils";
 import { api, isD2SyntaxError } from "@/lib/client/api";
+import { composeText } from "@/lib/compose";
+import { cleanSpecOutput, COMPOSITION_LANGUAGE } from "@/lib/compose/prompt";
+import { looksLikeSpec } from "@/lib/compose/partial";
+import { scoreComposition } from "@/lib/compose/quality";
+import { SpecError } from "@/lib/compose/spec";
 import type { ChatTurn, ModelSelection } from "@/lib/llm/types";
+import { renderModelSvg } from "@/lib/model/render-svg";
 import { cleanD2Output } from "@/lib/pipeline/d2-text";
 import {
   PipelineAbortError,
@@ -44,6 +50,8 @@ export interface RunRecord {
   endedAt?: number;
   model: ModelSelection;
   reviewer?: ModelSelection;
+  /** Absent on runs saved before composed diagrams existed (they were D2). */
+  format?: DiagramFormat;
   outcome?: PipelineOutcome;
   reviewScore?: number;
   qualityScore?: number;
@@ -61,13 +69,21 @@ export type ChatItem =
   | { id: string; kind: "assistant"; text: string; at: number; tone?: "info" | "warning" }
   | { id: string; kind: "run"; run: RunRecord; at: number };
 
+/** How new diagrams are drawn: composed by the layout engine, or a free-form graph laid out by D2. */
+export type DiagramStyle = "composed" | "graph";
+
+/** The language a run writes: a composition spec (JSON) or D2. */
+export type DiagramFormat = "composition" | "d2";
+
 export interface AgentSettings {
   clarify: boolean;
   review: boolean;
   refinements: number;
+  /** Absent in settings saved before composed diagrams existed; means "composed". */
+  style?: DiagramStyle;
 }
 
-export const DEFAULT_SETTINGS: AgentSettings = { clarify: true, review: true, refinements: 1 };
+export const DEFAULT_SETTINGS: AgentSettings = { clarify: true, review: true, refinements: 1, style: "composed" };
 
 export interface ClarifyState {
   prompt: string;
@@ -94,7 +110,23 @@ const isSettings = (v: unknown): v is AgentSettings =>
   typeof (v as AgentSettings).review === "boolean" &&
   Number.isInteger((v as AgentSettings).refinements) &&
   (v as AgentSettings).refinements >= 0 &&
-  (v as AgentSettings).refinements <= 3;
+  (v as AgentSettings).refinements <= 3 &&
+  ((v as AgentSettings).style === undefined || (v as AgentSettings).style === "composed" || (v as AgentSettings).style === "graph");
+
+/**
+ * Lays a composition spec out in the browser (no server round trip). Specs
+ * that can't be used surface as render errors, so the pipeline spends a fix
+ * round on them with the exact problems.
+ */
+function renderComposition(code: string, preferWidth: number | undefined): { svg: string; quality: ReturnType<typeof scoreComposition> } {
+  try {
+    const { model, warnings } = composeText(code, { preferWidth });
+    return { svg: renderModelSvg(model, { padding: 0 }), quality: scoreComposition(model, { warnings }) };
+  } catch (err) {
+    if (err instanceof SpecError) throw new Error([err.message, ...err.issues].join("\n"));
+    throw err;
+  }
+}
 
 function applyEvent(run: RunRecord, event: PipelineEvent, now: number): RunRecord {
   const closeActive = (steps: RunStep[]) => steps.map((s) => (s.status === "active" ? { ...s, status: "done" as const, endedAt: now } : s));
@@ -171,10 +203,14 @@ export interface AgentModels {
 export type KeepLayout = "full" | "stable";
 
 export interface AgentDocument {
-  /** D2 of the diagram on the canvas: "" for an empty canvas, null when there's no document yet. Edit runs start from it. */
+  /** Source of the diagram on the canvas (D2, or the composition spec for composed diagrams): "" for an empty canvas, null when there's no document yet. Edit runs start from it. */
   currentCode: () => string | null;
+  /** Which language the diagram on the canvas is edited in; undefined when there's no diagram. */
+  currentFormat?: () => DiagramFormat | undefined;
+  /** Page width of a composed diagram, so re-rendered candidates keep the page the canvas shows. */
+  pageWidth?: () => number | undefined;
   /** Puts a run's result on the canvas. Rejections are reported in the conversation. */
-  onKeep: (code: string, info: { layout: KeepLayout; status: "done" | "cancelled" | "failed" }) => Promise<unknown> | void;
+  onKeep: (code: string, info: { layout: KeepLayout; status: "done" | "cancelled" | "failed"; format: DiagramFormat }) => Promise<unknown> | void;
 }
 
 export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
@@ -196,6 +232,9 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
     const fromDocument = documentRef.current?.currentCode();
     return fromDocument ?? code;
   }, [code]);
+  /** Edits are written in the diagram's own language; without a document, the last run's code decides. */
+  const currentFormat = useCallback((): DiagramFormat => documentRef.current?.currentFormat?.() ?? (looksLikeSpec(code) ? "composition" : "d2"), [code]);
+  const newFormat: DiagramFormat = settings.style === "graph" ? "d2" : "composition";
 
   // One-time cleanup after hydration: migrate the old chat format and mark
   // runs that were interrupted by a reload.
@@ -249,11 +288,15 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       analysis?: unknown;
       /** Reviewer fixes re-lay out the diagram instead of keeping positions (R22). */
       relayout?: boolean;
+      /** Language of the run; new diagrams follow the style setting, edits the diagram's own format. */
+      format: DiagramFormat;
     }) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
       const reviewEnabled = settings.review && reviewerSupportsVision;
+      const { format } = input;
+      const composition = format === "composition";
 
       const run: RunRecord = {
         id: newId(),
@@ -266,6 +309,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         reviewer: reviewEnabled ? reviewer : undefined,
         reviews: [],
         notes: settings.review && !reviewerSupportsVision ? [`Review skipped — ${reviewer.model} can't view images`] : [],
+        format,
       };
       pushItem({ id: `run-${run.id}`, kind: "run", run, at: run.startedAt });
       setBusy("running");
@@ -276,23 +320,28 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       const layout: KeepLayout = input.mode === "create" || input.relayout ? "full" : "stable";
       const keep = async (keptCode: string, status: "done" | "cancelled" | "failed") => {
         try {
-          await documentRef.current?.onKeep(keptCode, { layout, status });
+          await documentRef.current?.onKeep(keptCode, { layout, status, format });
         } catch (err) {
           pushItem({ id: newId(), kind: "assistant", text: `Couldn't put the result on the canvas: ${errText(err)}`, at: Date.now(), tone: "warning" });
         }
       };
+      const clean = composition ? cleanSpecOutput : cleanD2Output;
+      // Edits of a composed diagram keep its page width so candidates are reviewed as they'll look.
+      const preferWidth = input.mode === "edit" ? documentRef.current?.pageWidth?.() : undefined;
 
       const steps: PipelineSteps = {
-        plan: async (prompt, analysis, signal) => (await api.plan(prompt, analysis, selection, signal)).plan,
+        language: composition ? COMPOSITION_LANGUAGE : undefined,
+        // Composition plans inside the spec itself; the D2 planner's topology plan doesn't apply.
+        plan: composition ? undefined : async (prompt, analysis, signal) => (await api.plan(prompt, analysis, selection, signal)).plan,
         generate: async (genInput, signal) => {
           let raw = "";
           let frame = 0;
           const flush = () => {
             frame = 0;
-            setCode(cleanD2Output(raw));
+            setCode(clean(raw));
           };
           try {
-            const result = await api.generate(genInput, selection, (chunk) => {
+            const result = await api.generate({ ...genInput, format }, selection, (chunk) => {
               raw += chunk;
               if (!frame) frame = requestAnimationFrame(flush);
             }, signal);
@@ -300,22 +349,24 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
           } finally {
             if (frame) cancelAnimationFrame(frame);
           }
-          const cleaned = cleanD2Output(raw);
+          const cleaned = clean(raw);
           if (!cleaned) throw new Error("The model returned an empty diagram");
           setCode(cleaned);
           return cleaned;
         },
-        render: async (candidate, signal) => {
-          try {
-            return await api.render(candidate, signal);
-          } catch (err) {
-            // Only a 422 means the D2 is wrong; anything else must not trigger a syntax-fix round.
-            if (isAbort(err) || isD2SyntaxError(err)) throw err;
-            throw new RenderUnavailableError(errText(err));
-          }
-        },
+        render: composition
+          ? async (candidate) => renderComposition(candidate, preferWidth)
+          : async (candidate, signal) => {
+              try {
+                return await api.render(candidate, signal);
+              } catch (err) {
+                // Only a 422 means the D2 is wrong; anything else must not trigger a syntax-fix round.
+                if (isAbort(err) || isD2SyntaxError(err)) throw err;
+                throw new RenderUnavailableError(errText(err));
+              }
+            },
         assess: reviewEnabled
-          ? async (review, signal) => (await api.assess({ svg: review.svg, prompt: review.prompt, d2Code: review.code }, reviewer, signal)).assessment
+          ? async (review, signal) => (await api.assess({ svg: review.svg, prompt: review.prompt, d2Code: review.code, format }, reviewer, signal)).assessment
           : undefined,
       };
 
@@ -396,7 +447,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         if (result.skipClarification || result.questions.length === 0) {
           note("Your request is detailed enough — skipping clarifying questions.");
           setBusy("idle");
-          void startRun({ prompt, mode: "create", analysis: result.analysis });
+          void startRun({ prompt, mode: "create", analysis: result.analysis, format: newFormat });
           return;
         }
         setClarify({ prompt, questions: result.questions as ClarifyQuestion[], analysis: result.analysis });
@@ -405,12 +456,12 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         setBusy("idle");
         if (isAbort(err)) return;
         note(`Couldn't get clarifying questions (${errText(err)}). Generating directly.`, "warning");
-        void startRun({ prompt, mode: "create" });
+        void startRun({ prompt, mode: "create", format: newFormat });
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [note, selection, startRun],
+    [newFormat, note, selection, startRun],
   );
 
   const send = useCallback(
@@ -421,14 +472,14 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       pushItem({ id: newId(), kind: "user", text: prompt, at: Date.now() });
       const existing = currentCode();
       if (existing.trim()) {
-        void startRun({ prompt, mode: "edit", existingCode: existing, history: priorRequests() });
+        void startRun({ prompt, mode: "edit", existingCode: existing, history: priorRequests(), format: currentFormat() });
       } else if (settings.clarify) {
         void askClarify(prompt);
       } else {
-        void startRun({ prompt, mode: "create" });
+        void startRun({ prompt, mode: "create", format: newFormat });
       }
     },
-    [askClarify, busy, currentCode, priorRequests, pushItem, settings.clarify, startRun],
+    [askClarify, busy, currentCode, currentFormat, newFormat, priorRequests, pushItem, settings.clarify, startRun],
   );
 
   const submitClarify = useCallback(
@@ -439,17 +490,17 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       const prompt = specs.length > 0 ? `${clarify.prompt}\n\nAdditional specifications:\n${specs.map((s) => `- ${s}`).join("\n")}` : clarify.prompt;
       const analysis = clarify.analysis;
       setClarify(null);
-      void startRun({ prompt, mode: "create", analysis });
+      void startRun({ prompt, mode: "create", analysis, format: newFormat });
     },
-    [clarify, pushItem, startRun],
+    [clarify, newFormat, pushItem, startRun],
   );
 
   const skipClarify = useCallback(() => {
     if (!clarify) return;
     const { prompt, analysis } = clarify;
     setClarify(null);
-    void startRun({ prompt, mode: "create", analysis });
-  }, [clarify, startRun]);
+    void startRun({ prompt, mode: "create", analysis, format: newFormat });
+  }, [clarify, newFormat, startRun]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -461,35 +512,41 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Try again", at: Date.now() });
       if (run.mode === "create") {
-        void startRun({ prompt: run.prompt, mode: "create" });
+        void startRun({ prompt: run.prompt, mode: "create", format: run.format ?? newFormat });
       } else {
-        void startRun({ prompt: run.prompt, mode: "edit", existingCode: currentCode(), history: priorRequests() });
+        void startRun({ prompt: run.prompt, mode: "edit", existingCode: currentCode(), history: priorRequests(), format: currentFormat() });
       }
     },
-    [busy, currentCode, priorRequests, pushItem, startRun],
+    [busy, currentCode, currentFormat, newFormat, priorRequests, pushItem, startRun],
   );
 
   const fixRenderError = useCallback(
     (message: string) => {
       const existing = currentCode();
       if (busy !== "idle" || !existing.trim()) return;
-      const prompt = `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`;
+      const format = currentFormat();
+      const prompt =
+        format === "composition"
+          ? `The diagram spec can't be used: "${message}". Fix the spec while keeping the architecture intact.`
+          : `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`;
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Fix the rendering error", at: Date.now() });
-      void startRun({ prompt, mode: "edit", existingCode: existing });
+      void startRun({ prompt, mode: "edit", existingCode: existing, format });
     },
-    [busy, currentCode, pushItem, startRun],
+    [busy, currentCode, currentFormat, pushItem, startRun],
   );
 
   const applyReview = useCallback(
     (assessment: ReviewAssessment) => {
       const existing = currentCode();
       if (busy !== "idle" || !existing.trim()) return;
+      const format = currentFormat();
+      const prompt = format === "composition" ? COMPOSITION_LANGUAGE.reviewFixPrompt(assessment, null) : reviewFixPrompt(assessment, null);
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Apply the reviewer's suggested fixes", at: Date.now() });
-      void startRun({ prompt: reviewFixPrompt(assessment, null), mode: "edit", existingCode: existing, relayout: true });
+      void startRun({ prompt, mode: "edit", existingCode: existing, relayout: true, format });
     },
-    [busy, currentCode, pushItem, startRun],
+    [busy, currentCode, currentFormat, pushItem, startRun],
   );
 
   const reset = useCallback(() => {
