@@ -123,3 +123,24 @@ The gate lays out an envelope-size spec (`src/test/envelope-spec.ts`: 60 compone
 The acceptance fixtures (10–27 components) lay out in 0.26–1.2 s in Node under the same load. The browser page was in the background (`visibilityState: hidden`), where timers are throttled, so its wall-clock times (8–10 s) are not meaningful; the main-thread work is. That work is a dev build (unminified, React development mode).
 
 **Decision: the budget is met without a web worker.** ELK runs each candidate as its own task, so the UI gets breaks between them. The residual risk is long tasks of up to about 0.7 s during large layouts. If users notice jank at that size, moving ELK into a Web Worker is the next step: elkjs supports a worker factory, and our passes after ELK take under 0.5 s.
+
+## Tier grids (U12 tuning, 2026-09-30)
+
+**Evidence.** In the second tuning round, 79 of the judges' 187 readability findings were about crossing or overlapping connectors, and 56 were about long ones. The worst diagrams were multi-AZ and multi-region ones. ELK packs each zone's subnets on its own, so two zones holding the same public, app and data subnets came out in different arrangements. One judge wrote: "AZ B is placed above AZ A with a mirrored, inconsistent subnet layout, which makes the tiers hard to compare". Connectors between the tiers then crossed the other zone to reach their target.
+
+Reference architectures draw these as a grid instead. Across the 132 generated specs, 32 lane sets had siblings holding the same tiers in the same order:
+- AWS three-tier: zones × [public, private, private]
+- SQL Server HADR: regions × [VNet, shared]
+- hub-and-spoke: spokes × [subnet, subnet]
+
+**P10.** Sibling boundaries of one kind whose children are the same kinds of boundary, in the same order, form a grid of at most 6 × 6:
+- **Direction.** Lanes run across the flow and tiers along it. The candidate's direction decides which way, so every candidate still competes on the usual score.
+- **Cells.** Each cell is laid out by itself. Every cell of a tier gets the same size, with its contents centred, so a lane's tiers line up and the same tier matches across lanes.
+- **Gaps.** A gap that a labelled connector crosses is widened to fit the label.
+- **ELK.** ELK sees the grid as one box, with a hint edge per connected pair so it still layers the flow. The connectors into and between cells are routed after layout (P4). Grids are not nested: a grid's cells are laid out without grids inside them.
+
+**Result.** The AWS fixture now reads like an AWS Quick Start diagram: zones as rows, with public, app and data subnets in aligned columns. With zones stacked, the Auto Scaling group overlay would cut through a subnet title, so its members are tagged instead. Re-rendered eval specs line their tiers up in all three families. No other fixture has matching lanes, and their layouts are unchanged. The grid's cells are laid out once per direction and shared by that direction's candidates. On the AWS fixture, the median layout goes from 0.84–0.99 s to 1.11–1.18 s (alternating runs, same load). The envelope spec has no grid, and its time is unchanged within the machine's noise.
+
+## Not done: nested grids
+
+A grid's cells don't get grids of their own. In the SQL Server HADR specs, the two regions' VNets hold matching subnets that a nested grid would also line up, but that needs a grid inside a cell. It's the next step if judges flag those subnets.

@@ -49,6 +49,81 @@ describe("layoutArchitecture", () => {
     expect(model.arch?.overlays[0]).toMatchObject({ name: "Auto Scaling group", members: ["web-a", "web-b"] });
   });
 
+  it("draws zones that hold the same subnets as a grid, each tier lined up across the zones", async () => {
+    const { model, report } = await composeArchitectureText(fixture("aws-multi-az-three-tier"));
+    expect(report.hardViolations).toBe(0);
+    const box = (id: string) => node(model, id).box;
+    const a = box("az-a");
+    const b = box("az-b");
+    // Lanes across the flow: side by side when tiers run down the page, stacked when they run across it.
+    const sideBySide = a.x + a.w <= b.x;
+    expect(sideBySide || a.y + a.h <= b.y).toBe(true);
+    const along = (id: string) => (sideBySide ? box(id).y : box(id).x);
+    const extent = (id: string) => (sideBySide ? box(id).h : box(id).w);
+    const across = (id: string) => (sideBySide ? box(id).x + box(id).w / 2 : box(id).y + box(id).h / 2);
+    for (const [p, q] of [["pub-a", "pub-b"], ["app-a", "app-b"], ["data-a", "data-b"]]) {
+      expect(along(q)).toBe(along(p));
+      expect(extent(q)).toBe(extent(p));
+    }
+    // Tiers keep author order along the flow; both lanes are the same size.
+    expect(along("pub-a")).toBeLessThan(along("app-a"));
+    expect(along("app-a")).toBeLessThan(along("data-a"));
+    expect(sideBySide ? b.w : b.h).toBe(sideBySide ? a.w : a.h);
+    // Components are centred in their cells, so a lane's tiers line up and the same tier matches across lanes.
+    expect(Math.abs(across("web-a") - across("rds-primary"))).toBeLessThanOrEqual(1);
+    expect(Math.abs(across("web-a") - across("nat-a"))).toBeLessThanOrEqual(1);
+    const flowCentre = (id: string) => (sideBySide ? box(id).y + box(id).h / 2 : box(id).x + box(id).w / 2);
+    expect(Math.abs(flowCentre("web-a") - flowCentre("web-b"))).toBeLessThanOrEqual(1);
+  });
+
+  it("lines up top-level regions that hold the same tiers, in every candidate", async () => {
+    const region = (id: string, name: string) => ({
+      type: "group",
+      kind: "region",
+      id,
+      name,
+      items: [
+        {
+          type: "group",
+          kind: "vnet",
+          id: `${id}-vnet`,
+          name: "VNet",
+          items: [
+            { type: "group", kind: "subnet", id: `${id}-web`, name: "Web subnet", items: [{ id: `${id}-app`, name: "Web app" }] },
+            { type: "group", kind: "subnet", id: `${id}-data`, name: "Data subnet", items: [{ id: `${id}-sql`, name: "SQL VM", detail: "Always On replica" }] },
+          ],
+        },
+        { type: "group", kind: "shared", id: `${id}-ops`, name: "Operations", items: [{ id: `${id}-logs`, name: "Log Analytics" }] },
+      ],
+    });
+    const { model, report } = await composeArchitecture({
+      title: "SQL Server across two regions",
+      platform: "azure",
+      items: [{ id: "users", name: "Users" }, { id: "tm", name: "Traffic Manager" }, region("primary", "Primary region"), region("dr", "DR region")],
+      connections: [
+        { from: "users", to: "tm", label: "DNS query" },
+        { from: "users", to: "primary-app", label: "HTTPS 443" },
+        { from: "users", to: "dr-app", label: "Failover" },
+        { from: "primary-app", to: "primary-sql", label: "TDS 1433" },
+        { from: "dr-app", to: "dr-sql", label: "TDS 1433" },
+        { from: "primary-sql", to: "dr-sql", meaning: "replication", label: "Async commit" },
+        { from: "primary-sql", to: "primary-logs", meaning: "monitoring", label: "logs" },
+        { from: "dr-sql", to: "dr-logs", meaning: "monitoring", label: "logs" },
+      ],
+    });
+    expect(report.hardViolations).toBe(0);
+    // The hybrid candidates (3+ top-level blocks) place the grid as one block; none of them fails.
+    expect(report.tried.filter((t) => t.error)).toEqual([]);
+    expect(report.tried.map((t) => t.id)).toContain("blocks-right");
+    const box = (id: string) => node(model, id).box;
+    const [p, d] = [box("primary"), box("dr")];
+    const sideBySide = p.x + p.w <= d.x;
+    expect(sideBySide || p.y + p.h <= d.y).toBe(true);
+    for (const tier of ["vnet", "ops"]) expect(sideBySide ? box(`dr-${tier}`).y : box(`dr-${tier}`).x).toBe(sideBySide ? box(`primary-${tier}`).y : box(`primary-${tier}`).x);
+    // Every connector is drawn, including those into the grid's cells from outside.
+    for (const e of model.edges.filter((edge) => !edge.hidden)) expect(e.route.length, e.id).toBeGreaterThanOrEqual(2);
+  });
+
   it("is deterministic", async () => {
     const text = fixture("azure-hub-spoke");
     const first = await composeArchitectureText(text);

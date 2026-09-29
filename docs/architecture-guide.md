@@ -68,6 +68,8 @@ Components are objects with `id`, `name`, optional `icon` and one `detail` line.
 | `onprem` / `external` | corporate or external site | corporate or external site | corporate or external site | external system | external system |
 | `group` | generic dashed group | generic group | generic group | generic group | generic group |
 
+**Parallel zones and regions.** Sibling boundaries of one kind that hold the same kinds of boundary in the same order are drawn as a grid, the way reference architectures draw them. Examples: availability zones that each hold a public, an app and a data subnet; a primary and a DR region that each hold a VNet and a shared group. Matching tiers line up across the zones, and every cell of a tier is the same size. To get the grid, give each zone the same subnets in the same order. A load balancer that spans zones is one component beside them (an AWS ALB in the VPC), not a copy per zone. An Auto Scaling group across zones is an overlay, not a component.
+
 ## Connections
 
 Connections are `{ "from": "id", "to": "id", "meaning": "...", "label": "protocol or purpose" }`. Prefer labels like protocol, port, link type or queue/topic name.

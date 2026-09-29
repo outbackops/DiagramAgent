@@ -15,7 +15,7 @@ import { ARCH_SPACE as S, ARCH_TYPE as T } from "./theme";
  * ELK's layered compound layout (plus a hybrid that arranges top-level blocks) proposes
  * candidates; generic polish passes and a score pick the one a designer would draw. Large
  * diagrams try fewer candidates to stay near the two-second budget. The approach, its passes
- * (P1–P8), their evidence and the performance gate: docs/spikes/2026-09-29-architecture-layout-spike.md.
+ * (P1–P10), their evidence and the performance gate: docs/spikes/2026-09-29-architecture-layout-spike.md.
  */
 
 export interface ArchLayoutOptions {
@@ -82,11 +82,24 @@ export async function layoutArchitecture(spec: NormalizedArchSpec, options: Arch
 
   const candidates: Array<Candidate & { elkMs: number }> = [];
   if (elk) {
+    const layoutElk = elk;
+    // Grids depend only on the direction (tiers follow the flow), so each direction's are laid out once.
+    // If ELK throws on a cell, that direction's candidates draw the lanes without a grid.
+    const gridCache = new Map<Direction, Promise<GridGeos>>();
+    const gridsFor = (direction: Direction): Promise<GridGeos> => {
+      let hit = gridCache.get(direction);
+      if (!hit) {
+        hit = plan.grids.size === 0 ? Promise.resolve(new Map()) : gridGeos(plan, layoutElk, direction).catch(() => new Map());
+        gridCache.set(direction, hit);
+      }
+      return hit;
+    };
     const flat = options.quick ? FLAT_CANDIDATES.slice(0, 1) : FLAT_CANDIDATES.filter((c) => tryCandidate(c.id));
     for (const candidate of flat) {
       const t = performance.now();
       try {
-        candidates.push({ id: candidate.id, geo: await flatLayout(plan, elk, candidate), elkMs: Math.round(performance.now() - t) });
+        const grids = await gridsFor(candidate.options["elk.direction"] === "DOWN" ? "DOWN" : "RIGHT");
+        candidates.push({ id: candidate.id, geo: await flatLayout(plan, elk, candidate, grids), elkMs: Math.round(performance.now() - t) });
       } catch (err) {
         tried.push({ id: candidate.id, error: message(err) });
       }
@@ -95,7 +108,7 @@ export async function layoutArchitecture(spec: NormalizedArchSpec, options: Arch
       for (const candidate of HYBRID_CANDIDATES.filter((c) => tryCandidate(c.id))) {
         const t = performance.now();
         try {
-          candidates.push({ id: candidate.id, geo: await hybridLayout(plan, elk, candidate), elkMs: Math.round(performance.now() - t) });
+          candidates.push({ id: candidate.id, geo: await hybridLayout(plan, elk, candidate, await gridsFor(candidate.inner)), elkMs: Math.round(performance.now() - t) });
         } catch (err) {
           tried.push({ id: candidate.id, error: message(err) });
         }
@@ -179,6 +192,8 @@ interface Plan {
   hidden: Set<NConnection>;
   /** Top-level items outside the band. */
   blocks: NItem[];
+  /** P10: lanes drawn as a grid, by lane id. */
+  grids: Map<string, Grid>;
   ancestors: (id: string) => string[];
   within: (id: string, root: string) => boolean;
 }
@@ -303,7 +318,240 @@ function planSpec(spec: NormalizedArchSpec): Plan {
     (back ? afterEdges : elkEdges).push(c);
   }
   const blocks = spec.items.filter((i) => !info.get(i.id)!.band);
-  return { spec, info, packed, elkEdges, afterEdges, hidden, blocks, ancestors, within };
+
+  // P10: sibling boundaries of one kind whose children are the same kinds of boundary, in the same order, form a grid.
+  const grids = new Map<string, Grid>();
+  const findGrids = (items: NItem[]) => {
+    const bySignature = new Map<string, NBoundary[]>();
+    for (const item of items) {
+      if (!isBoundary(item) || packed.has(item.id) || info.get(item.id)!.band) continue;
+      const tiers = item.items;
+      if (tiers.length < 2 || tiers.length > GRID_MAX || !tiers.every(isBoundary)) continue;
+      const signature = [item.kind, ...tiers.map((t) => (t as NBoundary).kind)].join("|");
+      bySignature.set(signature, [...(bySignature.get(signature) ?? []), item]);
+    }
+    for (const lanes of bySignature.values()) {
+      if (lanes.length < 2 || lanes.length > GRID_MAX) continue;
+      const grid: Grid = { id: `grid:${lanes[0].id}`, lanes };
+      for (const lane of lanes) grids.set(lane.id, grid);
+    }
+    // A grid's cells are laid out one by one, without grids inside them.
+    for (const item of items) if (isBoundary(item) && !packed.has(item.id) && !grids.has(item.id)) findGrids(item.items);
+  };
+  findGrids(spec.items);
+  return { spec, info, packed, elkEdges, afterEdges, hidden, blocks, grids, ancestors, within };
+}
+
+// ---------------------------------------------------------------- P10: tier grids
+
+/**
+ * P10: sibling boundaries of one kind holding the same tiers (availability zones that each hold
+ * a public, an app and a data subnet; two regions that each hold a VNet and a shared group;
+ * spokes with the same subnets) are drawn the way reference architectures draw them: the lanes
+ * across the flow, each tier lined up along it, every cell of a tier the same size. ELK places
+ * the grid as one box, each cell is laid out by itself, and the connectors between cells, and
+ * into them from outside, are routed after layout.
+ */
+interface Grid {
+  /** Stands for the grid in ELK graphs; spec ids are slugs, so it can't collide with one. */
+  id: string;
+  lanes: NBoundary[];
+}
+
+/** Most lanes, and most tiers in a lane, drawn as a grid. */
+const GRID_MAX = 6;
+
+type Direction = "RIGHT" | "DOWN";
+
+/** One item laid out by itself, relative to its top-left. */
+interface Placed {
+  w: number;
+  h: number;
+  /** The item's own box (at 0,0) and its descendants'. */
+  boxes: Map<string, Box>;
+  edges: GeoEdge[];
+  /** Connectors into grids inside the item: routed after layout. */
+  deferred: NConnection[];
+}
+
+/** The grids of one layout direction, by grid id. */
+type GridGeos = Map<string, Placed>;
+
+async function gridGeos(plan: Plan, elk: ElkLike, direction: Direction): Promise<GridGeos> {
+  const out: GridGeos = new Map();
+  for (const grid of new Set(plan.grids.values())) out.set(grid.id, await gridGeo(plan, elk, grid, direction));
+  return out;
+}
+
+async function gridGeo(plan: Plan, elk: ElkLike, grid: Grid, direction: Direction): Promise<Placed> {
+  const down = direction === "DOWN";
+  const pad = S.groupPad;
+  const lanes = grid.lanes;
+  const tierCount = lanes[0].items.length;
+  const cells: Placed[][] = [];
+  for (const lane of lanes) {
+    const row: Placed[] = [];
+    for (const tier of lane.items) row.push(await layoutAlone(plan, elk, tier, direction, null));
+    cells.push(row);
+  }
+  // Gaps a labelled connector crosses fit its label: between tiers when they sit side by side, between lanes likewise.
+  const cellOf = new Map<string, [number, number]>();
+  cells.forEach((row, i) => row.forEach((cell, j) => { for (const id of cell.boxes.keys()) cellOf.set(id, [i, j]); }));
+  const tierGap = Array.from({ length: tierCount - 1 }, (): number => S.blockGap);
+  const laneGap = Array.from({ length: lanes.length - 1 }, (): number => S.blockGap);
+  for (const c of plan.spec.connections) {
+    const a = cellOf.get(c.from);
+    const b = cellOf.get(c.to);
+    if (!c.label || plan.hidden.has(c) || !a || !b) continue;
+    const room = labelWidth(c.label) + 24;
+    if (!down && a[0] === b[0] && Math.abs(a[1] - b[1]) === 1) tierGap[Math.min(a[1], b[1])] = Math.max(tierGap[Math.min(a[1], b[1])], room);
+    if (down && a[1] === b[1] && Math.abs(a[0] - b[0]) === 1) laneGap[Math.min(a[0], b[0])] = Math.max(laneGap[Math.min(a[0], b[0])], room);
+  }
+  const boxes = new Map<string, Box>();
+  const edges: GeoEdge[] = [];
+  // A cell takes its tier's full size; what's inside it is centred in its body.
+  const place = (tier: NBoundary, cell: Placed, target: Box) => {
+    boxes.set(tier.id, target);
+    const inner = [...cell.boxes].filter(([id]) => id !== tier.id);
+    if (inner.length === 0) return;
+    const content = union(inner.map(([, b]) => b));
+    const top = headerHeight(tier);
+    const body = { x: target.x + pad, y: target.y + top, w: target.w - 2 * pad, h: target.h - top - pad };
+    const dx = Math.round(body.x + (body.w - content.w) / 2 - content.x);
+    const dy = Math.round(body.y + (body.h - content.h) / 2 - content.y);
+    for (const [id, b] of inner) boxes.set(id, { ...b, x: b.x + dx, y: b.y + dy });
+    for (const e of cell.edges) edges.push(moveEdge(e, dx, dy));
+  };
+  const tiersOf = (lane: NBoundary) => lane.items as NBoundary[];
+  let w = 0;
+  let h = 0;
+  if (down) {
+    // Lanes side by side, tiers top to bottom: every lane as wide as the widest cell, every tier as tall as its tallest cell.
+    const header = Math.max(...lanes.map((l) => headerHeight(l)));
+    const bodyW = Math.max(...cells.flat().map((c) => c.w), ...lanes.map((l) => boundaryMinWidth(l) - 2 * pad));
+    const rowH = Array.from({ length: tierCount }, (_, j) => Math.max(...cells.map((row) => row[j].h)));
+    const laneH = header + rowH.reduce((s, v) => s + v, 0) + tierGap.reduce((s, v) => s + v, 0) + pad;
+    let x = 0;
+    lanes.forEach((lane, i) => {
+      boxes.set(lane.id, { x, y: 0, w: bodyW + 2 * pad, h: laneH });
+      let y = header;
+      tiersOf(lane).forEach((tier, j) => {
+        place(tier, cells[i][j], { x: x + pad, y, w: bodyW, h: rowH[j] });
+        y += rowH[j] + (tierGap[j] ?? 0);
+      });
+      x += bodyW + 2 * pad + (laneGap[i] ?? 0);
+    });
+    w = x;
+    h = laneH;
+  } else {
+    // Lanes top to bottom, tiers side by side: every tier as wide as its widest cell, every lane as tall as the tallest cell.
+    const colW = Array.from({ length: tierCount }, (_, j) => Math.max(...cells.map((row) => row[j].w)));
+    const rowH = Math.max(...cells.flat().map((c) => c.h));
+    const laneW = Math.max(colW.reduce((s, v) => s + v, 0) + tierGap.reduce((s, v) => s + v, 0) + 2 * pad, ...lanes.map((l) => boundaryMinWidth(l)));
+    let y = 0;
+    lanes.forEach((lane, i) => {
+      const header = headerHeight(lane);
+      boxes.set(lane.id, { x: 0, y, w: laneW, h: header + rowH + pad });
+      let x = pad;
+      tiersOf(lane).forEach((tier, j) => {
+        place(tier, cells[i][j], { x, y: y + header, w: colW[j], h: rowH });
+        x += colW[j] + (tierGap[j] ?? 0);
+      });
+      y += header + rowH + pad + (laneGap[i] ?? 0);
+    });
+    w = laneW;
+    h = y;
+  }
+  return { w, h, boxes, edges, deferred: [] };
+}
+
+/** The grid holding an item (it is a lane, or inside one), when that grid is laid out as one. */
+function gridFor(plan: Plan, id: string, grids: GridGeos | null): string | undefined {
+  if (!grids || grids.size === 0) return undefined;
+  for (const x of [id, ...plan.ancestors(id)]) {
+    const grid = plan.grids.get(x);
+    if (grid) return grids.has(grid.id) ? grid.id : undefined;
+  }
+  return undefined;
+}
+
+/** The grid cell (a lane's tier) holding an item. */
+function cellOf(plan: Plan, id: string): string | undefined {
+  for (const x of [id, ...plan.ancestors(id)]) {
+    const parent = plan.info.get(x)?.parent;
+    if (parent && plan.grids.has(parent)) return x;
+  }
+  return undefined;
+}
+
+/**
+ * ELK edges when grids stand in for their lanes: a connector into a grid points at the grid
+ * (one hint per pair, so ELK still layers the flow) and is routed after layout; one inside a
+ * single cell was laid out with the cell.
+ */
+function gridEdges(plan: Plan, conns: NConnection[], grids: GridGeos | null): { edges: ElkExtendedEdge[]; laid: NConnection[]; deferred: NConnection[] } {
+  if (!grids || grids.size === 0) return { edges: elkEdges(conns), laid: conns, deferred: [] };
+  const laid: NConnection[] = [];
+  const deferred: NConnection[] = [];
+  const hints = new Map<string, [string, string]>();
+  for (const c of conns) {
+    const a = gridFor(plan, c.from, grids);
+    const b = gridFor(plan, c.to, grids);
+    if (!a && !b) {
+      laid.push(c);
+      continue;
+    }
+    const cell = cellOf(plan, c.from);
+    if (a === b && cell !== undefined && cell === cellOf(plan, c.to)) continue;
+    deferred.push(c);
+    const s = a ?? c.from;
+    const t = b ?? c.to;
+    if (s !== t) hints.set(`${s}\u0000${t}`, [s, t]);
+  }
+  // Hints go last: extract() pairs ELK's edges with `laid` by index and skips the rest.
+  const hintEdges: ElkExtendedEdge[] = [...hints.values()].map(([s, t], i) => ({ id: `g${i}`, sources: [s], targets: [t] }));
+  return { edges: [...elkEdges(laid), ...hintEdges], laid, deferred };
+}
+
+/** Puts each grid's lanes, cells and cell connectors where ELK placed the grid's box. */
+function expandGrids(geo: Geo, grids: GridGeos | null): void {
+  if (!grids) return;
+  for (const [id, grid] of grids) {
+    const at = geo.boxes.get(id);
+    if (!at) continue;
+    geo.boxes.delete(id);
+    for (const [k, b] of grid.boxes) geo.boxes.set(k, { x: at.x + b.x, y: at.y + b.y, w: b.w, h: b.h });
+    for (const e of grid.edges) geo.edges.push(moveEdge(e, at.x, at.y));
+  }
+}
+
+/**
+ * One item laid out by itself (a hybrid block, a grid cell): only the connectors inside it,
+ * with the root-only author-order options (they crash ELK on child graphs).
+ */
+async function layoutAlone(plan: Plan, elk: ElkLike, item: NItem, direction: Direction, grids: GridGeos | null): Promise<Placed> {
+  const internal = plan.elkEdges.filter((c) => plan.within(c.from, item.id) && plan.within(c.to, item.id));
+  const { edges, laid, deferred } = gridEdges(plan, internal, grids);
+  const graph: ElkNode = {
+    id: "root",
+    layoutOptions: { ...BASE_OPTIONS, ...ORDERED_OPTIONS, "elk.direction": direction, "elk.padding": "[top=0,left=0,bottom=0,right=0]" },
+    children: [elkNode(plan, item, grids)],
+    edges,
+  };
+  const geo = extract(plan, await layoutWithFallback(elk, graph, true), laid);
+  expandGrids(geo, grids);
+  const origin = geo.boxes.get(item.id)!;
+  return {
+    w: origin.w,
+    h: origin.h,
+    boxes: new Map([...geo.boxes].map(([id, box]) => [id, { ...box, x: box.x - origin.x, y: box.y - origin.y }])),
+    edges: geo.edges.map((e) => moveEdge(e, -origin.x, -origin.y)),
+    deferred,
+  };
+}
+
+function moveEdge(e: GeoEdge, dx: number, dy: number): GeoEdge {
+  return { ...e, points: e.points.map((p) => ({ x: p.x + dx, y: p.y + dy })), label: e.label ? { ...e.label, x: e.label.x + dx, y: e.label.y + dy } : undefined };
 }
 
 // ---------------------------------------------------------------- ELK candidates
@@ -329,7 +577,7 @@ interface Candidate {
   geo: Geo;
 }
 
-function elkNode(plan: Plan, item: NItem): ElkNode {
+function elkNode(plan: Plan, item: NItem, grids: GridGeos | null = null): ElkNode {
   const packed = plan.packed.get(item.id);
   if (packed) return { id: item.id, width: packed.w, height: packed.h };
   if (!isBoundary(item)) {
@@ -344,8 +592,24 @@ function elkNode(plan: Plan, item: NItem): ElkNode {
       "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
       "elk.nodeSize.minimum": `(${boundaryMinWidth(item)}, ${top + S.groupPad})`,
     },
-    children: item.items.filter((c) => !plan.info.get(c.id)!.band).map((c) => elkNode(plan, c)),
+    children: elkChildren(plan, item.items, grids),
   };
+}
+
+/** Children in author order; a grid stands in for its lanes, in its first lane's place. */
+function elkChildren(plan: Plan, items: NItem[], grids: GridGeos | null): ElkNode[] {
+  const out: ElkNode[] = [];
+  for (const item of items) {
+    if (plan.info.get(item.id)!.band) continue;
+    const grid = plan.grids.get(item.id);
+    const geo = grid ? grids?.get(grid.id) : undefined;
+    if (grid && geo) {
+      if (grid.lanes[0] === item) out.push({ id: grid.id, width: geo.w, height: geo.h });
+      continue;
+    }
+    out.push(elkNode(plan, item, grids));
+  }
+  return out;
 }
 
 function elkEdges(conns: NConnection[]): ElkExtendedEdge[] {
@@ -368,12 +632,14 @@ async function layoutWithFallback(elk: ElkLike, graph: ElkNode, ordered: boolean
   }
 }
 
-async function flatLayout(plan: Plan, elk: ElkLike, candidate: FlatCandidate): Promise<Geo> {
+async function flatLayout(plan: Plan, elk: ElkLike, candidate: FlatCandidate, grids: GridGeos | null): Promise<Geo> {
   const options: LayoutOptions = { ...BASE_OPTIONS, ...(candidate.ordered ? ORDERED_OPTIONS : {}), ...candidate.options };
-  const graph: ElkNode = { id: "root", layoutOptions: options, children: plan.blocks.map((i) => elkNode(plan, i)), edges: elkEdges(plan.elkEdges) };
+  const { edges, laid, deferred } = gridEdges(plan, plan.elkEdges, grids);
+  const graph: ElkNode = { id: "root", layoutOptions: options, children: elkChildren(plan, plan.blocks, grids), edges };
   const out = await layoutWithFallback(elk, graph, candidate.ordered);
-  const geo = extract(plan, out, plan.elkEdges);
-  geo.afterEdges = [...plan.afterEdges];
+  const geo = extract(plan, out, laid);
+  expandGrids(geo, grids);
+  geo.afterEdges = [...plan.afterEdges, ...deferred];
   orderLanes(plan, geo);
   straighten(plan, geo);
   placeBand(plan, geo);
@@ -502,35 +768,32 @@ function shiftSubtree(plan: Plan, geo: Geo, rootId: string, dx: number, dy: numb
 }
 
 /**
- * Hybrid: each top-level block is laid out on its own (only the connectors inside it), then
- * ELK places the blocks as boxes, then the connectors between blocks are routed.
+ * Hybrid: each top-level block (or top-level grid) is laid out on its own (only the connectors
+ * inside it), then ELK places the blocks as boxes, then the connectors between blocks are routed.
  */
-async function hybridLayout(plan: Plan, elk: ElkLike, candidate: HybridCandidate): Promise<Geo> {
-  const blockOf = (id: string) => plan.blocks.find((b) => plan.within(id, b.id))?.id;
-  const inner = new Map<string, Geo>();
+async function hybridLayout(plan: Plan, elk: ElkLike, candidate: HybridCandidate, grids: GridGeos | null): Promise<Geo> {
+  const unitOf = (id: string): string | undefined => {
+    const block = plan.blocks.find((b) => plan.within(id, b.id));
+    if (!block) return undefined;
+    const grid = plan.grids.get(block.id);
+    return grid && grids?.has(grid.id) ? grid.id : block.id;
+  };
+  const inner = new Map<string, Placed>();
   for (const block of plan.blocks) {
-    const internal = plan.elkEdges.filter((c) => blockOf(c.from) === block.id && blockOf(c.to) === block.id);
-    const graph: ElkNode = {
-      id: "root",
-      layoutOptions: { ...BASE_OPTIONS, ...ORDERED_OPTIONS, "elk.direction": candidate.inner, "elk.padding": "[top=0,left=0,bottom=0,right=0]" },
-      children: [elkNode(plan, block)],
-      edges: elkEdges(internal),
-    };
-    const geo = extract(plan, await layoutWithFallback(elk, graph, true), internal);
-    const origin = geo.boxes.get(block.id)!;
-    const shift = (p: Point): Point => ({ x: p.x - origin.x, y: p.y - origin.y });
-    inner.set(block.id, {
-      boxes: new Map([...geo.boxes].map(([id, box]) => [id, { ...box, ...shift(box) }])),
-      edges: geo.edges.map((e) => ({ ...e, points: e.points.map(shift), label: e.label ? { ...e.label, ...shift(e.label) } : undefined })),
-      width: origin.w,
-      height: origin.h,
-      afterEdges: [],
-    });
+    const unit = unitOf(block.id)!;
+    if (inner.has(unit)) continue;
+    if (unit === block.id) {
+      inner.set(unit, await layoutAlone(plan, elk, block, candidate.inner, grids));
+      continue;
+    }
+    // A top-level grid: connectors between its cells are routed after layout.
+    const sameCell = (c: NConnection) => cellOf(plan, c.from) !== undefined && cellOf(plan, c.from) === cellOf(plan, c.to);
+    inner.set(unit, { ...grids!.get(unit)!, deferred: plan.elkEdges.filter((c) => unitOf(c.from) === unit && unitOf(c.to) === unit && !sameCell(c)) });
   }
   const pairs = new Map<string, [string, string]>();
   for (const c of [...plan.elkEdges, ...plan.afterEdges]) {
-    const a = blockOf(c.from);
-    const b = blockOf(c.to);
+    const a = unitOf(c.from);
+    const b = unitOf(c.to);
     if (a && b && a !== b) pairs.set(`${a}\u0000${b}`, [a, b]);
   }
   const placed = await layoutWithFallback(
@@ -546,7 +809,7 @@ async function hybridLayout(plan: Plan, elk: ElkLike, candidate: HybridCandidate
         ...ORDERED_OPTIONS,
         ...candidate.outer,
       },
-      children: plan.blocks.map((b) => ({ id: b.id, width: inner.get(b.id)!.width, height: inner.get(b.id)!.height })),
+      children: [...inner].map(([id, p]) => ({ id, width: p.w, height: p.h })),
       edges: [...pairs.values()].map(([a, b], i) => ({ id: `b${i}`, sources: [a], targets: [b] })),
     },
     true,
@@ -557,9 +820,9 @@ async function hybridLayout(plan: Plan, elk: ElkLike, candidate: HybridCandidate
     const dx = child.x ?? 0;
     const dy = child.y ?? 0;
     for (const [id, box] of g.boxes) geo.boxes.set(id, { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h });
-    for (const e of g.edges) geo.edges.push({ ...e, points: e.points.map((p) => ({ x: p.x + dx, y: p.y + dy })), label: e.label ? { ...e.label, x: e.label.x + dx, y: e.label.y + dy } : undefined });
+    for (const e of g.edges) geo.edges.push(moveEdge(e, dx, dy));
   }
-  geo.afterEdges = [...plan.elkEdges.filter((c) => blockOf(c.from) !== blockOf(c.to)), ...plan.afterEdges];
+  geo.afterEdges = [...plan.elkEdges.filter((c) => unitOf(c.from) !== unitOf(c.to)), ...[...inner.values()].flatMap((p) => p.deferred), ...plan.afterEdges];
   orderLanes(plan, geo);
   straighten(plan, geo);
   placeBand(plan, geo);
