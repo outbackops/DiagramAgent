@@ -381,7 +381,7 @@
         [["mqtt", "broker", "ingestion"], ["stream"]],
         [["stream"], ["time series", "time-series"]],
         [["stream"], ["object storage", "cold"]],
-        [["ota", "update"], ["gateway", "edge", "device"]]
+        [["ota", "update"], ["gateway", "edge", "device", "mqtt", "broker"]]
       ],
       "prohibited": ["aws", "azure", "gcp", "google cloud"]
     }
