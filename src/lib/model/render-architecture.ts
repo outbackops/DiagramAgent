@@ -183,9 +183,9 @@ function renderComponent(node: DiagramNode, pack: StylePack): string {
     y += S.nameLineHeight;
     parts.push(`<text x="${num(cx)}" y="${num(y - 4)}" text-anchor="middle" font-size="${T.name.size}" fill="${attr(pack.text)}">${esc(line)}</text>`);
   }
-  if (geom.detail) {
+  for (const line of geom.detailLines) {
     y += S.detailLineHeight;
-    parts.push(`<text x="${num(cx)}" y="${num(y - 4)}" text-anchor="middle" font-size="${T.detail.size}" fill="${attr(pack.muted)}">${esc(geom.detail)}</text>`);
+    parts.push(`<text x="${num(cx)}" y="${num(y - 4)}" text-anchor="middle" font-size="${T.detail.size}" fill="${attr(pack.muted)}">${esc(line)}</text>`);
   }
   return `<g data-id="${attr(node.id)}" data-kind="node">${parts.join("")}</g>`;
 }

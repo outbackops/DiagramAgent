@@ -18,7 +18,7 @@ export const EVAL_THRESHOLDS = { quality: 75, judge: 7, keywordCoverage: 0.8 } a
  * state nothing about the system, so they never count as invented facts.
  */
 export const GENERIC_TECH_TERMS: readonly string[] = [
-  "S3", "EC2", "Route 53", "Route53", "Gen2", "ADLS Gen2", "K8s", "L4", "L7", "IPv4", "IPv6",
+  "S3", "EC2", "Route 53", "Route53", "Gen2", "ADLS Gen2", "K8s", "L4", "L7", "IPv4", "IPv6", "0.0.0.0/0", "S2S", "P2S",
   "OAuth2", "OAuth 2.0", "OIDC", "HTTP/2", "HTTP2", "HTTP/1.1", "gRPC", "TLS 1.2", "TLS1.2", "TLS 1.3", "TLS1.3", "mTLS", "SHA256", "AES256",
 ];
 

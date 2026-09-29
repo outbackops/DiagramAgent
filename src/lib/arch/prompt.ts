@@ -235,13 +235,17 @@ VIEW CHOICE
 
 REFERENCE-ARCHITECTURE PRACTICE
 1. Put entry points first in reading order: users/actors → DNS/CDN/WAF/gateway → app tiers → data → external systems. Use the fewest boundaries that explain ownership, deployment or network placement.
-2. Choose meaningful boundaries only: cloud/account/subscription/project, region, VNet/VPC, subnet, zone, cluster, namespace, on-prem/external. Use kind "shared" for identity, monitoring, security and DevOps; do not draw a monitoring line from every component.
-3. Use concrete service names and icon keys from the manifest. Components without a matching icon are still valid; use clear names rather than empty placeholders.
+2. Choose meaningful boundaries only: cloud/account/subscription/project, region, VNet/VPC, subnet, zone, cluster, namespace, on-prem/external. Use kind "shared" for identity, monitoring, security and DevOps. Don't draw a monitoring line from every component; when the request asks for telemetry, draw a few labelled connections (metrics, logs, traces) from the main sources.
+3. Use concrete service names and icon keys from the manifest. Components without a matching icon are still valid; use clear names rather than empty placeholders. For a vendor-neutral request, use generic icons, not a product's logo.
 4. Label the primary flow with protocol, port or purpose ("HTTPS 443", "TDS 1433", "Kafka topic"). Prefer one deliberate edge over many noisy support edges.
 5. Add up to two sequences such as inbound and outbound. Number the connections with matching step refs, and keep sequence steps in the same order as the visible flow.
-6. Private PaaS services stay outside the VNet/VPC; draw the private endpoint component inside a private-endpoint subnet and connect it to the PaaS service with meaning "private-link".
-7. Use overlays for spanning groups that do not contain their members, such as an AWS Auto Scaling group across availability zones.
-8. Keep ids stable, short and kebab-case. On edits, preserve ids for unchanged items and return the complete updated spec.
+6. Private PaaS services stay outside the VNet/VPC; draw the private endpoint component inside a private-endpoint subnet and connect it to the PaaS service with meaning "private-link". PaaS compute with VNet integration (App Service, Functions) also stays outside the VNet: connect it to the integration subnet or a "VNet integration" component there; never draw the app inside that subnet. (An App Service Environment or a Container Apps environment deployed into a subnet does run inside it.)
+7. Placement is shown by nesting, never by text: a detail line states properties (SKU, count, port), not which subnet or zone a component is in. Put each component in the boundary where it runs. Load balancers follow their platform: an AWS internet-facing ALB or NLB has a node in the public subnet of each AZ it serves, so draw one per public subnet (for example "ALB (AZ a)"); an Azure Application Gateway lives in its own gateway subnet.
+8. DNS-based services (Traffic Manager, Route 53, Azure DNS, Cloud DNS) answer name lookups and don't carry traffic: connect the client to them with a "DNS query" label, and draw the HTTPS request from the client straight to the entry point.
+9. When the request asks for a flow (backup, telemetry, replication, secret retrieval), draw it as a connection, including into shared services.
+10. Keep text short: a name of a few words, a detail of at most about 28 characters.
+11. Use overlays for spanning groups that do not contain their members, such as an AWS Auto Scaling group across availability zones.
+12. Keep ids stable, short and kebab-case. On edits, preserve ids for unchanged items and return the complete updated spec.
 
 TRUST POLICY
 - Facts the user did not give are never presented as facts of an existing system. For an existing system, include only stated components, stated boundaries and stated facts; omit unknown CIDRs, SKUs, regions, counts, tiers and security products.

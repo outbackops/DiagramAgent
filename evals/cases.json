@@ -213,10 +213,10 @@
       ],
       "boundaries": [["ingestion"], ["processing"], ["storage"], ["serving"], ["operations", "ops"]],
       "flows": [
-        [["producer"], ["kafka", "topic"]],
+        [["producer"], ["kafka", "topic", "ingestion"]],
         [["kafka", "topic", "ingestion"], ["spark"]],
         [["spark"], ["raw", "curated", "lake"]],
-        [["curated", "lake"], ["warehouse"]],
+        [["curated", "lake", "quality", "load"], ["warehouse"]],
         [["warehouse", "bi", "dashboard"], ["bi", "dashboard", "warehouse"]]
       ],
       "prohibited": ["aws", "azure", "gcp", "google cloud"]

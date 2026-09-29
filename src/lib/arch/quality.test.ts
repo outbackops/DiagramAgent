@@ -142,6 +142,22 @@ describe("faithfulness", () => {
     expect(report.missingComponents).toEqual([]);
   });
 
+  it("matches an alias at the start of a word (plurals, longer names), and a component drawn as a boundary", () => {
+    const spec = baseSpec({
+      items: [
+        { type: "component", id: "producers", name: "Event producers" },
+        { type: "component", id: "db", name: "PostgreSQL" },
+        { type: "boundary", id: "aks", kind: "cluster", name: "AKS cluster", items: [{ type: "component", id: "api", name: "API" }] },
+      ],
+      connections: [{ from: "producers", to: "db", meaning: "request" }],
+      overlays: [],
+    });
+    const report = faithfulness(spec, "Producers write to PostgreSQL on AKS.", { components: [["producer"], ["postgres"], ["aks"]], flows: [[["producer"], ["postgres"]]] });
+    expect(report).toMatchObject({ missingComponents: [], missingFlows: [] });
+    // Not in the middle of a word.
+    expect(faithfulness(spec, "p", { components: [["gres"]] }).missingComponents).toEqual(["gres"]);
+  });
+
   it("grounds facts from assumptions", () => {
     const spec = baseSpec({ items: [{ type: "component", id: "web", name: "Web app", detail: "P1v3" }], connections: [], overlays: [], assumptions: ["P1v3 is the chosen app service tier."] });
     expect(faithfulness(spec, "Draw a web app.", {}).ungroundedFacts).toEqual([]);

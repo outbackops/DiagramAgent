@@ -361,9 +361,13 @@ export function scoreArchitecture(model: DiagramModel, options: { warnings?: str
 const normalize = (text: string | undefined): string => ` ${text ?? ""} `.toLowerCase().replace(/[×]/g, " x ").replace(/[^a-z0-9.+/#:-]+/g, " ").replace(/\s+/g, " ");
 const normalizeLoose = (text: string | undefined): string => ` ${text ?? ""} `.toLowerCase().replace(/[×]/g, " x ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
 
+/** Whether an alias starts a word of the text, so "producer" matches "Event producers" and "postgres" matches "PostgreSQL". */
 function containsAlias(text: string, aliases: readonly string[]): boolean {
   const hay = normalizeLoose(text);
-  return aliases.some((alias) => hay.includes(normalizeLoose(alias)));
+  return aliases.some((alias) => {
+    const needle = normalizeLoose(alias).trimEnd();
+    return needle.trim().length > 0 && hay.includes(needle);
+  });
 }
 
 
@@ -523,7 +527,8 @@ export function faithfulness(spec: NormalizedArchSpec, prompt: string, expect: F
   const components = allItems(spec.items).filter((item): item is NComponent => !isBoundary(item)).map(directItemText);
   const boundaries = allItems(spec.items).filter((item): item is NBoundary => isBoundary(item)).map(directItemText);
 
-  const missingComponents = missingAliasGroups(expect.components, components);
+  // A requested component may be drawn as a boundary (an AKS cluster, an App Service plan).
+  const missingComponents = missingAliasGroups(expect.components, [...components, ...boundaries]);
   const missingBoundaries = missingAliasGroups(expect.boundaries, boundaries);
   const missingFlows = (expect.flows ?? [])
     .filter(([fromAliases, toAliases]) =>

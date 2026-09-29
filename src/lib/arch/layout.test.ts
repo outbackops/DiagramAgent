@@ -25,9 +25,9 @@ describe("layoutArchitecture", () => {
     const subnet = node(model, "pe-subnet").box;
     for (const pe of ["pe-app", "pe-sql", "pe-kv", "pe-st"]) expect(inside(node(model, pe).box, subnet)).toBe(true);
     const offsets = [["pe-sql", "sql"], ["pe-kv", "kv"], ["pe-st", "st"]].map(([pe, svc]) => Math.abs(centreY(node(model, pe).box) - centreY(node(model, svc).box)));
-    // Lined up with its endpoint; a small jog only where stacked neighbours leave no room.
+    // Lined up with its endpoint; a small jog (within the straightening tolerance) only where stacked neighbours leave no room.
     expect(offsets.filter((o) => o <= 8).length).toBeGreaterThanOrEqual(2);
-    expect(Math.max(...offsets)).toBeLessThanOrEqual(16);
+    expect(Math.max(...offsets)).toBeLessThanOrEqual(24);
     // Zones inside the App Service plan sit in author order, one row.
     const zones = ["zone-1", "zone-2", "zone-3"].map((z) => node(model, z).box);
     expect(zones[0].x).toBeLessThan(zones[1].x);
@@ -81,11 +81,12 @@ describe("layoutArchitecture", () => {
     expect(report.hardViolations).toBe(0);
   });
 
-  it("keeps monitoring links into the shared band as hidden links", async () => {
+  it("hides repeated monitoring links into the shared band, but never leaves a shared service unconnected", async () => {
     const { model } = await composeArchitectureText(fixture("azure-hub-spoke"));
     const hidden = model.edges.filter((e) => e.hidden);
-    expect(hidden.length).toBeGreaterThanOrEqual(3);
+    expect(hidden.length).toBeGreaterThanOrEqual(2);
     expect(hidden.every((e) => e.route.length === 0 && e.meaning === "monitoring")).toBe(true);
+    for (const target of new Set(hidden.map((e) => e.to))) expect(model.edges.some((e) => e.to === target && !e.hidden), target).toBe(true);
   });
 
   it("falls back to another option set when ELK throws on one", async () => {

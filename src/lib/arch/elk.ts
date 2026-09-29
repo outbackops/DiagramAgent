@@ -40,6 +40,8 @@ export const BASE_OPTIONS: LayoutOptions = {
   "elk.layered.spacing.edgeEdgeBetweenLayers": "12",
   "elk.edgeLabels.placement": "CENTER",
   "elk.padding": "[top=24,left=24,bottom=24,right=24]",
+  // Shortens edges after placement: fewer crossings and pages nearer the aspect band on the fixtures.
+  "elk.layered.compaction.postCompaction.strategy": "EDGE_LENGTH",
 };
 
 /**

@@ -13,19 +13,19 @@ export interface ComponentGeom {
   h: number;
   /** Name wrapped to at most two lines. */
   lines: string[];
-  /** Detail line, ellipsised to the box when needed. */
-  detail?: string;
+  /** Detail wrapped to at most two lines (the spec's detail budget fits), ellipsised beyond. */
+  detailLines: string[];
 }
 
 export function componentGeom(component: NComponent): ComponentGeom {
   const name = wrapText(component.name, S.nameMaxWidth, T.name, 2);
-  const detail = component.detail ? wrapText(component.detail, S.nameMaxWidth, T.detail, 1).lines[0] : undefined;
-  const textW = Math.max(...name.lines.map((line) => measureText(line, T.name)), detail ? measureText(detail, T.detail) : 0);
+  const detailLines = component.detail ? wrapText(component.detail, S.nameMaxWidth, T.detail, 2).lines : [];
+  const textW = Math.max(...name.lines.map((line) => measureText(line, T.name)), ...detailLines.map((line) => measureText(line, T.detail)));
   return {
     w: Math.max(S.nodeMinWidth, Math.ceil(textW) + S.nodeSidePad * 2),
-    h: S.nodePadTop + S.icon + S.iconGap + name.lines.length * S.nameLineHeight + (detail ? S.detailLineHeight : 0) + S.nodePadBottom,
+    h: S.nodePadTop + S.icon + S.iconGap + name.lines.length * S.nameLineHeight + detailLines.length * S.detailLineHeight + S.nodePadBottom,
     lines: name.lines,
-    detail,
+    detailLines,
   };
 }
 

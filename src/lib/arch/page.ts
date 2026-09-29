@@ -79,7 +79,7 @@ export function workflowBlock(sequences: NSequence[], maxWidth: number): PageBlo
   sequences.forEach((sequence, sequenceIndex) => {
     if (sequence.steps.length === 0) return;
     if (withSteps.length > 1) entries.push({ kind: "heading", text: sequence.name });
-    sequence.steps.forEach((step, i) => entries.push({ kind: "step", sequenceIndex, number: i + 1, lines: wrapText(step, colW - textX, T.body, 3).lines }));
+    sequence.steps.forEach((step, i) => entries.push({ kind: "step", sequenceIndex, number: i + 1, lines: wrapText(step, colW - textX, T.body, 5).lines }));
   });
   const entryHeight = (e: (typeof entries)[number]) => (e.kind === "heading" ? lineHeight(T.sectionTitle) + 4 : Math.max(S.badge + 4, e.lines.length * lineHeight(T.body) + 4));
   const total = entries.reduce((h, e) => h + entryHeight(e), 0);
@@ -185,7 +185,8 @@ export function assumptionsBlock(assumptions: string[], maxWidth: number): PageB
   block.runs.push({ text: "Assumptions", x: 0, y: lineHeight(T.sectionTitle) - 4, style: T.sectionTitle, tone: "muted" });
   let w = measureText("Assumptions", T.sectionTitle);
   for (const assumption of assumptions) {
-    const lines = wrapText(`• ${assumption}`, maxWidth, T.body, 2).lines;
+    // Wide enough for the spec's longest assumption at the narrowest section width: never cut off.
+    const lines = wrapText(`• ${assumption}`, maxWidth, T.body, 4).lines;
     for (const line of lines) {
       y += lineHeight(T.body);
       block.runs.push({ text: line, x: 0, y: y - 5, style: T.body, tone: "muted" });

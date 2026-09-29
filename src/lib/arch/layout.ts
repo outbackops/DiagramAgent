@@ -220,21 +220,28 @@ function planSpec(spec: NormalizedArchSpec): Plan {
   };
   findPackable(spec.items);
 
-  // P2: monitoring and management links into shared services are implied by the band; other
-  // links into one shared service are hidden once three or more components use it.
+  // P2: unlabelled monitoring and management links into shared services are implied by the band;
+  // other unlabelled links into one shared service are hidden once three or more components use it.
+  // A labelled link or one carrying a workflow step was drawn on purpose and always stays, and so
+  // does the first link of each shared service, so no shared service ever looks disconnected.
   const intoShared = new Map<string, number>();
   for (const c of spec.connections) if (info.get(c.to)?.shared && !info.get(c.from)?.shared) intoShared.set(c.to, (intoShared.get(c.to) ?? 0) + 1);
   const hidden = new Set<NConnection>();
+  const linkedShared = new Set<string>();
   const afterEdges: NConnection[] = [];
   const main: NConnection[] = [];
   for (const c of spec.connections) {
     const a = info.get(c.from)!;
     const b = info.get(c.to)!;
     const implied = (c.meaning === "monitoring" || c.meaning === "management") && (a.shared || b.shared);
-    if (implied || (b.shared && !a.shared && (intoShared.get(c.to) ?? 0) >= 3)) {
+    const crowded = b.shared && !a.shared && (intoShared.get(c.to) ?? 0) >= 3;
+    const sharedEnd = b.shared ? c.to : a.shared ? c.from : null;
+    const keep = Boolean(c.step) || Boolean(c.label) || (sharedEnd !== null && !linkedShared.has(sharedEnd));
+    if ((implied || crowded) && !keep) {
       hidden.add(c);
       continue;
     }
+    if (sharedEnd) linkedShared.add(sharedEnd);
     // P3: links to a node's own ancestor, and links into the band, are routed after layout.
     if (a.band || b.band || ancestors(c.to).includes(c.from) || ancestors(c.from).includes(c.to)) {
       afterEdges.push(c);
@@ -696,8 +703,9 @@ function placeLabels(plan: Plan, geo: Geo): void {
   const titles = titleObstacles(plan, geo).map((t) => t.box);
   const borders = [...plan.info.values()].filter((i) => isBoundary(i.item)).map((i) => geo.boxes.get(i.item.id)).filter((b): b is Box => Boolean(b));
   const placed: Box[] = [];
+  // As strict as the quality scorer: no overlap with components or titles, and a small gap between labels.
   const free = (b: Box) =>
-    !leaves.some((l) => overlaps(b, l, 1)) && !titles.some((t) => overlaps(b, t, 1)) && !placed.some((p) => overlaps(b, p, 2)) && !borders.some((g) => straddles(b, g));
+    !leaves.some((l) => overlaps(b, l, 0)) && !titles.some((t) => overlaps(b, t, 0)) && !placed.some((p) => overlaps(b, p, -2)) && !borders.some((g) => straddles(b, g));
   for (const e of geo.edges) {
     if (!e.conn.label || e.points.length < 2) continue;
     const w = labelWidth(e.conn.label);
@@ -751,25 +759,33 @@ function placeBadges(plan: Plan, geo: Geo): void {
     const key = `${step.sequence}.${step.number}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const options: Point[] = [];
+    // Near where the arrow starts first; then anywhere along the route.
+    const near: Point[] = [];
+    const farther: Point[] = [];
     let walked = 0;
-    for (let i = 0; i + 1 < e.points.length && walked < 400; i++) {
+    for (let i = 0; i + 1 < e.points.length; i++) {
       const a = e.points[i];
       const b = e.points[i + 1];
       const len = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
-      for (const d of [24, 44, 64, 90, 120]) {
+      for (const d of [24, 44, 64, 90, 120, 160, 200, 260, 320]) {
         if (d > len - 6) break;
         const t = d / len;
         const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
         const horizontal = Math.abs(a.y - b.y) < 1;
-        options.push(horizontal ? { x: p.x, y: p.y - r - 4 } : { x: p.x + r + 4, y: p.y }, horizontal ? { x: p.x, y: p.y + r + 4 } : { x: p.x - r - 4, y: p.y }, p);
+        const spots = [horizontal ? { x: p.x, y: p.y - r - 4 } : { x: p.x + r + 4, y: p.y }, horizontal ? { x: p.x, y: p.y + r + 4 } : { x: p.x - r - 4, y: p.y }, p];
+        (walked < 400 && d <= 120 ? near : farther).push(...spots);
       }
       walked += len;
     }
-    const at = options.find(free) ?? options[0];
+    const box = (c: Point) => ({ x: c.x - r, y: c.y - r, w: S.badge, h: S.badge });
+    const cost = (c: Point) => {
+      const b = box(c);
+      return leaves.reduce((s, l) => s + area(b, l), 0) * 4 + titles.reduce((s, t) => s + area(b, t), 0) * 4 + labels.reduce((s, l) => s + area(b, l), 0) * 2 + placed.reduce((s, p) => s + area(b, p), 0) * 2 + (borders.some((g) => straddles(b, g)) ? 50 : 0);
+    };
+    const at = near.find(free) ?? farther.find(free) ?? [...near, ...farther].sort((p, q) => cost(p) - cost(q))[0];
     if (!at) continue;
     e.badge = at;
-    placed.push({ x: at.x - r, y: at.y - r, w: S.badge, h: S.badge });
+    placed.push(box(at));
   }
 }
 
@@ -842,9 +858,9 @@ function scoreGeo(plan: Plan, geo: Geo, final: boolean): Score {
   for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) if (segs[i].edge !== segs[j].edge && properCross(segs[i].a, segs[i].b, segs[j].a, segs[j].b)) crossings++;
   const labels = geo.edges.map((e) => e.label).filter((l): l is Box => Boolean(l));
   for (let i = 0; i < labels.length; i++) {
-    for (const l of leaves) if (overlaps(labels[i], l.box, 1)) hard++;
-    for (const t of titles) if (overlaps(labels[i], t.box, 1)) hard++;
-    for (let j = i + 1; j < labels.length; j++) if (overlaps(labels[i], labels[j], 1)) hard++;
+    for (const l of leaves) if (overlaps(labels[i], l.box, 0)) hard++;
+    for (const t of titles) if (overlaps(labels[i], t.box, 0)) hard++;
+    for (let j = i + 1; j < labels.length; j++) if (overlaps(labels[i], labels[j], 0)) hard++;
   }
   let overlayPenalty = 0;
   for (const overlay of plan.spec.overlays) if (!overlayClean(plan, geo, overlay)) overlayPenalty += 30;
