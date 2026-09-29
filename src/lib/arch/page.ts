@@ -173,8 +173,11 @@ export function legendBlock(input: LegendInput): PageBlock | null {
 
 /** Short tag for an overlay drawn on its members when no clean box fits, e.g. "ASG". */
 export function overlayTag(overlay: Pick<NOverlay, "name" | "kind">): string {
+  // "EC2 Auto Scaling group" → ASG, "VM Scale Set" → VMSS: a leading provider or service word is
+  // dropped, and an all-caps word stays whole.
   const words = overlay.name.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w));
-  const acronym = words.map((w) => w[0].toUpperCase()).join("").slice(0, 4);
+  const core = words.length > 1 && /^(?:EC2|Amazon|AWS|Azure|Google|GCP|Microsoft)$/i.test(words[0]) ? words.slice(1) : words;
+  const acronym = core.map((w) => (/^[A-Z0-9]{2,}$/.test(w) ? w : w[0].toUpperCase())).join("").slice(0, 5);
   return acronym.length >= 2 ? acronym : overlay.name.slice(0, 6);
 }
 

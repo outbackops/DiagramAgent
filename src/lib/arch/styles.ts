@@ -335,6 +335,15 @@ export function badgeStyle(platform: Platform, sequenceIndex: number): BadgeStyl
   return stylePack(platform).badges[Math.min(Math.max(sequenceIndex, 0), 1)];
 }
 
+/**
+ * What a step badge shows: numbers for the first workflow, letters for the second (A, B, C…), so two
+ * workflows never show the same mark — side by side, "1" and "1" read as one sequence.
+ */
+export function stepLabel(sequenceIndex: number, number: number): string {
+  if (sequenceIndex < 1 || number < 1 || number > 26) return String(number);
+  return String.fromCharCode(64 + number);
+}
+
 function emptyScores(): Record<ProviderPlatform, number> {
   return { azure: 0, aws: 0, gcp: 0, kubernetes: 0 };
 }

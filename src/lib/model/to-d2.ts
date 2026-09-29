@@ -215,7 +215,7 @@ function modelToArchitectureD2(model: DiagramModel): string {
   for (const node of children.get(null) ?? []) emitNode(node, 0);
   for (const edge of model.edges) {
     const operator = edge.hidden ? "--" : chooseOperator(edge.srcArrow, edge.dstArrow);
-    const parts = [stepPrefix(edge), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
+    const parts = [stepPrefix(edge, model), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
     const label = parts.length ? `: ${quoteString(parts.join(" "))}` : "";
     if (edge.hidden) {
       lines.push(`${edge.from} ${operator} ${edge.to}${label} {`);

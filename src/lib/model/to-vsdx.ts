@@ -5,7 +5,7 @@ import JSZip from "jszip";
 
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
-import { badgeStyle, boundaryStyle, connectorStyle, stylePack } from "@/lib/arch/styles";
+import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
 import { architectureExportView, architecturePageLines, exportResult, type ExportResult } from "./export-result";
 import { unionBoxes } from "./geometry";
 import { diagramKind } from "./kind";
@@ -280,7 +280,7 @@ async function modelToArchitectureVsdxBuffer(model: DiagramModel): Promise<Buffe
       const pagePlatform = architectureExportView(model).platform;
       const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
       const style = badgeStyle(pagePlatform, sequenceIndex);
-      return boxShapeXml(nextShapeId++, `badge.${edge.id}.${badge.number}`, { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, page, String(badge.number), style.fill, style.fill);
+      return boxShapeXml(nextShapeId++, `badge.${edge.id}.${badge.number}`, { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, page, stepLabel(sequenceIndex, badge.number), style.fill, style.fill);
     })
   );
   const connectRows = visibleEdges.flatMap((edge, index) => {

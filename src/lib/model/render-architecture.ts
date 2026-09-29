@@ -2,7 +2,7 @@ import { componentGeom } from "@/lib/arch/measure";
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { assumptionsBlock, legendBlock, overlayTag, titleBlock, workflowBlock, type PageBlock } from "@/lib/arch/page";
 import { allItems, isBoundary, type BoundaryKind, type Meaning, type NBoundary, type NComponent, type NItem, type NormalizedArchSpec, type Platform } from "@/lib/arch/spec";
-import { badgeStyle, boundaryPlatform, boundaryStyle, connectorStyle, inferPlatform, stylePack, type BoundaryStyle, type ConnectorStyle, type StylePack } from "@/lib/arch/styles";
+import { badgeStyle, boundaryPlatform, boundaryStyle, connectorStyle, inferPlatform, stepLabel, stylePack, type BoundaryStyle, type ConnectorStyle, type StylePack } from "@/lib/arch/styles";
 import { ARCH_SPACE as S, ARCH_TYPE as T } from "@/lib/arch/theme";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 import type { RenderModelSvgOptions } from "./render-svg";
@@ -238,15 +238,15 @@ function renderBadges(edge: DiagramEdge, model: DiagramModel, page: Platform): s
     .map((badge) => {
       const at = badge.at ?? along(edge.route, 24);
       const index = Math.max(0, sequences.findIndex((s) => s.id === badge.sequence));
-      return badgeMark(at, badge.number, badgeStyle(page, index));
+      return badgeMark(at, stepLabel(index, badge.number), badgeStyle(page, index));
     })
     .join("");
 }
 
-function badgeMark(at: Point, number: number, style: { shape: "circle" | "square"; fill: string; text: string }): string {
+function badgeMark(at: Point, mark: string, style: { shape: "circle" | "square"; fill: string; text: string }): string {
   const r = S.badge / 2;
   const shape = style.shape === "circle" ? `<circle cx="${num(at.x)}" cy="${num(at.y)}" r="${r}" fill="${attr(style.fill)}"/>` : `<rect x="${num(at.x - r)}" y="${num(at.y - r)}" width="${S.badge}" height="${S.badge}" rx="2" fill="${attr(style.fill)}"/>`;
-  return `<g data-badge="${number}">${shape}<text x="${num(at.x)}" y="${num(at.y + 4)}" text-anchor="middle" font-size="${T.badge.size}" font-weight="${T.badge.weight}" fill="${attr(style.text)}">${number}</text></g>`;
+  return `<g data-badge="${attr(mark)}">${shape}<text x="${num(at.x)}" y="${num(at.y + 4)}" text-anchor="middle" font-size="${T.badge.size}" font-weight="${T.badge.weight}" fill="${attr(style.text)}">${esc(mark)}</text></g>`;
 }
 
 function renderMarker(id: string, color: string, kind: "filled" | "open"): string {
@@ -273,14 +273,14 @@ function renderPageNode(node: DiagramNode, model: DiagramModel, page: Platform, 
   for (const run of block.runs) {
     parts.push(`<text x="${num(x + run.x)}" y="${num(y + run.y)}" font-size="${run.style.size}" font-weight="${run.style.weight}" fill="${attr(run.tone === "muted" ? pack.muted : pack.text)}">${esc(run.text)}</text>`);
   }
-  for (const badge of block.badges) parts.push(badgeMark({ x: x + badge.x, y: y + badge.y }, badge.number, badgeStyle(page, badge.sequenceIndex)));
+  for (const badge of block.badges) parts.push(badgeMark({ x: x + badge.x, y: y + badge.y }, stepLabel(badge.sequenceIndex, badge.number), badgeStyle(page, badge.sequenceIndex)));
   for (const swatch of block.swatches) {
     if (swatch.kind === "line") {
       const style = connectorStyle(page, swatch.meaning);
       const dash = style.dash ? ` stroke-dasharray="${attr(style.dash)}"` : "";
       parts.push(`<path d="M${num(x + swatch.x)} ${num(y + swatch.y)} H${num(x + swatch.x + swatch.w)}" stroke="${attr(style.stroke)}" stroke-width="${style.width + 0.5}"${dash} fill="none"/>`);
     } else if (swatch.kind === "badge") {
-      parts.push(badgeMark({ x: x + swatch.x, y: y + swatch.y }, 1, badgeStyle(page, swatch.sequenceIndex)));
+      parts.push(badgeMark({ x: x + swatch.x, y: y + swatch.y }, stepLabel(swatch.sequenceIndex, 1), badgeStyle(page, swatch.sequenceIndex)));
     } else {
       parts.push(`<rect x="${num(x + swatch.x)}" y="${num(y + swatch.y - 8)}" width="${Math.ceil(swatch.text.length * 7) + 10}" height="16" rx="8" fill="${attr(pack.background)}" stroke="#ED7100"/><text x="${num(x + swatch.x + 5)}" y="${num(y + swatch.y + 3.5)}" font-size="10" font-weight="700" fill="#ED7100">${esc(swatch.text)}</text>`);
     }

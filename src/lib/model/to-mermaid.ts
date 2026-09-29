@@ -98,7 +98,7 @@ function modelToArchitectureMermaid(model: DiagramModel): string {
     const from = ids.get(edge.from) ?? safeBase(edge.from);
     const to = ids.get(edge.to) ?? safeBase(edge.to);
     const arrow = edge.hidden || edge.style.strokeDash ? "-.->" : "-->";
-    const parts = [stepPrefix(edge), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
+    const parts = [stepPrefix(edge, model), edge.hidden ? "logical link" : "", edge.label ?? ""].filter(Boolean);
     const edgeLabel = parts.length ? `|"${label(parts.join(" "))}"|` : "";
     lines.push(`  ${from} ${arrow}${edgeLabel} ${to}`);
   }

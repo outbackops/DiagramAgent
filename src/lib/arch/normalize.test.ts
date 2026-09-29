@@ -213,3 +213,31 @@ describe("boundary helpers", () => {
     expect(allItems(spec.items).filter(isBoundary).map((b) => b.id)).toContain("vpc");
   });
 });
+
+describe("normalizer repairs for model output", () => {
+  it("gives a service its own icon instead of the provider's logo, and says so", () => {
+    const { spec, warnings } = normalizeArchSpec({
+      title: "T",
+      platform: "gcp",
+      items: [
+        { id: "bq", name: "BigQuery", icon: "gcp" },
+        { id: "ps", name: "Cloud Pub/Sub", icon: "gcp" },
+        { id: "df", name: "Dataflow streaming pipeline", icon: "gcp" },
+        { id: "partner", name: "Partner system", icon: "gcp" },
+      ],
+    });
+    const icons = Object.fromEntries(allItems(spec.items).map((item) => [item.id, (item as NComponent).icon]));
+    expect(icons).toEqual({ bq: "gcp-bigquery", ps: "gcp-pubsub", df: "gcp-dataflow", partner: "gcp" });
+    expect(warnings.filter((w) => w.includes('instead of the "gcp" logo'))).toHaveLength(3);
+  });
+
+  it("warns about workflow steps that no connection carries", () => {
+    const { warnings } = normalizeArchSpec({
+      title: "T",
+      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      connections: [{ from: "a", to: "b", step: "main.1" }],
+      sequences: [{ id: "main", steps: ["one", "two", "three"] }],
+    });
+    expect(warnings).toContain("Steps main.2, main.3 aren't on any connection, so they have no badge on the diagram");
+  });
+});

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
-import { badgeStyle, boundaryStyle, connectorStyle, stylePack } from "@/lib/arch/styles";
+import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
 import { bottom, right, unionBoxes } from "./geometry";
 import { architectureExportView, architecturePageLines, exportResult, type ExportResult } from "./export-result";
 import { diagramKind } from "./kind";
@@ -288,7 +288,7 @@ function badgeCellXml(id: string, model: DiagramModel, edge: DiagramEdge, badge:
   const size = 18;
   const shape = style.shape === "circle" ? "shape=ellipse" : "rounded=1;arcSize=2";
   const mxStyle = styleText([shape, "html=1", `fillColor=${style.fill}`, "strokeColor=none", `fontColor=${style.text}`, "fontStyle=1", "fontSize=10", "align=center", "verticalAlign=middle"]);
-  return `        <mxCell id="${id}-badge-${index}" value="${badge.number}" style="${escapeXml(mxStyle)}" vertex="1" parent="${ROOT_CELL_ID}">\n          <mxGeometry x="${at.x - size / 2}" y="${at.y - size / 2}" width="${size}" height="${size}" as="geometry"/>\n        </mxCell>`;
+  return `        <mxCell id="${id}-badge-${index}" value="${escapeXml(stepLabel(sequenceIndex, badge.number))}" style="${escapeXml(mxStyle)}" vertex="1" parent="${ROOT_CELL_ID}">\n          <mxGeometry x="${at.x - size / 2}" y="${at.y - size / 2}" width="${size}" height="${size}" as="geometry"/>\n        </mxCell>`;
 }
 
 function overlayCellXml(id: string, box: { x: number; y: number; w: number; h: number }, name: string): string {

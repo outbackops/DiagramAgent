@@ -122,3 +122,16 @@ describe("architecture style packs", () => {
     }
   });
 });
+
+describe("step marks and overlay tags", () => {
+  it("numbers the first workflow and letters the second", async () => {
+    const { stepLabel } = await import("./styles");
+    expect([stepLabel(0, 1), stepLabel(0, 12), stepLabel(1, 1), stepLabel(1, 3)]).toEqual(["1", "12", "A", "C"]);
+  });
+
+  it("tags overlay members with a standard abbreviation", async () => {
+    const { overlayTag } = await import("./page");
+    const tag = (name: string) => overlayTag({ name, kind: "scaling-group" });
+    expect([tag("EC2 Auto Scaling group"), tag("Auto Scaling group"), tag("VM Scale Set"), tag("Web")]).toEqual(["ASG", "ASG", "VMSS", "Web"]);
+  });
+});

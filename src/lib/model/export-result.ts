@@ -1,6 +1,6 @@
 import { allItems, isBoundary, type BoundaryKind, type NBoundary, type NComponent, type NItem, type NormalizedArchSpec, type Platform } from "@/lib/arch/spec";
-import { boundaryPlatform, inferPlatform } from "@/lib/arch/styles";
-import type { DiagramEdge, DiagramModel, DiagramNode } from "./types";
+import { boundaryPlatform, inferPlatform, stepLabel } from "@/lib/arch/styles";
+import type { DiagramEdge, DiagramModel, DiagramNode, EdgeBadge } from "./types";
 
 export interface ExportResult<T = string> {
   content: T;
@@ -40,9 +40,15 @@ export function architectureExportView(model: DiagramModel): ArchitectureExportV
   return { platform, boundaryPlatforms };
 }
 
-export function stepPrefix(edge: DiagramEdge): string {
+/** The mark a step badge shows (numbers for the first workflow, letters for the second), as on the canvas. */
+export function badgeMarkText(model: DiagramModel, badge: EdgeBadge): string {
+  const index = Math.max(0, (model.arch?.sequences ?? []).findIndex((s) => s.id === badge.sequence));
+  return stepLabel(index, badge.number);
+}
+
+export function stepPrefix(edge: DiagramEdge, model: DiagramModel): string {
   if (!edge.badges?.length) return "";
-  return edge.badges.map((badge) => `(${badge.number})`).join(" ");
+  return edge.badges.map((badge) => `(${badgeMarkText(model, badge)})`).join(" ");
 }
 
 export function architectureTextWarnings(format: "D2" | "Mermaid"): string[] {
@@ -61,11 +67,11 @@ export function architecturePageLines(model: DiagramModel, node: DiagramNode): s
   if (node.role === "title") return [arch.title, arch.subtitle].filter((line): line is string => Boolean(line));
   if (node.role === "workflow") {
     const lines = ["Workflow"];
-    for (const sequence of arch.sequences) {
-      if (sequence.steps.length === 0) continue;
+    arch.sequences.forEach((sequence, sequenceIndex) => {
+      if (sequence.steps.length === 0) return;
       lines.push(sequence.name);
-      sequence.steps.forEach((step, index) => lines.push(`(${index + 1}) ${step}`));
-    }
+      sequence.steps.forEach((step, index) => lines.push(`(${stepLabel(sequenceIndex, index + 1)}) ${step}`));
+    });
     return lines;
   }
   if (node.role === "legend") {

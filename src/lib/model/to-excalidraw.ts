@@ -1,7 +1,7 @@
 import { PAGE } from "@/lib/compose/theme";
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { overlayTag } from "@/lib/arch/page";
-import { badgeStyle, boundaryStyle, connectorStyle, stylePack } from "@/lib/arch/styles";
+import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
 import { architectureExportView, architecturePageLines } from "./export-result";
 import { diagramKind } from "./kind";
 import type { DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
@@ -495,11 +495,12 @@ function modelToArchitectureExcalidraw(model: DiagramModel): string {
       const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
       const style = badgeStyle(page, sequenceIndex);
       const badgeId = elementId(`badge:${edge.id}:${badge.number}`, used);
+      const mark = stepLabel(sequenceIndex, badge.number);
       containers.push({
-        node: { ...styledNodes[0], id: badgeId, label: String(badge.number), box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 } },
-        rect: { ...rectForNode({ id: badgeId, parent: null, label: String(badge.number), shape: "rectangle", box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, style: { fill: style.fill, stroke: style.fill, fontColor: style.text, fontSize: 10, bold: true }, container: false }, badgeId, false), roundness: style.shape === "circle" ? { type: 2 } : { type: 3 } },
+        node: { ...styledNodes[0], id: badgeId, label: mark, box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 } },
+        rect: { ...rectForNode({ id: badgeId, parent: null, label: mark, shape: "rectangle", box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, style: { fill: style.fill, stroke: style.fill, fontColor: style.text, fontSize: 10, bold: true }, container: false }, badgeId, false), roundness: style.shape === "circle" ? { type: 2 } : { type: 3 } },
       });
-      texts.push(textElement({ id: elementId(`badge-text:${edge.id}:${badge.number}`, used), text: String(badge.number), x: at.x - 9, y: at.y - 7, width: 18, fontSize: 10, color: style.text, align: "center", verticalAlign: "middle" }));
+      texts.push(textElement({ id: elementId(`badge-text:${edge.id}:${badge.number}`, used), text: mark, x: at.x - 9, y: at.y - 7, width: 18, fontSize: 10, color: style.text, align: "center", verticalAlign: "middle" }));
     }
   }
 

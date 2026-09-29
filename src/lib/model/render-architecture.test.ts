@@ -22,6 +22,9 @@ describe("renderArchitectureSvg", () => {
     // Badges: green circles for the first sequence, blue squares for the second.
     expect(svg).toMatch(/<circle[^>]*fill="#107C10"/);
     expect(svg).toMatch(/<rect[^>]*fill="#4672C4"/);
+    // The second workflow is lettered, so its badges never repeat the first one's numbers.
+    expect(svg).toContain('data-badge="A"');
+    expect(svg).not.toMatch(/<rect[^>]*fill="#4672C4"[^>]*\/><text[^>]*>1</);
     // Legend lists only what's used; page blocks carry the workflow and assumptions.
     expect(svg).toContain('data-page="legend"');
     expect(svg).toContain(">Private link<");

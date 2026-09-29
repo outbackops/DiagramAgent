@@ -55,6 +55,12 @@ export function normalizeArchSpec(raw: unknown): ArchNormalizeResult {
   const refs = buildRefs(nested);
   const sequences = normalizeSequences(raw, warnings);
   const connections = normalizeConnections(raw, refs, sequences, warnings);
+  // A listed step that no connection carries has no badge on the diagram.
+  for (const sequence of sequences) {
+    const carried = new Set(connections.filter((c) => c.step?.sequence === sequence.id).map((c) => c.step!.number));
+    const orphans = sequence.steps.map((_, i) => i + 1).filter((number) => !carried.has(number));
+    if (orphans.length > 0) warnings.push(`Steps ${orphans.map((number) => `${sequence.id}.${number}`).join(", ")} aren't on any connection, so they have no badge on the diagram`);
+  }
   const overlays = normalizeOverlays(raw, refs, ctx);
   const assumptions = arrayOf(raw, ["assumptions", "assumed"])
     .slice(0, ARCH_LIMITS.assumptions)
@@ -648,9 +654,33 @@ function resolveIcon(value: unknown, componentName: string | undefined, ctx: Ctx
   const prefixes = platformPrefixes(ctx.platform);
   const candidates = [slug, ICON_ALIASES[slug], ...prefixes.map((p) => `${p}-${slug}`), ...prefixes.map((p) => ICON_ALIASES[`${p}-${slug}`])].filter((c): c is string => Boolean(c));
   const key = candidates.find((candidate) => iconRegistry[candidate]) ?? iconByLabel(raw, prefixes);
+  // A provider's logo on a specific service: its own icon, when its name identifies one.
+  if (key && PROVIDER_LOGOS.has(key) && componentName) {
+    const specific = iconForName(componentName, prefixes);
+    if (specific) {
+      ctx.warnings.push(`Used the "${specific}" icon for ${componentName} instead of the "${key}" logo`);
+      return specific;
+    }
+  }
   if (key) return key;
   ctx.warnings.push(`Unknown icon "${raw}"${componentName ? ` for ${componentName}` : ""}; drew a generic box`);
   return undefined;
+}
+
+const PROVIDER_LOGOS = new Set(["azure", "aws", "gcp", "k8s"]);
+
+/** A service's own icon from its display name ("BigQuery", "Cloud Pub/Sub", "Dataflow pipeline"). */
+function iconForName(name: string, prefixes: string[]): string | undefined {
+  const slug = slugify(name);
+  const bare = slug.replace(/^(?:azure|aws|amazon|google|gcp|cloud)-/, "");
+  const first = bare.split("-")[0];
+  for (const base of [...new Set([slug, bare, first])]) {
+    const candidates = [base, ICON_ALIASES[base], ...prefixes.map((p) => `${p}-${base}`), ...prefixes.map((p) => ICON_ALIASES[`${p}-${base}`])];
+    const found = candidates.find((candidate): candidate is string => Boolean(candidate && iconRegistry[candidate] && !PROVIDER_LOGOS.has(candidate)));
+    if (found) return found;
+  }
+  const byLabel = iconByLabel(name, prefixes);
+  return byLabel && !PROVIDER_LOGOS.has(byLabel) ? byLabel : undefined;
 }
 
 function platformPrefixes(platform: Platform | undefined): string[] {

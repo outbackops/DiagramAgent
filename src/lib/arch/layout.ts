@@ -646,9 +646,29 @@ function packedLayout(plan: Plan): Geo {
 // ---------------------------------------------------------------- finishing: routes (P4), labels (P6), badges
 
 function finish(plan: Plan, geo: Geo, after: NConnection[]): void {
+  rerouteBlocked(plan, geo, after);
   routeAfter(plan, geo, after);
   placeLabels(plan, geo);
   placeBadges(plan, geo);
+}
+
+/**
+ * P9: the passes after ELK move nodes (P7 lanes, P8 straightening, the shared band), which can
+ * leave another connector's ELK route running through a component or a boundary title. Those
+ * connectors are routed again after layout, like the ones ELK never laid out.
+ */
+function rerouteBlocked(plan: Plan, geo: Geo, after: NConnection[]): void {
+  const leaves = leafObstacles(plan, geo);
+  const titles = titleObstacles(plan, geo);
+  const keep: GeoEdge[] = [];
+  for (const edge of geo.edges) {
+    const ends = new Set([edge.conn.from, edge.conn.to, ...plan.ancestors(edge.conn.from), ...plan.ancestors(edge.conn.to)]);
+    const hits = (box: Box) => edge.points.some((p, i) => i > 0 && segmentHits(edge.points[i - 1], p, box));
+    const blocked = leaves.some((l) => !ends.has(l.id) && hits(l.box)) || titles.some((t) => !ends.has(t.id) && hits(t.box));
+    if (blocked && !after.includes(edge.conn)) after.push(edge.conn);
+    else if (!blocked) keep.push(edge);
+  }
+  geo.edges = keep;
 }
 
 function leafObstacles(plan: Plan, geo: Geo): Array<{ id: string; box: Box }> {
