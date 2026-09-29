@@ -524,7 +524,9 @@ function factGrounded(fact: string, prompt: string, allowedFacts: readonly strin
     if (port.protocol && IMPLIED_PORTS[port.protocol]?.includes(port.port)) return true;
     if (sources.some((source) => normalizeLoose(source).includes(` ${port.port} `))) return true;
     const promptLoose = normalizeLoose(prompt);
-    if (!port.protocol && Object.entries(IMPLIED_PORTS).some(([protocol, ports]) => promptLoose.includes(` ${protocol} `) && ports.includes(port.port))) return true;
+    // "port 443" or "TCP 1433" restates the default port of a protocol the request names (HTTPS, SQL).
+    const transport = !port.protocol || port.protocol === "tcp" || port.protocol === "udp";
+    if (transport && Object.entries(IMPLIED_PORTS).some(([protocol, ports]) => promptLoose.includes(` ${protocol} `) && ports.includes(port.port))) return true;
   }
   return false;
 }

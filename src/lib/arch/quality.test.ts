@@ -151,6 +151,10 @@ describe("faithfulness", () => {
     const bare = (port: string) => baseSpec({ connections: [{ from: "api", to: "db", meaning: "request", label: `port ${port}` }] });
     expect(faithfulness(bare("443"), "Use HTTPS between API and database.", {}).ungroundedFacts).not.toContain("port 443");
     expect(faithfulness(bare("8443"), "Use HTTPS between API and database.", {}).ungroundedFacts).toContain("port 8443");
+    // So is a transport and that port: SQL Server's TCP 1433, not TCP 8443.
+    const tcp = (port: string) => baseSpec({ connections: [{ from: "api", to: "db", meaning: "request", label: `TCP ${port}` }] });
+    expect(faithfulness(tcp("1433"), "The API queries SQL Server.", {}).ungroundedFacts).not.toContain("TCP 1433");
+    expect(faithfulness(tcp("8443"), "Use HTTPS between API and database.", {}).ungroundedFacts).toContain("TCP 8443");
   });
 
   it("extracts counts without matching words ending in x", () => {
