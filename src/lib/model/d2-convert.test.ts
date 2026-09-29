@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileD2, type CompiledDiagram, type CompiledShape } from "@/lib/d2-render";
-import { isOrthogonalRoute } from "@/lib/svg-orthogonal";
+import { isOrthogonalRoute } from "@/lib/d2-routes";
 import { modelFromCompiled } from "./from-d2";
 import { resolveColor } from "./d2-theme";
 import { modelToD2 } from "./to-d2";

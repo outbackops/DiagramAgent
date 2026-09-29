@@ -1,10 +1,12 @@
 import { resolveIconsInD2Code } from "@/lib/icon-registry";
-import { countObstacleHits, isOrthogonalRoute, orthogonalizeConnections, routeOrthogonal, type Point, type Rect } from "@/lib/svg-orthogonal";
+import { countObstacleHits, isOrthogonalRoute, routeOrthogonal, type Point, type Rect } from "@/lib/d2-routes";
 import { errorMessage } from "@/lib/error-message";
 
 /**
- * Server-side D2 → SVG rendering (WASM). Shared by /api/render, the quality
- * scorer, the fixture tests, and the eval harness.
+ * Server-side D2 compilation (WASM, ELK layout). D2 is the automatic layout
+ * engine: its compiled shapes and routes are imported into the diagram model,
+ * which the app renders itself. Shared by /api/render, the export routes, the
+ * fixture tests and the eval harness.
  */
 
 export interface CompiledShape {
@@ -69,11 +71,6 @@ export interface CompiledDiagram {
   connections: CompiledConnection[];
 }
 
-export interface RenderResult {
-  svg: string;
-  diagram: CompiledDiagram;
-}
-
 export interface CompileResult {
   diagram: CompiledDiagram;
 }
@@ -83,7 +80,6 @@ type D2Like = {
     diagram: unknown;
     renderOptions: Record<string, unknown>;
   }>;
-  render: (diagram: unknown, opts: Record<string, unknown>) => Promise<string>;
   /** Node worker_threads Worker hosting the WASM runtime. */
   worker?: { terminate?: () => unknown };
 };
@@ -132,7 +128,7 @@ function discardD2(instance: D2Like) {
 
 // The D2 JS wrapper tracks a single pending request: overlapping calls orphan
 // the earlier promise (it never settles) and can receive each other's
-// results. Every compile/render therefore runs strictly one at a time.
+// results. Every compile therefore runs strictly one at a time.
 let queue: Promise<unknown> = Promise.resolve();
 let pending = 0;
 
@@ -218,42 +214,6 @@ export async function compileD2(code: string, options: { signal?: AbortSignal } 
         throw new D2RenderError("D2 returned no diagram");
       }
       return { diagram: fixCompiledRoutes(toCompiledDiagram(compiled.diagram)) };
-    } catch (err) {
-      if (err instanceof D2RenderError) throw err;
-      throw new D2RenderError(formatD2Error(err));
-    }
-  }, options.signal);
-}
-
-export async function renderD2(code: string, options: { signal?: AbortSignal } = {}): Promise<RenderResult> {
-  return exclusive(async () => {
-    const d2 = await getD2();
-    try {
-      const compiled = await step(d2, d2.compile(resolveIconsInD2Code(code), { layout: "elk", sketch: false, pad: 40 }), "layout");
-      if (!compiled || typeof compiled !== "object" || !("diagram" in compiled)) {
-        throw new D2RenderError("D2 returned no diagram");
-      }
-      const diagram = toCompiledDiagram(compiled.diagram);
-      const svg = await step(
-        d2,
-        d2.render(compiled.diagram, {
-          ...compiled.renderOptions,
-          themeID: 0,
-          center: true,
-          noXMLTag: true,
-        }),
-        "rendering",
-      );
-      if (typeof svg !== "string" || !svg.trimStart().startsWith("<")) {
-        throw new D2RenderError("D2 returned an invalid SVG");
-      }
-      const result = orthogonalizeConnections(svg, { obstacles: leafObstacles(diagram) });
-      // Score what users see: replace ELK routes with the final post-processed ones.
-      diagram.connections = diagram.connections.map((c) => {
-        const route = result.routes.get(c.id);
-        return route ? { ...c, route } : c;
-      });
-      return { svg: result.svg, diagram };
     } catch (err) {
       if (err instanceof D2RenderError) throw err;
       throw new D2RenderError(formatD2Error(err));

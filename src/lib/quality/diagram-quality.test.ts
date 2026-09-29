@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { renderD2 } from "@/lib/d2-render";
+import { compileD2 } from "@/lib/d2-render";
 import { countCrossings, findEdgesThroughNodes, findUnknownIcons, hasCriticalFailure, qualityFeedback, scoreDiagram } from "./diagram-quality";
 
 // Real D2 (WASM) — the scorer is only meaningful against real layouts.
 async function score(code: string) {
-  const { diagram } = await renderD2(code);
+  const { diagram } = await compileD2(code);
   return scoreDiagram(code, diagram);
 }
 

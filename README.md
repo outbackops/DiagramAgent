@@ -10,8 +10,8 @@ Describe a system in plain language and get a clean, editable architecture diagr
 - **Pick any model you're entitled to** — the model picker lists your Copilot catalog (Claude, GPT, Grok and more — whatever your plan includes) with vision/reasoning badges and a reasoning-effort control. Default: `claude-opus-5.5` @ `medium`.
 - **A real pipeline, not a single prompt** — optional clarifying questions → architecture plan → D2 generation (streamed live) → render → deterministic quality checks → vision review → targeted refinement. Every refinement is re-checked and the best version wins.
 - **Quality you can see** — a *Quality* tab scores every render (0–100) with 16 deterministic checks (phantom nodes, unknown icons, overlaps, edges through nodes, crossings, aspect ratio, orphans, label coverage, …); a *Review* tab shows the vision model's score, findings and fixes per round.
-- **Edit however you like** — chat ("add a Redis cache"), edit the D2 in a syntax-highlighted editor, or click elements on the canvas to relabel, delete, connect, or drag them into another container.
-- **Export** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io, native Visio `.vsdx`, or raw `.d2`.
+- **Edit by hand or by chat** — drag nodes and groups, drop them into other groups, resize groups, add nodes from an icon palette, connect, rename, change icons, align and distribute, with full undo/redo. Ask in chat ("add a Redis cache") and the change is merged into your layout: nothing you arranged moves. *Tidy up* re-runs the automatic layout when you want it.
+- **Export what you see** — SVG, high-resolution PNG (icons and fonts embedded), editable draw.io and native Visio `.vsdx` at the positions on your canvas, plus D2 and Mermaid source.
 - **Polished UX** — resizable panels, light/dark/system themes, live progress with timings, stop at any time (<kbd>Esc</kbd>), keyboard shortcuts, and state that survives reloads.
 
 ## Quick start
@@ -62,19 +62,22 @@ DIAGRAM_AGENT_SESSION_SECRET=<32+ random characters>  # required in production
 ## How it works
 
 ```
-prompt ──► clarify (optional) ──► plan ──► generate D2 (streamed) ──► render (D2 WASM, ELK)
-                                                     ▲                      │
-                                                     │             quality checks (deterministic)
-                                                     │                      │
-                                             refine with findings ◄── vision review (score /10)
+prompt ──► clarify (optional) ──► plan ──► generate D2 (streamed) ──► layout (D2 WASM, ELK) ──► diagram model
+                                                     ▲                                             │
+                                                     │                         quality checks + model renderer
+                                                     │                                             │
+                                             refine with findings ◄──────────────── vision review (score /10)
                                                      │
-                                          best candidate across rounds ──► canvas / editor / export
+                                          best candidate ──► canvas (hand edits, undo) ──► exports
 ```
 
 - **Plan** — an architecture blueprint (components, hierarchy, zones, connections, HA/DR mirroring) plus a deterministic D2 scaffold so the generator refines a complete skeleton instead of dropping components.
 - **Quality checks** — computed from the compiled layout on every render, no model involved. Critical failures (e.g. duplicate nodes created by unqualified connection paths) are fixed before spending a vision review.
 - **Vision review** — the reviewer model looks at a PNG of the diagram (icons and fonts embedded) and scores intent coverage, flow, grouping, routing and style. Pass = 7/10, computed server-side.
 - **Refinement** — review findings plus failed checks are fed back; every refined candidate is rendered and reviewed again, and a regression guard keeps the best one.
+- **Diagram model** — D2 is the layout engine and the language the AI writes, but the app works on a diagram model (nodes, groups, connections, icons, styles and positions) imported from D2's compiled layout. One renderer draws the model for the canvas, the exports and the vision reviewer, so they always match. Hand edits change the model directly and lines re-route around nodes that don't move.
+- **Chat edits keep your layout** — for an edit, the current model is exported to D2, the AI changes it, and the result is merged back by node id: existing items keep their positions, new ones are placed next to what they connect to, and groups grow to make room. New diagrams, *Tidy up* and *Apply suggested fixes* use a fresh full layout (fixes ask first if you've arranged things by hand). Everything is undoable.
+- **Code tab** — shows the D2 and Mermaid generated from the model (read-only), and *Import D2…* opens D2 from elsewhere. Diagrams saved by earlier versions are imported automatically.
 
 Model calls run in isolated, tool-less Copilot sessions (`mode: "empty"`, replaced system prompt, no filesystem or shell access) with their state kept outside your `~/.copilot`.
 
@@ -87,7 +90,7 @@ npx tsc --noEmit
 npm run eval:diagrams     # live end-to-end eval against real Copilot models (see below)
 ```
 
-- **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` renders each with the real D2 engine (no network) and asserts quality score, no critical failures, keyword coverage, and that draw.io/Visio export works.
+- **Diagram fixtures** — `src/test/fixtures/diagrams/*.d2` are real pipeline outputs from the live eval below; each passed the deterministic quality gates (the vision reviewer rated them 6/10). `src/test/diagram-fixtures.test.ts` lays each out with the real D2 engine (no network), imports it into the model, and asserts quality score, no critical failures, that scoring the model matches scoring the compiled layout, keyword coverage (also in the D2 exported from the model), and that draw.io/Visio export works. `src/lib/model/d2-convert.test.ts` round-trips every fixture through D2 export and re-import with the same ids, groups, labels, styles and connections.
 - **Live eval** — `npm run eval:diagrams` runs the full pipeline over [`evals/cases.json`](evals/cases.json) with your Copilot access and writes diagrams, PNGs, reviews and a summary to `eval-output/` (git-ignored). Options: `--cases a,b`, `--model copilot:<model>@<effort>`, `--reviewer …`, `--refinements N`, `--concurrency N`, `--no-review`, `--update-fixtures`.
 
 ### Latest eval (2026-09-28)
@@ -121,6 +124,10 @@ Real pipeline output (golden fixtures), rendered by the app:
 |---|---|
 | ![Review tab](docs/images/app-review-dark.png) | ![Device-code sign-in](docs/images/sign-in.png) |
 
+Editing on the canvas: a selected group with resize handles, the toolbar (undo/redo, add node or group, connect, align, distribute, delete, Tidy up) and the element editor:
+
+![Editable canvas](docs/images/canvas-editing.png)
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -151,14 +158,15 @@ src/
 ├── app/
 │   ├── page.tsx                 # Workspace: top bar, conversation, canvas, inspector
 │   └── api/                     # auth/*, models, clarify, plan, generate (SSE), assess, render, export/*
-├── components/                  # UI (ModelPicker, ConversationPanel, RunCard, DiagramCanvas, Inspector, …)
-├── hooks/                       # useDiagramAgent (conversation + pipeline), useCopilot, useLiveRender, useTheme
+├── components/                  # UI (ModelCanvas, CanvasToolbar, ElementEditor, ConversationPanel, RunCard, Inspector, …)
+├── hooks/                       # useDiagramDocument (model + undo), useDiagramAgent (conversation + pipeline), useCopilot, …
 └── lib/
+    ├── model/                   # diagram model: operations, stable merge, router, renderer, D2 import/export, draw.io/Visio/Mermaid
     ├── llm/                     # Copilot SDK provider, optional Azure provider, model selection
     ├── auth/                    # device flow, sealed session cookie, machine-login policy
     ├── pipeline/                # prompts, server steps, pure refine loop shared by UI and evals
     ├── quality/                 # deterministic diagram scoring
-    ├── d2-render.ts             # D2 WASM rendering
+    ├── d2-render.ts             # D2 WASM compile (automatic layout)
     └── svg-raster.ts            # SVG → PNG with embedded icons and fonts
 evals/                           # live eval cases
 scripts/eval-diagrams.ts         # eval harness
