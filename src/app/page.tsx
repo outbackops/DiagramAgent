@@ -5,9 +5,11 @@ import AccountMenu from "@/components/AccountMenu";
 import ConversationPanel from "@/components/ConversationPanel";
 import type { ComposerHandle } from "@/components/Composer";
 import DeviceFlowDialog from "@/components/DeviceFlowDialog";
+import CanvasToolbar from "@/components/CanvasToolbar";
 import DiagramCanvas from "@/components/DiagramCanvas";
-import ElementEditor, { type SelectedElement } from "@/components/ElementEditor";
+import ElementEditor from "@/components/ElementEditor";
 import Inspector, { type InspectorTab } from "@/components/Inspector";
+import ModelCanvas from "@/components/ModelCanvas";
 import ModelPicker from "@/components/ModelPicker";
 import ResizeHandle from "@/components/ResizeHandle";
 import { phaseLabel } from "@/components/RunCard";
@@ -16,22 +18,18 @@ import SignInGate from "@/components/SignInGate";
 import TopBar from "@/components/TopBar";
 import { Dialog } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/primitives";
-import { ToastProvider } from "@/components/ui/Toast";
+import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { useCopilotSession, useModelChoice } from "@/hooks/useCopilot";
-import { useDiagramAgent } from "@/hooks/useDiagramAgent";
+import { useDiagramAgent, type AgentDocument } from "@/hooks/useDiagramAgent";
+import { LARGE_EDIT, useDiagramDocument } from "@/hooks/useDiagramDocument";
 import { useLiveRender } from "@/hooks/useLiveRender";
+import { useModelQuality } from "@/hooks/useModelQuality";
 import { useTheme } from "@/hooks/useTheme";
 import { useViewportWidth } from "@/hooks/useViewportWidth";
-import {
-  addConnection,
-  deleteConnection,
-  deleteElement,
-  findElementLabel,
-  moveNodeToContainer,
-  parseConnectionPath,
-  updateConnectionLabel,
-  updateElementLabel,
-} from "@/lib/d2-editor";
+import { connect } from "@/lib/model/ops";
+import { modelToMermaid } from "@/lib/model/to-mermaid";
+import type { DiagramModel } from "@/lib/model/types";
+import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
 interface Layout {
@@ -54,28 +52,59 @@ const isLayout = (v: unknown): v is Layout =>
 
 const isTab = (v: unknown): v is InspectorTab => v === "code" || v === "quality" || v === "review";
 
-function connectionLabel(code: string, from: string, to: string): string {
-  for (const line of code.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.includes("->") && trimmed.includes(from) && trimmed.includes(to)) {
-      const match = trimmed.match(/->[^:]*:\s*(.+?)(?:\s*\{|$)/);
-      return match ? match[1].trim() : "";
-    }
-  }
-  return "";
+/** Ids from `ids` that still exist in `model` (nodes or edges). */
+function existingIds(model: DiagramModel | null, ids: string[]): string[] {
+  if (!model || ids.length === 0) return [];
+  const known = new Set<string>([...model.nodes.map((n) => n.id), ...model.edges.map((e) => e.id)]);
+  return ids.filter((id) => known.has(id));
 }
 
 function Workspace() {
   const theme = useTheme();
+  const { toast } = useToast();
   const session = useCopilotSession();
   const choice = useModelChoice(session.catalog);
-  const agent = useDiagramAgent({
-    selection: choice.selection,
-    reviewer: choice.reviewer,
-    reviewerSupportsVision: choice.reviewerSupportsVision,
-  });
+  const doc = useDiagramDocument();
+  const [fitNonce, setFitNonce] = useState(0);
+
+  const tidyUp = useCallback(async () => {
+    await doc.tidyUp();
+    setFitNonce((n) => n + 1);
+  }, [doc]);
+
+  const agentDocument: AgentDocument = {
+    currentCode: () => doc.d2,
+    onKeep: async (code, info) => {
+      const result = await doc.acceptRunCode(code, info.layout);
+      if (result.warnings.length > 0) {
+        toast({ tone: "info", title: "Some parts of the diagram weren't imported", description: result.warnings.slice(0, 3).join(" · ") });
+      }
+      // Stable merges tuck new items in around the existing layout; many of them deserve a fresh layout (R16).
+      if (info.layout === "stable" && result.added + result.regrouped >= LARGE_EDIT) {
+        toast({
+          tone: "info",
+          title: `${result.added + result.regrouped} items were added or moved into new groups`,
+          description: "They were placed around your layout. Tidy up to re-arrange the whole diagram.",
+          action: { label: "Tidy up", onClick: () => void tidyUp().catch((err: unknown) => toast({ tone: "error", title: "Tidy up failed", description: err instanceof Error ? err.message : String(err) })) },
+        });
+      }
+    },
+  };
+  const agent = useDiagramAgent(
+    {
+      selection: choice.selection,
+      reviewer: choice.reviewer,
+      reviewerSupportsVision: choice.reviewerSupportsVision,
+    },
+    agentDocument,
+  );
   const running = agent.busy === "running";
-  const render = useLiveRender(agent.code, running);
+  // New diagrams stream in as a live preview; edits keep showing your layout until the result is merged in.
+  const previewing = running && agent.latestRun?.mode === "create";
+  // Live renders cover new-diagram previews and code that isn't on the canvas yet (e.g. a draft that failed to render).
+  const showLive = previewing || !doc.model;
+  const render = useLiveRender(showLive ? agent.code : "", running);
+  const modelQuality = useModelQuality(doc.model, !previewing && doc.status === "ready");
 
   const [layout, setLayout] = usePersistedState<Layout>("diagramAgent.layout.v2", DEFAULT_LAYOUT, { validate: isLayout });
   const [tab, setTab] = usePersistedState<InspectorTab>("diagramAgent.inspectorTab", "code", { validate: isTab });
@@ -99,20 +128,24 @@ function Workspace() {
     [inspectorFloating, setLayout],
   );
 
-  const [selected, setSelected] = useState<SelectedElement | null>(null);
-  const [connectMode, setConnectMode] = useState(false);
-  const [connectSource, setConnectSource] = useState<string | null>(null);
+  const [selectionState, setSelection] = useState<string[]>([]);
+  const [connectFrom, setConnectFrom] = useState<string | null>(null);
+  const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | undefined>(undefined);
+  const [pendingFixes, setPendingFixes] = useState<ReviewAssessment | null>(null);
+  // Undo, AI edits and deletes can remove selected items; only pass on what still exists.
+  const selection = useMemo(() => existingIds(doc.model, selectionState), [doc.model, selectionState]);
 
   const deselect = useCallback(() => {
-    setSelected(null);
-    setConnectMode(false);
-    setConnectSource(null);
+    setSelection([]);
+    setConnectFrom(null);
   }, []);
 
   const canUseModels = Boolean(session.auth?.signedIn || session.auth?.providers.azure);
   const showGate = !session.loading && !canUseModels;
   const latestRun = agent.latestRun;
-  const fitKey = latestRun?.status === "running" ? `running-${latestRun.id}` : `${latestRun?.id ?? "none"}-${latestRun?.endedAt ?? 0}-${agent.code ? "code" : "empty"}`;
+  const fitKey =
+    latestRun?.status === "running" ? `running-${latestRun.id}` : `${latestRun?.id ?? "none"}-${latestRun?.endedAt ?? 0}-${doc.status}-${fitNonce}`;
+  const canvasModel = previewing ? render.model : (doc.model ?? render.model);
 
   const activePhase = latestRun?.status === "running" ? latestRun.steps.findLast((s) => s.status === "active") : undefined;
   const status =
@@ -136,7 +169,7 @@ function Workspace() {
       const mod = e.ctrlKey || e.metaKey;
       if (e.key === "Escape" && !e.defaultPrevented) {
         if (agent.busy !== "idle") agent.stop();
-        else if (selected || connectMode) deselect();
+        else if (selection.length > 0 || connectFrom) deselect();
       } else if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         composerRef.current?.focus();
@@ -150,88 +183,51 @@ function Workspace() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [agent, connectMode, deselect, selected, setInspectorVisible, setLayout]);
+  }, [agent, connectFrom, deselect, selection.length, setInspectorVisible, setLayout]);
 
-  const onElementClick = useCallback(
-    (path: string, isConnection: boolean) => {
+  /** Hand edits; blocked while a run is changing the diagram (R12). */
+  const applyEdit = useCallback(
+    (op: (model: DiagramModel) => DiagramModel, options?: { coalesceKey?: string }) => {
       if (running) return;
-      if (connectMode && connectSource && path && !isConnection) {
-        agent.setCode(addConnection(agent.code, connectSource, path, ""));
-        deselect();
-        return;
-      }
-      if (!path || selected?.path === path) {
-        deselect();
-        return;
-      }
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        setSelected({
-          path,
-          isConnection: true,
-          connectionFrom: conn?.from,
-          connectionTo: conn?.to,
-          label: conn ? connectionLabel(agent.code, conn.from, conn.to) : "",
-        });
-      } else {
-        setSelected({ path, isConnection: false, label: findElementLabel(agent.code, path) || path.split(".").pop() || path });
-      }
+      doc.apply(op, options);
     },
-    [agent, connectMode, connectSource, deselect, running, selected],
+    [doc, running],
   );
 
-  const onUpdateLabel = useCallback(
-    (path: string, label: string, isConnection: boolean) => {
-      if (running) return;
-      let next: string | null = null;
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        if (conn) next = updateConnectionLabel(agent.code, conn.from, conn.to, label);
-      } else {
-        next = updateElementLabel(agent.code, path, label);
-      }
-      if (next) {
-        agent.setCode(next);
-        setSelected((s) => (s ? { ...s, label } : null));
-      }
+  const onConnect = useCallback(
+    (from: string, to: string) => {
+      applyEdit((model) => connect(model, from, to).model);
+      setConnectFrom(null);
     },
-    [agent, running],
+    [applyEdit],
   );
 
-  const onDeleteElement = useCallback(
-    (path: string, isConnection: boolean) => {
-      if (running) return;
-      if (isConnection) {
-        const conn = parseConnectionPath(path);
-        if (!conn) return;
-        agent.setCode(deleteConnection(agent.code, conn.from, conn.to));
-      } else {
-        agent.setCode(deleteElement(agent.code, path));
-      }
+  const importD2 = useCallback(
+    async (code: string) => {
+      const warnings = await doc.importD2(code);
       deselect();
+      setFitNonce((n) => n + 1);
+      return warnings;
     },
-    [agent, deselect, running],
+    [deselect, doc],
   );
 
-  const onMoveNode = useCallback(
-    (nodePath: string, target: string) => {
-      if (running) return;
-      const next = moveNodeToContainer(agent.code, nodePath, target);
-      if (next) {
-        agent.setCode(next);
-        deselect();
-      }
+  // Reviewer fixes re-arrange the layout (R22): confirm first when it was arranged by hand.
+  const applyReview = useCallback(
+    (assessment: ReviewAssessment) => {
+      if (doc.model?.handArranged) setPendingFixes(assessment);
+      else agent.applyReview(assessment);
     },
-    [agent, deselect, running],
+    [agent, doc.model?.handArranged],
   );
 
   const resizeSidebar = useCallback((dx: number) => setLayout((l) => ({ ...l, sidebarWidth: clamp(l.sidebarWidth + dx, 300, 600) })), [setLayout]);
   const resizeInspector = useCallback((dx: number) => setLayout((l) => ({ ...l, inspectorWidth: clamp(l.inspectorWidth - dx, 320, 820) })), [setLayout]);
 
   const requestNew = useCallback(() => {
-    if (agent.code.trim() || agent.items.length > 0 || agent.busy !== "idle") setConfirmNew(true);
+    if (doc.model || agent.code.trim() || agent.items.length > 0 || agent.busy !== "idle") setConfirmNew(true);
     else agent.reset();
-  }, [agent]);
+  }, [agent, doc.model]);
 
   const openInspector = useCallback(
     (next: InspectorTab) => {
@@ -310,7 +306,7 @@ function Workspace() {
                   busy={agent.busy}
                   clarify={agent.clarify}
                   models={choice.models}
-                  hasDiagram={Boolean(agent.code.trim())}
+                  hasDiagram={Boolean(doc.model?.nodes.length) || Boolean(agent.code.trim())}
                   disabled={session.loading && !session.auth}
                   onSend={agent.send}
                   onStop={agent.stop}
@@ -326,35 +322,71 @@ function Workspace() {
 
         <section aria-label="Diagram" className="relative min-w-0 flex-1">
           <DiagramCanvas
-            code={agent.code}
-            render={render}
+            canvas={
+              canvasModel ? (
+                <ModelCanvas
+                  model={canvasModel}
+                  readOnly={running || !doc.model}
+                  dimmed={running && !previewing}
+                  fitKey={fitKey}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                  onApply={applyEdit}
+                  connectFrom={connectFrom}
+                  onConnect={onConnect}
+                  onRequestRename={(id) => setRenameRequest({ id, nonce: Date.now() })}
+                />
+              ) : null
+            }
+            exportModel={running ? null : doc.model}
+            title={agent.title}
             streaming={running}
             busy={running}
-            title={agent.title}
-            fitKey={fitKey}
+            quality={showLive ? render.quality : modelQuality.quality}
+            qualityLoading={showLive ? render.loading : modelQuality.loading}
             reviewScore={latestRun?.status === "done" ? latestRun.reviewScore : undefined}
-            selectedPath={selected?.path}
-            onElementClick={onElementClick}
-            onMoveNode={onMoveNode}
+            renderError={showLive ? render.error : null}
+            renderErrorKind={showLive ? render.errorKind : null}
+            onRetryRender={render.retry}
             onFixError={agent.fixRenderError}
             onShowCode={() => openInspector("code")}
             onShowQuality={() => openInspector("quality")}
+            toolbar={
+              doc.model && !running ? (
+                <CanvasToolbar
+                  model={doc.model}
+                  selection={selection}
+                  readOnly={running}
+                  canUndo={doc.canUndo}
+                  canRedo={doc.canRedo}
+                  onUndo={doc.undo}
+                  onRedo={doc.redo}
+                  onApply={applyEdit}
+                  onSelectionChange={setSelection}
+                  onStartConnect={setConnectFrom}
+                  onTidyUp={tidyUp}
+                />
+              ) : null
+            }
+            status={
+              doc.status === "migrating" ? (
+                <span className="text-xs text-zinc-500">Opening your saved diagram…</span>
+              ) : doc.error ? (
+                <button type="button" onClick={doc.dismissError} className="text-xs text-rose-600 hover:underline dark:text-rose-300">
+                  {doc.error} (dismiss)
+                </button>
+              ) : null
+            }
             overlay={
               <ElementEditor
-                selected={selected}
-                connectMode={connectMode}
-                onUpdateLabel={onUpdateLabel}
-                onDelete={onDeleteElement}
-                onStartConnect={() => {
-                  if (selected && !selected.isConnection) {
-                    setConnectSource(selected.path);
-                    setConnectMode(true);
-                  }
-                }}
-                onCancelConnect={() => {
-                  setConnectMode(false);
-                  setConnectSource(null);
-                }}
+                model={doc.model}
+                selection={selection}
+                readOnly={running}
+                connectFrom={connectFrom}
+                renameRequest={renameRequest}
+                onApply={applyEdit}
+                onStartConnect={setConnectFrom}
+                onCancelConnect={() => setConnectFrom(null)}
                 onDeselect={deselect}
               />
             }
@@ -376,22 +408,48 @@ function Workspace() {
                 tab={tab}
                 onTabChange={setTab}
                 onClose={() => setInspectorVisible(false)}
-                code={agent.code}
-                onCodeChange={agent.setCode}
-                readOnly={running}
+                d2={doc.d2 || agent.code}
+                mermaid={doc.model ? modelToMermaid(doc.model) : ""}
+                streamingCode={running ? agent.code : null}
                 theme={theme.resolved}
-                quality={render.quality}
-                qualityLoading={render.loading}
+                quality={showLive ? render.quality : modelQuality.quality}
+                qualityLoading={showLive ? render.loading : modelQuality.loading}
                 run={latestRun}
                 models={choice.models}
                 reviewEnabled={agent.settings.review}
-                canApplyReview={agent.busy === "idle" && Boolean(agent.code.trim())}
-                onApplyReview={agent.applyReview}
+                canApplyReview={agent.busy === "idle" && Boolean(doc.model)}
+                onApplyReview={applyReview}
+                onImportD2={importD2}
+                importDisabled={running}
               />
             </div>
           </>
         )}
       </main>
+
+      <Dialog
+        open={pendingFixes !== null}
+        onClose={() => setPendingFixes(null)}
+        title="Apply the suggested fixes?"
+        description="Fixing layout problems re-arranges the diagram, so positions you set by hand will change. You can undo this afterwards."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPendingFixes(null)}>
+              Keep my layout
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const fixes = pendingFixes;
+                setPendingFixes(null);
+                if (fixes) agent.applyReview(fixes);
+              }}
+            >
+              Apply fixes
+            </Button>
+          </>
+        }
+      />
 
       <DeviceFlowDialog open={deviceOpen} onClose={() => setDeviceOpen(false)} onSignedIn={() => void session.refresh()} />
 
@@ -411,6 +469,7 @@ function Workspace() {
                 setConfirmNew(false);
                 deselect();
                 agent.reset();
+                doc.clear();
               }}
             >
               Clear and start over

@@ -82,15 +82,17 @@ describe("D2 compiled import", () => {
     expect(warnings.join("\n")).toContain("Dropped unsafe icon");
   });
 
-  it("orders parents before children and detects containers including empty source blocks", () => {
+  it("orders parents before children; only shapes with children are groups", () => {
     const diagram: CompiledDiagram = {
-      shapes: [shape("A.B"), shape("A"), shape("Empty")],
+      shapes: [shape("A.B"), shape("A"), shape("Styled")],
       connections: [],
     };
-    const { model } = modelFromCompiled(diagram, { code: "Empty: {\n  direction: down\n}\n" });
-    expect(model.nodes.map((node) => node.id)).toEqual(["A", "Empty", "A.B"]);
+    // A block of attributes (icon, class, style…) doesn't make a group in D2; children do.
+    const { model } = modelFromCompiled(diagram, { code: "Styled: {\n  icon: aws-ec2\n  style.fill: red\n}\nA: {\n  B\n}\n" });
+    expect(model.nodes.map((node) => node.id)).toEqual(["A", "Styled", "A.B"]);
     expect(model.nodes.find((node) => node.id === "A")?.container).toBe(true);
-    expect(model.nodes.find((node) => node.id === "Empty")?.container).toBe(true);
+    expect(model.nodes.find((node) => node.id === "Styled")?.container).toBe(false);
+    expect(model.nodes.find((node) => node.id === "A.B")?.container).toBe(false);
   });
 
   it("preserves layout hints from source D2", () => {
@@ -114,6 +116,9 @@ describe("D2 model export/import", () => {
       for (const fixture of fixtureNames) {
         const code = readFileSync(path.join(fixturesDir, fixture), "utf8");
         const first = modelFromCompiled((await compileD2(code)).diagram, { code }).model;
+        const parents = new Set(first.nodes.map((node) => node.parent));
+        for (const node of first.nodes) expect(node.container, `${fixture} ${node.id}`).toBe(parents.has(node.id));
+        expect(first.nodes.some((node) => !node.container), fixture).toBe(true);
         const exported = modelToD2(first);
         const second = modelFromCompiled((await compileD2(exported)).diagram, { code: exported }).model;
         expect(nodeSummary(second), fixture).toEqual(nodeSummary(first));

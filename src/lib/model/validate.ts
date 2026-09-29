@@ -1,3 +1,4 @@
+import { ensureParentsFirst } from "./query";
 import type { Arrowhead, Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, LayoutHints, NodeStyle, Point, Size } from "./types";
 
 /**
@@ -211,19 +212,15 @@ export function validateModel(input: unknown): ValidationResult {
     if (m.version !== 1) fail("unsupported model version");
     if (!Array.isArray(m.nodes) || m.nodes.length > MODEL_LIMITS.nodes) fail(`nodes must be a list of at most ${MODEL_LIMITS.nodes}`);
     if (!Array.isArray(m.edges) || m.edges.length > MODEL_LIMITS.edges) fail(`edges must be a list of at most ${MODEL_LIMITS.edges}`);
-    const nodes = (m.nodes as unknown[]).map(validateNode);
+    const unordered = (m.nodes as unknown[]).map(validateNode);
     const edges = (m.edges as unknown[]).map(validateEdge);
 
     const ids = new Set<string>();
-    for (const n of nodes) {
+    for (const n of unordered) {
       if (ids.has(n.id)) fail(`duplicate node id "${n.id}"`);
       ids.add(n.id);
     }
-    const seen = new Set<string>();
-    for (const n of nodes) {
-      if (n.parent !== null && !seen.has(n.parent)) fail(`node "${n.id}" must come after its parent "${n.parent}"`);
-      seen.add(n.id);
-    }
+    const nodes = ensureParentsFirst(unordered) ?? fail("nodes reference a missing parent or form a cycle");
     const edgeIds = new Set<string>();
     for (const e of edges) {
       if (edgeIds.has(e.id)) fail(`duplicate edge id "${e.id}"`);

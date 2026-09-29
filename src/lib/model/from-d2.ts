@@ -10,7 +10,6 @@ const UNSUPPORTED_SHAPES = new Set(["sequence_diagram", "sql_table", "class", "c
 interface SourceHints {
   modelLayout?: LayoutHints;
   nodeLayouts: Map<string, LayoutHints>;
-  blockNodes: Set<string>;
   warnings: string[];
 }
 
@@ -82,7 +81,7 @@ function setHint(layout: LayoutHints, key: string, value: string): void {
 }
 
 function parseSourceHints(code: string | undefined): SourceHints {
-  const hints: SourceHints = { nodeLayouts: new Map(), blockNodes: new Set(), warnings: [] };
+  const hints: SourceHints = { nodeLayouts: new Map(), warnings: [] };
   if (!code) return hints;
   if (/\b(layers|scenarios|steps)\s*:\s*\{/.test(code)) hints.warnings.push("D2 layers/scenarios/steps are not represented in the diagram model.");
   if (/\bnear\s*:/.test(code) || /\bnear\s*=/.test(code)) hints.warnings.push("D2 near constants are not represented in the diagram model.");
@@ -124,7 +123,6 @@ function parseSourceHints(code: string | undefined): SourceHints {
         if (key) {
           const id = joinPath(stack[stack.length - 1] ?? null, key);
           stack.push(id);
-          hints.blockNodes.add(id);
         }
       }
     }
@@ -205,7 +203,7 @@ export function modelFromCompiled(diagram: CompiledDiagram, options: { code?: st
         icon,
         box: { x: shape.pos.x, y: shape.pos.y, w: shape.width, h: shape.height },
         style: nodeStyle(shape),
-        container: parentIds.has(shape.id) || source.blockNodes.has(shape.id),
+        container: parentIds.has(shape.id),
         labelPosition: shape.labelPosition || undefined,
         iconPosition: shape.iconPosition || undefined,
         labelSize:

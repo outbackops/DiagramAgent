@@ -172,4 +172,34 @@ describe("model operations", () => {
     expect(once.edges[0]?.route).toEqual([]);
     expect(once.edges[1]?.route).toEqual([]);
   });
+
+  it("keeps parents before children when a node is dropped into a group listed after it", () => {
+    const model: DiagramModel = {
+      version: 1,
+      nodes: [
+        { id: "a", parent: null, label: "A", shape: "rectangle", box: { x: 0, y: 0, w: 100, h: 60 }, style: {}, container: false },
+        { id: "g", parent: null, label: "G", shape: "rectangle", box: { x: 300, y: 0, w: 400, h: 300 }, style: {}, container: true },
+        { id: "g.b", parent: "g", label: "B", shape: "rectangle", box: { x: 330, y: 80, w: 100, h: 60 }, style: {}, container: false },
+      ],
+      edges: [],
+    };
+    const { model: next, id } = reparent(model, "a", "g", { x: 500, y: 150 });
+    expect(id).toBe("g.a");
+    const order = next.nodes.map((n) => n.id);
+    expect(order.indexOf("g")).toBeLessThan(order.indexOf("g.a"));
+  });
+
+  it("keeps parents before children when adding an empty group inside a group", () => {
+    const model: DiagramModel = {
+      version: 1,
+      nodes: [
+        { id: "a", parent: null, label: "A", shape: "rectangle", box: { x: 0, y: 0, w: 100, h: 60 }, style: {}, container: false },
+        { id: "g", parent: null, label: "G", shape: "rectangle", box: { x: 300, y: 0, w: 400, h: 300 }, style: {}, container: true },
+      ],
+      edges: [],
+    };
+    const { model: next, id } = addGroup(model, { parent: "g", label: "Inner" });
+    const order = next.nodes.map((n) => n.id);
+    expect(order.indexOf("g")).toBeLessThan(order.indexOf(id));
+  });
 });

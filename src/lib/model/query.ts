@@ -67,6 +67,48 @@ export function leafNodes(model: DiagramModel): DiagramNode[] {
 // ── D2 paths ─────────────────────────────────────────────────────────────
 
 /**
+ * Nodes ordered parents-before-children, as the model requires. Returns the
+ * same array when the order is already valid (sibling order is kept either
+ * way), or null when a parent is missing or the hierarchy has a cycle.
+ */
+export function ensureParentsFirst(nodes: DiagramNode[]): DiagramNode[] | null {
+  const seen = new Set<string>();
+  let valid = true;
+  for (const n of nodes) {
+    if (n.parent !== null && !seen.has(n.parent)) {
+      valid = false;
+      break;
+    }
+    seen.add(n.id);
+  }
+  if (valid) return nodes;
+
+  const ids = new Set(nodes.map((n) => n.id));
+  const children = new Map<string | null, DiagramNode[]>();
+  for (const n of nodes) {
+    if (n.parent !== null && !ids.has(n.parent)) return null;
+    const list = children.get(n.parent);
+    if (list) list.push(n);
+    else children.set(n.parent, [n]);
+  }
+  const ordered: DiagramNode[] = [];
+  const walk = (parent: string | null) => {
+    for (const child of children.get(parent) ?? []) {
+      ordered.push(child);
+      walk(child.id);
+    }
+  };
+  walk(null);
+  // Anything unreachable from the top level sits in a cycle.
+  return ordered.length === nodes.length ? ordered : null;
+}
+
+/** D2-style edge id: `(from -> to)[n]`. */
+export function edgeId(from: string, to: string, n: number): string {
+  return `(${from} -> ${to})[${n}]`;
+}
+
+/**
  * Splits a D2 path into its keys. Keys that contain dots are quoted in D2
  * (`"a.b".c`); quotes are kept on the key so paths round-trip.
  */
@@ -100,11 +142,6 @@ export function keyOf(id: string): string {
 
 export function joinPath(parent: string | null, key: string): string {
   return parent ? `${parent}.${key}` : key;
-}
-
-/** D2-style edge id: `(from -> to)[n]`. */
-export function edgeId(from: string, to: string, n: number): string {
-  return `(${from} -> ${to})[${n}]`;
 }
 
 /** Recomputes edge ids from their endpoints so they stay unique and D2-shaped. */

@@ -64,6 +64,12 @@ const validModel = () => ({
 });
 
 describe("validateModel", () => {
+  it("puts a child listed before its parent back in parents-first order", () => {
+    const result = validateModel({ ...validModel(), nodes: [validModel().nodes[1], validModel().nodes[0], validModel().nodes[2]] });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.model.nodes.map((n) => n.id)).toEqual(["g", "g.a", "b"]);
+  });
+
   it("accepts a well-formed model and drops unknown fields", () => {
     const result = validateModel(validModel());
     expect(result.ok).toBe(true);
@@ -79,7 +85,18 @@ describe("validateModel", () => {
     ["a NaN coordinate", { ...validModel(), nodes: [{ ...validModel().nodes[0], box: { x: NaN, y: 0, w: 1, h: 1 } }] }],
     ["an infinite coordinate", { ...validModel(), nodes: [{ ...validModel().nodes[0], box: { x: 0, y: Infinity, w: 1, h: 1 } }] }],
     ["duplicate ids", { ...validModel(), nodes: [validModel().nodes[0], validModel().nodes[0]], edges: [] }],
-    ["a child before its parent", { ...validModel(), nodes: [validModel().nodes[1], validModel().nodes[0], validModel().nodes[2]] }],
+    ["a missing parent", { ...validModel(), nodes: [{ ...validModel().nodes[1], parent: "ghost" }], edges: [] }],
+    [
+      "a parent cycle",
+      {
+        ...validModel(),
+        nodes: [
+          { ...validModel().nodes[0], id: "x", parent: "y" },
+          { ...validModel().nodes[0], id: "y", parent: "x" },
+        ],
+        edges: [],
+      },
+    ],
     ["an edge to a missing node", { ...validModel(), edges: [{ ...validModel().edges[0], to: "ghost" }] }],
     ["an unknown arrowhead", { ...validModel(), edges: [{ ...validModel().edges[0], dstArrow: "rocket" }] }],
     ["an oversized label", { ...validModel(), nodes: [{ ...validModel().nodes[0], label: "x".repeat(MODEL_LIMITS.labelLength + 1) }], edges: [] }],

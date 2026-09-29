@@ -167,7 +167,17 @@ export interface AgentModels {
   reviewerSupportsVision: boolean;
 }
 
-export function useDiagramAgent(models: AgentModels) {
+/** How a run's result should land on the canvas (R14, R22). */
+export type KeepLayout = "full" | "stable";
+
+export interface AgentDocument {
+  /** D2 of the diagram currently on the canvas ("" when there is none); edit runs start from it. */
+  currentCode: () => string;
+  /** Puts a run's result on the canvas. Rejections are reported in the conversation. */
+  onKeep: (code: string, info: { layout: KeepLayout; status: "done" | "cancelled" | "failed" }) => Promise<unknown> | void;
+}
+
+export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
   const [code, setCode] = usePersistedState<string>("diagramAgent.d2Code", "", { validate: (v): v is string => typeof v === "string" });
   const [items, setItems] = usePersistedState<ChatItem[]>("diagramAgent.chat.v2", [], { validate: isItems });
   const [title, setTitle] = usePersistedState<string>("diagramAgent.title", "Untitled diagram", { validate: (v): v is string => typeof v === "string" });
@@ -177,6 +187,15 @@ export function useDiagramAgent(models: AgentModels) {
   const [clarify, setClarify] = useState<ClarifyState | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const { selection, reviewer, reviewerSupportsVision } = models;
+  const documentRef = useRef(document);
+  useEffect(() => {
+    documentRef.current = document;
+  });
+  /** The diagram edit runs start from: the canvas when there is a document, otherwise the last run's code. */
+  const currentCode = useCallback(() => {
+    const fromDocument = documentRef.current?.currentCode() ?? "";
+    return fromDocument.trim() ? fromDocument : code;
+  }, [code]);
 
   // One-time cleanup after hydration: migrate the old chat format and mark
   // runs that were interrupted by a reload.
@@ -222,7 +241,15 @@ export function useDiagramAgent(models: AgentModels) {
   );
 
   const startRun = useCallback(
-    async (input: { prompt: string; mode: "create" | "edit"; existingCode?: string; history?: ChatTurn[]; analysis?: unknown }) => {
+    async (input: {
+      prompt: string;
+      mode: "create" | "edit";
+      existingCode?: string;
+      history?: ChatTurn[];
+      analysis?: unknown;
+      /** Reviewer fixes re-lay out the diagram instead of keeping positions (R22). */
+      relayout?: boolean;
+    }) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -245,6 +272,15 @@ export function useDiagramAgent(models: AgentModels) {
       // Streaming writes straight into the editor; this is what to put back if the run is stopped or fails.
       const baseline = input.mode === "edit" ? (input.existingCode ?? "") : "";
       if (input.mode === "create") setCode("");
+
+      const layout: KeepLayout = input.mode === "create" || input.relayout ? "full" : "stable";
+      const keep = async (keptCode: string, status: "done" | "cancelled" | "failed") => {
+        try {
+          await documentRef.current?.onKeep(keptCode, { layout, status });
+        } catch (err) {
+          pushItem({ id: newId(), kind: "assistant", text: `Couldn't put the result on the canvas: ${errText(err)}`, at: Date.now(), tone: "warning" });
+        }
+      };
 
       const steps: PipelineSteps = {
         plan: async (prompt, analysis, signal) => (await api.plan(prompt, analysis, selection, signal)).plan,
@@ -294,6 +330,7 @@ export function useDiagramAgent(models: AgentModels) {
           onEvent: (event) => updateRun(run.id, (r) => applyEvent(r, event, Date.now())),
         });
         setCode(result.code);
+        if (result.svg && abortRef.current === controller) await keep(result.code, "done");
         const now = Date.now();
         updateRun(run.id, (r) => ({
           ...r,
@@ -320,6 +357,7 @@ export function useDiagramAgent(models: AgentModels) {
         // when a newer run or a reset has taken over the editor.
         if (abortRef.current === controller) {
           setCode(kept ? kept.code : baseline);
+          if (kept) await keep(kept.code, cancelled ? "cancelled" : "failed");
         }
         updateRun(run.id, (r) => ({
           ...r,
@@ -381,15 +419,16 @@ export function useDiagramAgent(models: AgentModels) {
       if (!prompt || busy !== "idle") return;
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: prompt, at: Date.now() });
-      if (code.trim()) {
-        void startRun({ prompt, mode: "edit", existingCode: code, history: priorRequests() });
+      const existing = currentCode();
+      if (existing.trim()) {
+        void startRun({ prompt, mode: "edit", existingCode: existing, history: priorRequests() });
       } else if (settings.clarify) {
         void askClarify(prompt);
       } else {
         void startRun({ prompt, mode: "create" });
       }
     },
-    [askClarify, busy, code, priorRequests, pushItem, settings.clarify, startRun],
+    [askClarify, busy, currentCode, priorRequests, pushItem, settings.clarify, startRun],
   );
 
   const submitClarify = useCallback(
@@ -424,31 +463,33 @@ export function useDiagramAgent(models: AgentModels) {
       if (run.mode === "create") {
         void startRun({ prompt: run.prompt, mode: "create" });
       } else {
-        void startRun({ prompt: run.prompt, mode: "edit", existingCode: code, history: priorRequests() });
+        void startRun({ prompt: run.prompt, mode: "edit", existingCode: currentCode(), history: priorRequests() });
       }
     },
-    [busy, code, priorRequests, pushItem, startRun],
+    [busy, currentCode, priorRequests, pushItem, startRun],
   );
 
   const fixRenderError = useCallback(
     (message: string) => {
-      if (busy !== "idle" || !code.trim()) return;
+      const existing = currentCode();
+      if (busy !== "idle" || !existing.trim()) return;
       const prompt = `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`;
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Fix the rendering error", at: Date.now() });
-      void startRun({ prompt, mode: "edit", existingCode: code });
+      void startRun({ prompt, mode: "edit", existingCode: existing });
     },
-    [busy, code, pushItem, startRun],
+    [busy, currentCode, pushItem, startRun],
   );
 
   const applyReview = useCallback(
     (assessment: ReviewAssessment) => {
-      if (busy !== "idle" || !code.trim()) return;
+      const existing = currentCode();
+      if (busy !== "idle" || !existing.trim()) return;
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Apply the reviewer's suggested fixes", at: Date.now() });
-      void startRun({ prompt: reviewFixPrompt(assessment, null), mode: "edit", existingCode: code });
+      void startRun({ prompt: reviewFixPrompt(assessment, null), mode: "edit", existingCode: existing, relayout: true });
     },
-    [busy, code, pushItem, startRun],
+    [busy, currentCode, pushItem, startRun],
   );
 
   const reset = useCallback(() => {

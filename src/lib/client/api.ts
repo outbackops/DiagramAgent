@@ -8,6 +8,7 @@ import type {
   ModelsResponse,
 } from "@/lib/api/types";
 import type { ChatTurn, LlmUsage, ModelSelection } from "@/lib/llm/types";
+import type { DiagramModel } from "@/lib/model/types";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 import type { ReviewAssessment } from "@/lib/pipeline/refine-loop";
 
@@ -78,6 +79,10 @@ export interface ClarifyResponseDto {
 export interface RenderResponse {
   svg: string;
   quality: QualityReport | null;
+  /** The imported diagram (present when D2 code was rendered). */
+  model?: DiagramModel;
+  /** Parts of the D2 the model couldn't represent. */
+  warnings?: string[];
 }
 
 // Rendering is deterministic, so identical code renders are shared between
@@ -215,10 +220,12 @@ export const api = {
   assess: (input: { svg: string; prompt: string; d2Code: string }, model: ModelSelection, signal?: AbortSignal) =>
     postJson<{ assessment: ReviewAssessment }>("/api/assess", { ...input, model }, signal),
   render,
+  /** Scores (and renders) an edited model exactly as it is on the canvas. */
+  renderModel: (model: DiagramModel, signal?: AbortSignal) => postJson<RenderResponse>("/api/render", { model }, signal),
   generate,
-  exportPng: (svg: string) => postForBlob("/api/export/png", { svg }),
-  exportDrawio: (d2Code: string, title: string) => postForBlob("/api/export/vsdx", { d2Code, title }),
-  exportVisio: (d2Code: string, title: string) => postForBlob("/api/export/visio", { d2Code, title }),
+  exportPng: (model: DiagramModel) => postForBlob("/api/export/png", { model }),
+  exportDrawio: (model: DiagramModel, title: string) => postForBlob("/api/export/vsdx", { model, title }),
+  exportVisio: (model: DiagramModel, title: string) => postForBlob("/api/export/visio", { model, title }),
 };
 
 export function downloadBlob(blob: Blob, fileName: string) {

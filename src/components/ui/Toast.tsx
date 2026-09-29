@@ -11,6 +11,8 @@ interface ToastItem {
   tone: ToastTone;
   title: string;
   description?: string;
+  /** One follow-up action, e.g. "Tidy up". */
+  action?: { label: string; onClick: () => void };
 }
 
 interface ToastApi {
@@ -41,7 +43,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (t: Omit<ToastItem, "id">) => {
       const id = nextId.current++;
       setItems((all) => [...all.slice(-3), { ...t, id }]);
-      setTimeout(() => dismiss(id), t.tone === "error" ? 7000 : 3500);
+      setTimeout(() => dismiss(id), t.tone === "error" || t.action ? 8000 : 3500);
     },
     [dismiss],
   );
@@ -65,6 +67,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{t.title}</p>
               {t.description && <p className="mt-0.5 break-words text-xs text-zinc-500 dark:text-zinc-400">{t.description}</p>}
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismiss(t.id);
+                    t.action?.onClick();
+                  }}
+                  className="mt-1.5 rounded-md text-xs font-medium text-indigo-600 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 dark:text-indigo-300"
+                >
+                  {t.action.label}
+                </button>
+              )}
             </div>
             <button
               type="button"

@@ -1,5 +1,5 @@
 import { boxesOverlap, bottom, containsBox, polylineHitsBox, right, unionBoxes } from "./geometry";
-import { ancestors, descendants, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, uniqueKey } from "./query";
+import { ancestors, descendants, ensureParentsFirst, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, uniqueKey } from "./query";
 import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point } from "./types";
 
 const GROUP_PADDING = 24;
@@ -214,13 +214,19 @@ export function clearAffectedRoutes(prev: DiagramModel, next: DiagramModel): Dia
   return edges.some((edge, i) => edge !== next.edges[i]) ? { ...next, edges } : next;
 }
 
+/** Reparenting renames nodes in place and new groups are inserted early; restore the parents-first order. */
+function withParentsFirst(model: DiagramModel): DiagramModel {
+  const nodes = ensureParentsFirst(model.nodes);
+  return nodes && nodes !== model.nodes ? { ...model, nodes } : model;
+}
+
 function finalizePositionChange(prev: DiagramModel, draft: DiagramModel): DiagramModel {
-  const grown = growGroupsAndMakeRoom(makeRoomForExplicitGroupGrowth(prev, draft));
+  const grown = growGroupsAndMakeRoom(makeRoomForExplicitGroupGrowth(prev, withParentsFirst(draft)));
   return clearAffectedRoutes(prev, { ...grown, handArranged: true });
 }
 
 function finalizeNonPositionChange(prev: DiagramModel, draft: DiagramModel): DiagramModel {
-  return clearAffectedRoutes(prev, draft);
+  return clearAffectedRoutes(prev, withParentsFirst(draft));
 }
 
 function clampIntoParent(model: DiagramModel, node: DiagramNode, parent: string | null): Point {

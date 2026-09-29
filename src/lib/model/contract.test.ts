@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { boxesOverlap, containsBox, longestSegmentMidpoint, segmentHitsBox, simplifyPolyline, unionBoxes } from "./geometry";
-import { ancestors, descendants, edgeId, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, splitPath, uniqueKey } from "./query";
+import { ancestors, descendants, edgeId, ensureParentsFirst, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, splitPath, uniqueKey } from "./query";
 import type { DiagramEdge, DiagramModel, DiagramNode } from "./types";
 
 const node = (id: string, parent: string | null, box = { x: 0, y: 0, w: 10, h: 10 }, container = false): DiagramNode => ({
@@ -99,6 +99,15 @@ describe("query", () => {
   it("renumbers parallel edges D2-style", () => {
     const edges = renumberEdges([edge("a", "b", "x"), edge("a", "b", "y"), edge("b", "a", "z")]);
     expect(edges.map((e) => e.id)).toEqual(["(a -> b)[0]", "(a -> b)[1]", "(b -> a)[0]"]);
+  });
+
+  it("orders parents first, keeping valid input untouched", () => {
+    const valid = [node("a", null), node("a.b", "a"), node("c", null)];
+    expect(ensureParentsFirst(valid)).toBe(valid);
+    const shuffled = [node("a.b.c", "a.b"), node("x", null), node("a.b", "a"), node("a", null)];
+    expect(ensureParentsFirst(shuffled)?.map((n) => n.id)).toEqual(["x", "a", "a.b", "a.b.c"]);
+    expect(ensureParentsFirst([node("a.b", "missing")])).toBeNull();
+    expect(ensureParentsFirst([node("p", "q"), node("q", "p")])).toBeNull();
   });
 
   it("derives unique D2 keys from labels", () => {

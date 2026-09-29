@@ -44,22 +44,26 @@ function layoutLines(layout: LayoutHints | undefined): string[] {
   return lines;
 }
 
+// Values equal to D2's own defaults are left out: the export stays short for
+// the AI to read and edit, and D2 compiles them back to the same values.
+const isDefault = (value: StyleValue | undefined, fallback: StyleValue) => value === fallback;
+
 function nodeStyleProps(style: NodeStyle): Record<string, StyleValue> {
   const props: Record<string, StyleValue> = {};
   if (isSet(style.fill)) props["style.fill"] = style.fill!;
   if (isSet(style.stroke)) props["style.stroke"] = style.stroke!;
   if (isSet(style.strokeWidth)) props["style.stroke-width"] = style.strokeWidth!;
-  if (isSet(style.strokeDash)) props["style.stroke-dash"] = style.strokeDash!;
+  if (isSet(style.strokeDash) && !isDefault(style.strokeDash, 0)) props["style.stroke-dash"] = style.strokeDash!;
   if (isSet(style.borderRadius)) props["style.border-radius"] = style.borderRadius!;
-  if (isSet(style.opacity)) props["style.opacity"] = style.opacity!;
-  if (isSet(style.shadow)) props["style.shadow"] = style.shadow!;
-  if (isSet(style.multiple)) props["style.multiple"] = style.multiple!;
-  if (isSet(style.doubleBorder)) props["style.double-border"] = style.doubleBorder!;
+  if (isSet(style.opacity) && !isDefault(style.opacity, 1)) props["style.opacity"] = style.opacity!;
+  if (style.shadow) props["style.shadow"] = true;
+  if (style.multiple) props["style.multiple"] = true;
+  if (style.doubleBorder) props["style.double-border"] = true;
   if (isSet(style.fontSize)) props["style.font-size"] = style.fontSize!;
   if (isSet(style.fontColor)) props["style.font-color"] = style.fontColor!;
   if (isSet(style.bold)) props["style.bold"] = style.bold!;
-  if (isSet(style.italic)) props["style.italic"] = style.italic!;
-  if (isSet(style.underline)) props["style.underline"] = style.underline!;
+  if (style.italic) props["style.italic"] = true;
+  if (style.underline) props["style.underline"] = true;
   return props;
 }
 
@@ -67,13 +71,13 @@ function edgeStyleProps(style: EdgeStyle): Record<string, StyleValue> {
   const props: Record<string, StyleValue> = {};
   if (isSet(style.stroke)) props["style.stroke"] = style.stroke!;
   if (isSet(style.strokeWidth)) props["style.stroke-width"] = style.strokeWidth!;
-  if (isSet(style.strokeDash)) props["style.stroke-dash"] = style.strokeDash!;
-  if (isSet(style.opacity)) props["style.opacity"] = style.opacity!;
+  if (isSet(style.strokeDash) && !isDefault(style.strokeDash, 0)) props["style.stroke-dash"] = style.strokeDash!;
+  if (isSet(style.opacity) && !isDefault(style.opacity, 1)) props["style.opacity"] = style.opacity!;
   if (isSet(style.borderRadius)) props["style.border-radius"] = style.borderRadius!;
   if (isSet(style.fontSize)) props["style.font-size"] = style.fontSize!;
   if (isSet(style.fontColor)) props["style.font-color"] = style.fontColor!;
-  if (isSet(style.bold)) props["style.bold"] = style.bold!;
-  if (isSet(style.italic)) props["style.italic"] = style.italic!;
+  if (style.bold) props["style.bold"] = true;
+  if (style.italic) props["style.italic"] = true;
   return props;
 }
 

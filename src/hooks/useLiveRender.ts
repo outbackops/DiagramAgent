@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isD2SyntaxError } from "@/lib/client/api";
+import type { DiagramModel } from "@/lib/model/types";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 
 interface RenderSnapshot {
   svg: string;
   quality: QualityReport | null;
+  /** The rendered code as a diagram model, for the canvas. */
+  model: DiagramModel | null;
   error: string | null;
   /** "syntax": the D2 doesn't compile. "unavailable": the renderer couldn't be used (busy, offline, signed out). */
   errorKind: "syntax" | "unavailable" | null;
@@ -20,7 +23,7 @@ export interface LiveRenderState extends RenderSnapshot {
   retry: () => void;
 }
 
-const EMPTY: RenderSnapshot = { svg: "", quality: null, error: null, errorKind: null, loading: false, renderedCode: "" };
+const EMPTY: RenderSnapshot = { svg: "", quality: null, model: null, error: null, errorKind: null, loading: false, renderedCode: "" };
 
 /**
  * Debounced server render of whatever code is on screen. While a model is
@@ -46,7 +49,7 @@ export function useLiveRender(code: string, streaming: boolean): LiveRenderState
       try {
         const result = await api.render(code, controller.signal);
         if (id !== requestId.current) return;
-        setState({ svg: result.svg, quality: result.quality, error: null, errorKind: null, loading: false, renderedCode: code });
+        setState({ svg: result.svg, quality: result.quality, model: result.model ?? null, error: null, errorKind: null, loading: false, renderedCode: code });
       } catch (err) {
         if (controller.signal.aborted || id !== requestId.current) return;
         const message = err instanceof Error ? err.message : String(err);
