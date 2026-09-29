@@ -48,7 +48,9 @@ describe("seal / unseal", () => {
   it("rejects tampering", () => {
     const sealed = seal({ a: 1 }, "session");
     const parts = sealed.split(".");
-    parts[2] = parts[2].slice(0, -2) + (parts[2].endsWith("A") ? "B" : "A") + parts[2].slice(-1);
+    // Flip the second-to-last character: its bits are always part of the decoded bytes (the last may be padding).
+    const i = parts[2].length - 2;
+    parts[2] = parts[2].slice(0, i) + (parts[2][i] === "A" ? "B" : "A") + parts[2].slice(i + 1);
     expect(unseal(parts.join("."), "session")).toBeNull();
     expect(unseal("garbage", "session")).toBeNull();
     expect(unseal(null, "session")).toBeNull();
