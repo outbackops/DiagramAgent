@@ -219,6 +219,15 @@ export const iconRegistry: Record<string, IconEntry> = {
   "container": { url: `${ICONIFY_MDI}/package-variant-closed.svg?color=%23666`, label: "Container", category: "general" },
 };
 
+/**
+ * Service keys whose icon is only the provider's logo, because no licensed service icon is vendored
+ * (most Google Cloud services). Drawing that logo on every service makes them indistinguishable, so
+ * the Architecture renderer draws a labelled tile for these instead.
+ */
+export function isPlaceholderIcon(key: string | undefined): boolean {
+  return Boolean(key && key !== "gcp" && iconRegistry[key]?.url === `${ICONIFY}/google-cloud.svg`);
+}
+
 // Resolve an icon key to a URL.
 // Prefers vendored local copy under /icons/ when the build has run
 // `npm run vendor:icons` (manifest at public/icons/manifest.json).

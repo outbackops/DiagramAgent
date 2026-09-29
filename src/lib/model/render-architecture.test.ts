@@ -57,6 +57,21 @@ describe("renderArchitectureSvg", () => {
     expect(svg).not.toContain('href="undefined"');
   });
 
+  it("draws services whose only icon is the provider's logo as distinct tiles", async () => {
+    const { model } = await composeArchitecture({
+      title: "Analytics",
+      platform: "gcp",
+      items: [{ id: "bq", name: "BigQuery", icon: "gcp-bigquery" }, { id: "ps", name: "Pub Sub", icon: "gcp-pubsub" }, { id: "run", name: "Cloud Run", icon: "gcp-cloud-run" }],
+      connections: [{ from: "ps", to: "bq" }, { from: "run", to: "ps" }],
+    });
+    const svg = renderModelSvg(model);
+    expect(svg).not.toContain('href="/icons/gcp-bigquery.svg"');
+    expect(svg).toContain(">B<");
+    expect(svg).toContain(">PS<");
+    // A real service icon still draws as the icon.
+    expect(svg).toContain('href="/icons/gcp-cloud-run.svg"');
+  });
+
   it("shows no legend for one line style and no steps", async () => {
     const { model } = await composeArchitecture({ title: "Plain", items: [{ id: "a", name: "A" }, { id: "b", name: "B" }], connections: [{ from: "a", to: "b" }] });
     expect(renderModelSvg(model)).not.toContain('data-page="legend"');

@@ -1,3 +1,4 @@
+import { isPlaceholderIcon } from "@/lib/icon-registry";
 import { componentGeom } from "@/lib/arch/measure";
 import { overlayGeometries } from "@/lib/arch/overlays";
 import { assumptionsBlock, legendBlock, overlayTag, titleBlock, workflowBlock, type PageBlock } from "@/lib/arch/page";
@@ -176,7 +177,9 @@ function renderComponent(node: DiagramNode, pack: StylePack): string {
   if (pack.node.cardFill) parts.push(`<rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" rx="2" fill="${attr(pack.node.cardFill)}" stroke="${attr(pack.node.cardStroke ?? "none")}" stroke-width="0.75"/>`);
   const cx = box.x + box.w / 2;
   const iconY = box.y + S.nodePadTop;
-  if (node.icon) parts.push(`<image href="${attr(node.icon)}" x="${num(cx - S.icon / 2)}" y="${num(iconY)}" width="${S.icon}" height="${S.icon}" preserveAspectRatio="xMidYMid meet"/>`);
+  // A service whose icon is only its provider's logo gets a labelled tile, so services stay distinguishable.
+  const iconKey = node.arch?.iconKey ?? node.icon?.match(/^\/icons\/([a-z0-9-]+)\.svg$/)?.[1];
+  if (node.icon && !isPlaceholderIcon(iconKey)) parts.push(`<image href="${attr(node.icon)}" x="${num(cx - S.icon / 2)}" y="${num(iconY)}" width="${S.icon}" height="${S.icon}" preserveAspectRatio="xMidYMid meet"/>`);
   else parts.push(genericIcon(node.label, cx, iconY, pack));
   let y = iconY + S.icon + S.iconGap;
   for (const line of geom.lines) {
