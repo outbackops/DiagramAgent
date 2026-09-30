@@ -134,4 +134,16 @@ describe("step marks and overlay tags", () => {
     const tag = (name: string) => overlayTag({ name, kind: "scaling-group" });
     expect([tag("EC2 Auto Scaling group"), tag("Auto Scaling group"), tag("VM Scale Set"), tag("Web")]).toEqual(["ASG", "ASG", "VMSS", "Web"]);
   });
+
+  it("lists a group tagged in several places once in the legend", async () => {
+    const { legendBlock } = await import("./page");
+    const overlay = (id: string, name: string) => ({ id, kind: "scaling-group" as const, name, members: [] });
+    const block = legendBlock({
+      meanings: ["request"],
+      sequences: [],
+      taggedOverlays: [overlay("web-aa", "Regional MIG (web)"), overlay("app-aa", "Regional MIG (app)"), overlay("web-bb", "Regional MIG (web)"), overlay("app-bb", "Regional MIG (app)")],
+    });
+    expect(block?.swatches.filter((s) => s.kind === "tag")).toHaveLength(2);
+    expect(block?.runs.map((r) => r.text)).toEqual(["Legend", "Regional MIG (web)", "Regional MIG (app)"]);
+  });
 });

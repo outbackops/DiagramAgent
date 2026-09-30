@@ -94,7 +94,7 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
   if (shape !== "text" && shape !== "image") {
     if (node.style.multiple) parts.push(renderShape(node, group, translateBox(node.box, 8, 8), "opacity=\"0.28\""));
     parts.push(renderShape(node, group, node.box, node.style.shadow ? `filter="url(#${idPrefix}-shadow)"` : ""));
-    if (node.style.doubleBorder) parts.push(renderShape(node, group, insetBox(node.box, 5), "fill=\"none\""));
+    if (node.style.doubleBorder) parts.push(renderShape(node, group, insetBox(node.box, 5), "", "none"));
   }
   const icon = safeIconHref(node.icon);
   if (icon) {
@@ -106,14 +106,15 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
   return parts.join("");
 }
 
-function renderShape(node: DiagramNode, group: boolean, box: Box, extra: string): string {
+/** `fill` replaces the node's fill (the inner outline of a double border is unfilled); one fill attribute, or XML parsers reject the SVG. */
+function renderShape(node: DiagramNode, group: boolean, box: Box, extra: string, fill?: string): string {
   const style = node.style;
-  const fill = style.fill === undefined ? "transparent" : resolveColor(style.fill);
+  const fillColor = fill ?? (style.fill === undefined ? "transparent" : resolveColor(style.fill));
   const stroke = resolveColor(style.stroke ?? (group ? "#757575" : DEFAULT_STROKE));
   const sw = style.strokeWidth ?? (group ? 2 : 1);
   const attrs = [
     `stroke="${escAttr(stroke)}"`,
-    `fill="${escAttr(fill)}"`,
+    `fill="${escAttr(fillColor)}"`,
     `stroke-width="${num(sw)}"`,
     dashAttr(style.strokeDash),
     opacityAttr(style.opacity),

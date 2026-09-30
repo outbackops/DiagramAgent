@@ -159,8 +159,13 @@ export function legendBlock(input: LegendInput): PageBlock | null {
     w = Math.max(w, sample + 10 + measureText(label, T.body));
     y += rowH;
   });
+  // One row per tag and name: the same group tagged in two regions is one legend entry.
+  const listed = new Set<string>();
   for (const overlay of input.taggedOverlays) {
     const tag = overlayTag(overlay);
+    const key = `${tag}\u0000${overlay.name}`;
+    if (listed.has(key)) continue;
+    listed.add(key);
     block.swatches.push({ kind: "tag", text: tag, x: 0, y: y + rowH / 2 });
     block.runs.push({ text: overlay.name, x: sample + 10, y: y + rowH / 2 + 4, style: T.body, tone: "text" });
     w = Math.max(w, sample + 10 + measureText(overlay.name, T.body));
