@@ -46,6 +46,19 @@ Open http://localhost:3000, pick an example (or describe your own system), and w
 
 No `.env` file is needed for local use. See [`.env.example`](.env.example) for everything you *can* configure.
 
+### Try the styles
+
+Choose the style under **Generation settings** (the gear icon) → **Diagram style**: *Auto* (the default), *Architecture*, *Poster* or *Graph*. Then paste a prompt. Some to start with:
+
+| Style | Prompt to try | Look for |
+|---|---|---|
+| Architecture | *Multi-region web application on Google Cloud … two regions side by side, each with the same three tiers drawn as boxes …* | the regions mirrored, with web, app and database tiers lined up |
+| Architecture | *Create an AWS three-tier web application architecture diagram … across two Availability Zones …* | zones as a grid, one load balancer |
+| Poster | *Customer onboarding journey for a digital bank, from sign-up to first payment …* | lanes, lettered flows, a timing on each card |
+| Graph | *State machine for an online order: created, paid, packed, shipped and delivered …* | D2's automatic layout |
+
+The full prompts are in [docs/sample-prompts.md](docs/sample-prompts.md): 14 across the styles, with what to look for in each, follow-up edits, and how to open the exact specs behind the images in this README.
+
 ## Signing in and model access
 
 DiagramAgent talks to models through the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). Copilot entitlements belong to a GitHub identity, so there are two ways a request can run:
