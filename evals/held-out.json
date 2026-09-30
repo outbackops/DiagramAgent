@@ -1,0 +1,79 @@
+[
+  {
+    "id": "held-hybrid-existing",
+    "title": "Existing hybrid estate (no address ranges given)",
+    "prompt": "Draw our existing hybrid setup. Our on-premises datacenter runs SQL Server and an Active Directory domain. It connects to Azure over ExpressRoute into a hub VNet with Azure Firewall. A spoke VNet runs AKS for the customer portal, which calls the on-premises SQL Server through the firewall. We don't know the address ranges.",
+    "expect": {
+      "keywords": [["expressroute"], ["firewall"], ["aks", "kubernetes"], ["sql"], ["active directory", "domain"]],
+      "minNodes": 5,
+      "components": [["sql"], ["active directory", "domain"], ["expressroute"], ["firewall"], ["aks", "kubernetes"]],
+      "boundaries": [["on-prem", "on prem", "datacenter"], ["hub"], ["spoke"]],
+      "flows": [[["on-prem", "on prem", "datacenter", "expressroute"], ["hub", "firewall", "expressroute"]], [["aks", "portal", "spoke"], ["firewall", "hub"]]],
+      "prohibited": ["aws", "gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "held-multi-cloud-dr",
+    "title": "AWS primary with Azure disaster recovery",
+    "prompt": "Multi-cloud web platform: the primary runs on AWS (CloudFront, an Application Load Balancer, ECS on Fargate, Aurora PostgreSQL) and disaster recovery runs on Azure (Front Door, Azure Container Apps, Azure Database for PostgreSQL). Route 53 fails traffic over between the clouds, and the database replicates nightly from Aurora to Azure. Show each cloud in its own conventions.",
+    "expect": {
+      "keywords": [["cloudfront"], ["fargate", "ecs"], ["aurora"], ["front door"], ["container apps"], ["postgres"], ["route 53"]],
+      "minNodes": 7,
+      "components": [["cloudfront"], ["load balancer", "alb"], ["fargate", "ecs"], ["aurora"], ["front door"], ["container apps"], ["postgres"], ["route 53"]],
+      "boundaries": [["aws"], ["azure"]],
+      "flows": [[["aurora"], ["postgres", "azure"]], [["route 53", "dns"], ["cloudfront", "front door"]]],
+      "prohibited": ["gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "held-software-no-cloud",
+    "title": "Software architecture without a cloud provider",
+    "prompt": "A software architecture with no cloud provider: a React single-page app talks to a GraphQL gateway. Behind it sit an order service, a catalog service and a pricing service that talk to each other over gRPC. The order service publishes OrderPlaced events to a message bus; a notification worker consumes them and sends emails through an SMTP relay. Each service owns its database. Show the request path and the event path.",
+    "expect": {
+      "keywords": [["graphql"], ["order"], ["catalog"], ["pricing"], ["grpc"], ["notification"], ["smtp", "email"]],
+      "minNodes": 8,
+      "components": [["react", "spa", "single-page", "single page"], ["graphql"], ["order"], ["catalog"], ["pricing"], ["bus", "broker", "queue"], ["notification"], ["smtp", "email"]],
+      "flows": [[["react", "spa", "single-page", "single page", "browser"], ["graphql"]], [["graphql"], ["order", "catalog", "pricing"]], [["order"], ["bus", "broker", "queue"]], [["bus", "broker", "queue"], ["notification"]], [["notification"], ["smtp", "email"]]],
+      "prohibited": ["aws", "azure", "gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "held-unusual-shared-services",
+    "title": "Regulated web platform with many shared services",
+    "prompt": "Azure web platform for a regulated bank: users reach App Service through Application Gateway; the app uses Azure SQL Database through a private endpoint, all in a spoke VNet. Every workload also relies on shared services: Microsoft Sentinel, Defender for Cloud, Azure Policy, a Key Vault Managed HSM, Azure Monitor with Log Analytics, and Microsoft Purview. Keep the shared services out of the way of the request flow and don't draw a line from every component to each of them.",
+    "expect": {
+      "keywords": [["sentinel"], ["defender"], ["policy"], ["purview"], ["log analytics"], ["hsm"]],
+      "minNodes": 9,
+      "components": [["application gateway"], ["app service"], ["sql"], ["private endpoint"], ["sentinel"], ["defender"], ["policy"], ["hsm"], ["monitor"], ["log analytics"], ["purview"]],
+      "boundaries": [["spoke", "vnet", "virtual network"], ["shared"]],
+      "flows": [[["users", "user", "client", "internet"], ["application gateway"]], [["application gateway"], ["app service"]], [["app service"], ["sql", "private endpoint"]]],
+      "prohibited": ["aws", "gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "held-three-tier-reversed",
+    "title": "AWS web stack described bottom-up (perturbed)",
+    "prompt": "Diagram this AWS web stack, described from the database up: an Amazon Aurora MySQL cluster with a replica in a second Availability Zone, fronted by EC2 app servers in an Auto Scaling group, behind an internet-facing Application Load Balancer, behind a CloudFront distribution with AWS WAF. DNS is Route 53. The app and database tiers live in private subnets.",
+    "expect": {
+      "keywords": [["aurora"], ["ec2", "auto scaling"], ["load balancer", "alb"], ["cloudfront"], ["waf"], ["route 53"]],
+      "minNodes": 7,
+      "components": [["aurora"], ["ec2", "auto scaling"], ["load balancer", "alb"], ["cloudfront"], ["waf"], ["route 53"]],
+      "boundaries": [["vpc"], ["private"], ["availability zone", "az"]],
+      "flows": [[["cloudfront", "waf"], ["load balancer", "alb"]], [["load balancer", "alb"], ["ec2", "auto scaling"]], [["ec2", "auto scaling"], ["aurora"]]],
+      "prohibited": ["azure", "gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "held-hub-spoke-terse",
+    "title": "Terse existing hub-and-spoke (perturbed)",
+    "prompt": "Our current network: a hub VNet with Azure Firewall and a VPN gateway to the office, and two spokes peered to the hub, one running AKS and one running an App Service Environment. That's all; draw it.",
+    "expect": {
+      "keywords": [["hub"], ["firewall"], ["vpn"], ["aks", "kubernetes"], ["app service"], ["peer"]],
+      "minNodes": 5,
+      "components": [["firewall"], ["vpn"], ["aks", "kubernetes"], ["app service"]],
+      "boundaries": [["hub"], ["spoke"]],
+      "flows": [[["office", "on-prem", "on prem", "corporate", "branch", "vpn"], ["vpn", "hub", "gateway"]]],
+      "prohibited": ["aws", "gcp", "google cloud"]
+    }
+  }
+]

@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../../_test-helpers";
 
 vi.mock("@/lib/model/to-vsdx", () => ({
-  modelToVsdx: async () => Buffer.from("PK\x03\x04fake-vsdx-zip"),
+  modelToVsdxResult: async (model: { kind?: string }) => ({
+    content: Buffer.from("PK\x03\x04fake-vsdx-zip"),
+    warnings: model.kind === "architecture" ? ["architecture warning"] : [],
+  }),
 }));
 
 const MODEL = {
@@ -59,7 +62,7 @@ describe("POST /api/export/visio", () => {
   it("returns 500 with error JSON when conversion throws", async () => {
     vi.resetModules();
     vi.doMock("@/lib/model/to-vsdx", () => ({
-      modelToVsdx: async () => {
+      modelToVsdxResult: async () => {
         throw new Error("conversion exploded");
       },
     }));
@@ -68,6 +71,19 @@ describe("POST /api/export/visio", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toMatch(/conversion exploded/);
+  });
+
+  it("returns export warnings in a response header", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/model/to-vsdx", () => ({
+      modelToVsdxResult: async (model: { kind?: string }) => ({
+        content: Buffer.from("PK\x03\x04fake-vsdx-zip"),
+        warnings: model.kind === "architecture" ? ["architecture warning"] : [],
+      }),
+    }));
+    const { POST } = await import("./route");
+    const res = await POST(makeJsonRequest({ model: { ...MODEL, kind: "architecture" } }));
+    expect(JSON.parse(decodeURIComponent(res.headers.get("X-Export-Warnings") ?? ""))).toEqual(["architecture warning"]);
   });
 
   it("requires credentials in production", async () => {

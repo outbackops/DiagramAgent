@@ -1,6 +1,8 @@
+import { boundaryMinWidth, componentGeom } from "@/lib/arch/measure";
+import { setArchTitle } from "@/lib/arch/title";
 import { boxesOverlap, bottom, containsBox, polylineHitsBox, right, unionBoxes } from "./geometry";
 import { ancestors, descendants, ensureParentsFirst, indexModel, isGroup, isWithin, joinPath, keyOf, renumberEdges, uniqueKey } from "./query";
-import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point } from "./types";
+import type { Box, DiagramEdge, DiagramModel, DiagramNode, EdgeStyle, NodeStyle, Point, Size } from "./types";
 
 const GROUP_PADDING = 24;
 const GROUP_GAP = 40;
@@ -203,6 +205,28 @@ function labelMinWidth(node: DiagramNode, label: string): number {
   return (node.style.fontSize ?? 16) * 0.6 * label.length + 24;
 }
 
+/**
+ * The smallest box an Architecture node's text needs (name, detail line, header facts), measured
+ * like the layout measures it; undefined for other nodes.
+ */
+export function archFitSize(node: DiagramNode, label = node.label): Size | undefined {
+  if (node.generated) return undefined;
+  if (node.role === "service") {
+    const geom = componentGeom({ type: "component", id: node.arch?.id ?? node.id, name: label, detail: node.arch?.detail, icon: node.arch?.iconKey });
+    return { w: geom.w, h: geom.h };
+  }
+  if (node.role === "boundary") return { w: boundaryMinWidth({ name: label, facts: node.arch?.facts }), h: node.box.h };
+  return undefined;
+}
+
+/** Grows a node to at least `size` (its text got longer), grows its groups to match and re-routes what moved. */
+export function growNodeToFit(model: DiagramModel, id: string, size: Size): DiagramModel {
+  const node = indexModel(model).byId.get(id);
+  if (!node || (node.box.w >= size.w && node.box.h >= size.h)) return model;
+  const draft = cloneWithNode(model, id, (item) => ({ ...item, box: { ...item.box, w: Math.max(item.box.w, size.w), h: Math.max(item.box.h, size.h) } }));
+  return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft, [id]));
+}
+
 function routeIgnores(index: ReturnType<typeof indexModel>, edge: DiagramEdge, boxId: string): boolean {
   return boxId === edge.from || boxId === edge.to || ancestors(index, edge.from).some((node) => node.id === boxId) || ancestors(index, edge.to).some((node) => node.id === boxId);
 }
@@ -216,10 +240,11 @@ export function clearAffectedRoutes(prev: DiagramModel, next: DiagramModel): Dia
   });
   if (changedBoxes.length === 0) return next;
   const changedIds = new Set(changedBoxes.map((node) => node.id));
-  // A re-routed line needs its label placed again, so the old label spot goes with the old route.
+  // A re-routed line needs its label and badges placed again, so their old spots go with the old route.
   const unrouted = (edge: DiagramEdge): DiagramEdge => {
     const next = { ...edge, route: [] };
     delete next.labelAt;
+    if (next.badges) next.badges = next.badges.map(({ sequence, number }) => ({ sequence, number }));
     return next;
   };
   const edges = next.edges.map((edge) => {
@@ -363,8 +388,14 @@ export function placeNear(model: DiagramModel, id: string, anchorIds: string[]):
   return translateRoot(model, id, fallback.x, fallback.y);
 }
 
+/** Architecture page projections (title, workflow, legend, assumptions) are regenerated, never edited as shapes. */
+function editableIds(model: DiagramModel, ids: string[]): string[] {
+  const generated = new Set(model.nodes.filter((n) => n.generated).map((n) => n.id));
+  return generated.size ? ids.filter((id) => !generated.has(id)) : ids;
+}
+
 export function moveItems(model: DiagramModel, ids: string[], dx: number, dy: number): DiagramModel {
-  const roots = minimalRootIds(model, ids);
+  const roots = minimalRootIds(model, editableIds(model, ids));
   const moved = subtreeIds(model, roots);
   const draft = shiftNodeIds(model, moved, dx, dy);
   return finalizePositionChange(model, draft);
@@ -373,7 +404,7 @@ export function moveItems(model: DiagramModel, ids: string[], dx: number, dy: nu
 export function reparent(model: DiagramModel, id: string, newParent: string | null, at?: Point): { model: DiagramModel; id: string } {
   const index = indexModel(model);
   const node = index.byId.get(id);
-  if (!node) return { model, id };
+  if (!node || node.generated || (newParent !== null && index.byId.get(newParent)?.generated)) return { model, id };
   if (newParent !== null && (!isGroup(index, newParent) || isWithin(index, newParent, id))) return { model, id };
   const siblingKeys = siblingNodes(model, newParent).filter((sibling) => sibling.id !== id).map((sibling) => keyOf(sibling.id));
   const key = uniqueKey(keyOf(id), siblingKeys);
@@ -412,6 +443,7 @@ export function resizeGroup(model: DiagramModel, id: string, box: Box): DiagramM
 }
 
 export function deleteItems(model: DiagramModel, ids: string[]): DiagramModel {
+  ids = editableIds(model, ids);
   const nodeIds = ids.filter((id) => indexModel(model).byId.has(id));
   const deleting = subtreeIds(model, nodeIds);
   const edgeIds = new Set(ids.filter((id) => indexModel(model).edgeById.has(id)));
@@ -426,9 +458,11 @@ export function deleteItems(model: DiagramModel, ids: string[]): DiagramModel {
 export function renameItem(model: DiagramModel, id: string, label: string): DiagramModel {
   const index = indexModel(model);
   const node = index.byId.get(id);
+  if (node?.generated) return node.role === "title" ? setArchTitle(model, label) : model;
   if (node) {
-    const minWidth = labelMinWidth(node, label);
-    const draft = cloneWithNode(model, id, (item) => ({ ...item, label, box: { ...item.box, w: Math.max(item.box.w, minWidth) } }));
+    // Architecture nodes are measured like the layout measures them (the name wraps to two lines).
+    const fit = archFitSize(node, label) ?? { w: labelMinWidth(node, label), h: node.box.h };
+    const draft = cloneWithNode(model, id, (item) => ({ ...item, label, box: { ...item.box, w: Math.max(item.box.w, fit.w), h: Math.max(item.box.h, fit.h) } }));
     return finalizeNonPositionChange(model, growGroupsAndMakeRoom(draft, [id]));
   }
   const edge = index.edgeById.get(id);
@@ -529,14 +563,14 @@ export function addGroup(model: DiagramModel, opts: AddGroupOptions): { model: D
 export function connect(model: DiagramModel, from: string, to: string, label?: string): { model: DiagramModel; id: string } {
   if (from === to) return { model, id: "" };
   const index = indexModel(model);
-  if (!index.byId.has(from) || !index.byId.has(to)) return { model, id: "" };
+  if (!index.byId.has(from) || !index.byId.has(to) || index.byId.get(from)?.generated || index.byId.get(to)?.generated) return { model, id: "" };
   const style = commonBy(model.edges.map((edge) => edge.style), DEFAULT_EDGE_STYLE);
   const [edge] = renumberEdges([...model.edges, { id: "", from, to, label, srcArrow: "none", dstArrow: "triangle", style, route: [] }]).slice(-1);
   return { model: { ...model, edges: [...model.edges, edge] }, id: edge.id };
 }
 
 export function alignItems(model: DiagramModel, ids: string[], mode: AlignMode): DiagramModel {
-  const roots = minimalRootIds(model, ids);
+  const roots = minimalRootIds(model, editableIds(model, ids));
   const index = indexModel(model);
   const nodes = roots.map((id) => index.byId.get(id)).filter((node): node is DiagramNode => Boolean(node));
   if (nodes.length < 2) return model;
@@ -551,7 +585,7 @@ export function alignItems(model: DiagramModel, ids: string[], mode: AlignMode):
 }
 
 export function distributeItems(model: DiagramModel, ids: string[], axis: Axis): DiagramModel {
-  const roots = minimalRootIds(model, ids);
+  const roots = minimalRootIds(model, editableIds(model, ids));
   const index = indexModel(model);
   const nodes = roots.map((id) => index.byId.get(id)).filter((node): node is DiagramNode => Boolean(node));
   if (nodes.length < 3) return model;

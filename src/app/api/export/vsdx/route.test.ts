@@ -2,8 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { makeJsonRequest } from "../../_test-helpers";
 
 vi.mock("@/lib/model/to-drawio", () => ({
-  modelToDrawio: async (model: { nodes: { id: string }[] }, options: { title: string }) =>
-    `<mxfile><diagram name="${options.title}"><!--${model.nodes.map((n) => n.id).join(",")}--></diagram></mxfile>`,
+  modelToDrawioResult: async (model: { nodes: { id: string }[]; kind?: string }, options: { title: string }) => ({
+    content: `<mxfile><diagram name="${options.title}"><!--${model.nodes.map((n) => n.id).join(",")}--></diagram></mxfile>`,
+    warnings: model.kind === "architecture" ? ["architecture warning"] : [],
+  }),
 }));
 
 const MODEL = {
@@ -60,6 +62,12 @@ describe("POST /api/export/vsdx (drawio output)", () => {
     const { POST } = await loadRoute();
     const res = await POST(makeJsonRequest({ model: MODEL }));
     expect(res.headers.get("Content-Disposition")).toMatch(/Architecture/i);
+  });
+
+  it("returns export warnings in a response header", async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(makeJsonRequest({ model: { ...MODEL, kind: "architecture" } }));
+    expect(JSON.parse(decodeURIComponent(res.headers.get("X-Export-Warnings") ?? ""))).toEqual(["architecture warning"]);
   });
 
   it("requires credentials in production", async () => {

@@ -4,9 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClarifyAnswers, ClarifyQuestion } from "@/components/ClarifyPanel";
 import { resolveAnswerSpecs } from "@/lib/clarify-utils";
 import { api, isD2SyntaxError } from "@/lib/client/api";
+import { composeArchitectureText } from "@/lib/arch";
+import { routeStyle } from "@/lib/arch/intent";
+import { ARCHITECTURE_LANGUAGE, cleanArchOutput } from "@/lib/arch/prompt";
+import { scoreArchitecture } from "@/lib/arch/quality";
 import { composeText } from "@/lib/compose";
 import { cleanSpecOutput, COMPOSITION_LANGUAGE } from "@/lib/compose/prompt";
-import { looksLikeSpec } from "@/lib/compose/partial";
 import { scoreComposition } from "@/lib/compose/quality";
 import { SpecError } from "@/lib/compose/spec";
 import type { ChatTurn, ModelSelection } from "@/lib/llm/types";
@@ -23,6 +26,8 @@ import {
   type PipelineSteps,
   type ReviewAssessment,
 } from "@/lib/pipeline/refine-loop";
+import type { QualityReport } from "@/lib/quality/diagram-quality";
+import { formatOfCode, type DiagramFormat } from "@/lib/spec-format";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
 export interface RunStep {
@@ -52,6 +57,8 @@ export interface RunRecord {
   reviewer?: ModelSelection;
   /** Absent on runs saved before composed diagrams existed (they were D2). */
   format?: DiagramFormat;
+  /** Set when the Auto style chose the format: from the clarify analysis or the request's wording. */
+  routed?: "clarify" | "heuristic";
   outcome?: PipelineOutcome;
   reviewScore?: number;
   qualityScore?: number;
@@ -69,21 +76,41 @@ export type ChatItem =
   | { id: string; kind: "assistant"; text: string; at: number; tone?: "info" | "warning" }
   | { id: string; kind: "run"; run: RunRecord; at: number };
 
-/** How new diagrams are drawn: composed by the layout engine, or a free-form graph laid out by D2. */
-export type DiagramStyle = "composed" | "graph";
+/**
+ * How new diagrams are drawn: Architecture (reference-architecture conventions), Poster (a
+ * designed one-page overview), Graph (free-form, laid out by D2), or Auto, which picks
+ * Architecture or Poster from the request.
+ */
+export type DiagramStyle = "auto" | "architecture" | "poster" | "graph";
 
-/** The language a run writes: a composition spec (JSON) or D2. */
-export type DiagramFormat = "composition" | "d2";
+export type { DiagramFormat };
 
 export interface AgentSettings {
   clarify: boolean;
   review: boolean;
   refinements: number;
-  /** Absent in settings saved before composed diagrams existed; means "composed". */
+  /** Absent in settings saved before styles existed; means "auto". */
   style?: DiagramStyle;
 }
 
-export const DEFAULT_SETTINGS: AgentSettings = { clarify: true, review: true, refinements: 1, style: "composed" };
+export const DEFAULT_SETTINGS: AgentSettings = { clarify: true, review: true, refinements: 1, style: "auto" };
+
+const STYLES: readonly DiagramStyle[] = ["auto", "architecture", "poster", "graph"];
+
+/** Settings saved when the only engine-drawn style was "composed" now mean Auto; everything else is kept. */
+export function migrateSettings(value: unknown): unknown {
+  if (value && typeof value === "object" && (value as { style?: unknown }).style === "composed") return { ...value, style: "auto" };
+  return value;
+}
+
+/** The language a new diagram is written in; Auto routes by the clarify analysis or the request's wording. */
+export function formatForStyle(style: DiagramStyle | undefined, prompt: string, analysis?: unknown): { format: DiagramFormat; routed?: "clarify" | "heuristic" } {
+  if (style === "graph") return { format: "d2" };
+  if (style === "poster") return { format: "composition" };
+  if (style === "architecture") return { format: "architecture" };
+  const route = routeStyle(prompt, analysis);
+  return { format: route.style === "poster" ? "composition" : "architecture", routed: route.source };
+}
 
 export interface ClarifyState {
   prompt: string;
@@ -111,7 +138,9 @@ const isSettings = (v: unknown): v is AgentSettings =>
   Number.isInteger((v as AgentSettings).refinements) &&
   (v as AgentSettings).refinements >= 0 &&
   (v as AgentSettings).refinements <= 3 &&
-  ((v as AgentSettings).style === undefined || (v as AgentSettings).style === "composed" || (v as AgentSettings).style === "graph");
+  ((v as AgentSettings).style === undefined || STYLES.includes((v as AgentSettings).style as DiagramStyle));
+
+const specErrorMessage = (err: unknown) => (err instanceof SpecError ? new Error([err.message, ...err.issues].join("\n")) : err);
 
 /**
  * Lays a composition spec out in the browser (no server round trip). Specs
@@ -123,10 +152,24 @@ function renderComposition(code: string, preferWidth: number | undefined): { svg
     const { model, warnings } = composeText(code, { preferWidth });
     return { svg: renderModelSvg(model, { padding: 0 }), quality: scoreComposition(model, { warnings }) };
   } catch (err) {
-    if (err instanceof SpecError) throw new Error([err.message, ...err.issues].join("\n"));
-    throw err;
+    throw specErrorMessage(err);
   }
 }
+
+/** Lays an Architecture spec out in the browser, like a composition spec. */
+async function renderArchitecture(code: string): Promise<{ svg: string; quality: QualityReport }> {
+  try {
+    const { model, warnings, report } = await composeArchitectureText(code);
+    return { svg: renderModelSvg(model, { padding: 0 }), quality: scoreArchitecture(model, { warnings: [...warnings, ...report.warnings] }) };
+  } catch (err) {
+    throw specErrorMessage(err);
+  }
+}
+
+const CLEAN: Record<DiagramFormat, (raw: string) => string> = { architecture: cleanArchOutput, composition: cleanSpecOutput, d2: cleanD2Output };
+
+/** What the style chip on a run calls each format. */
+export const FORMAT_LABEL: Record<DiagramFormat, string> = { architecture: "Architecture", composition: "Poster", d2: "Graph" };
 
 function applyEvent(run: RunRecord, event: PipelineEvent, now: number): RunRecord {
   const closeActive = (steps: RunStep[]) => steps.map((s) => (s.status === "active" ? { ...s, status: "done" as const, endedAt: now } : s));
@@ -217,7 +260,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
   const [code, setCode] = usePersistedState<string>("diagramAgent.d2Code", "", { validate: (v): v is string => typeof v === "string" });
   const [items, setItems] = usePersistedState<ChatItem[]>("diagramAgent.chat.v2", [], { validate: isItems });
   const [title, setTitle] = usePersistedState<string>("diagramAgent.title", "Untitled diagram", { validate: (v): v is string => typeof v === "string" });
-  const [settings, setSettings] = usePersistedState<AgentSettings>("diagramAgent.settings.v2", DEFAULT_SETTINGS, { validate: isSettings });
+  const [settings, setSettings] = usePersistedState<AgentSettings>("diagramAgent.settings.v2", DEFAULT_SETTINGS, { validate: isSettings, migrate: migrateSettings });
 
   const [busy, setBusy] = useState<AgentBusy>("idle");
   const [clarify, setClarify] = useState<ClarifyState | null>(null);
@@ -233,8 +276,9 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
     return fromDocument ?? code;
   }, [code]);
   /** Edits are written in the diagram's own language; without a document, the last run's code decides. */
-  const currentFormat = useCallback((): DiagramFormat => documentRef.current?.currentFormat?.() ?? (looksLikeSpec(code) ? "composition" : "d2"), [code]);
-  const newFormat: DiagramFormat = settings.style === "graph" ? "d2" : "composition";
+  const currentFormat = useCallback((): DiagramFormat => documentRef.current?.currentFormat?.() ?? formatOfCode(code), [code]);
+  /** The language of a new diagram, from the style setting (Auto routes by the request). */
+  const pickFormat = useCallback((prompt: string, analysis?: unknown) => formatForStyle(settings.style, prompt, analysis), [settings.style]);
 
   // One-time cleanup after hydration: migrate the old chat format and mark
   // runs that were interrupted by a reload.
@@ -290,13 +334,14 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       relayout?: boolean;
       /** Language of the run; new diagrams follow the style setting, edits the diagram's own format. */
       format: DiagramFormat;
+      /** Set when Auto chose the format. */
+      routed?: "clarify" | "heuristic";
     }) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
       const reviewEnabled = settings.review && reviewerSupportsVision;
       const { format } = input;
-      const composition = format === "composition";
 
       const run: RunRecord = {
         id: newId(),
@@ -310,6 +355,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         reviews: [],
         notes: settings.review && !reviewerSupportsVision ? [`Review skipped — ${reviewer.model} can't view images`] : [],
         format,
+        ...(input.routed ? { routed: input.routed } : {}),
       };
       pushItem({ id: `run-${run.id}`, kind: "run", run, at: run.startedAt });
       setBusy("running");
@@ -325,14 +371,14 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
           pushItem({ id: newId(), kind: "assistant", text: `Couldn't put the result on the canvas: ${errText(err)}`, at: Date.now(), tone: "warning" });
         }
       };
-      const clean = composition ? cleanSpecOutput : cleanD2Output;
+      const clean = CLEAN[format];
       // Edits of a composed diagram keep its page width so candidates are reviewed as they'll look.
       const preferWidth = input.mode === "edit" ? documentRef.current?.pageWidth?.() : undefined;
 
       const steps: PipelineSteps = {
-        language: composition ? COMPOSITION_LANGUAGE : undefined,
-        // Composition plans inside the spec itself; the D2 planner's topology plan doesn't apply.
-        plan: composition ? undefined : async (prompt, analysis, signal) => (await api.plan(prompt, analysis, selection, signal)).plan,
+        language: format === "composition" ? COMPOSITION_LANGUAGE : format === "architecture" ? ARCHITECTURE_LANGUAGE : undefined,
+        // Specs plan inside themselves; the D2 planner's topology plan doesn't apply.
+        plan: format !== "d2" ? undefined : async (prompt, analysis, signal) => (await api.plan(prompt, analysis, selection, signal)).plan,
         generate: async (genInput, signal) => {
           let raw = "";
           let frame = 0;
@@ -354,17 +400,20 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
           setCode(cleaned);
           return cleaned;
         },
-        render: composition
-          ? async (candidate) => renderComposition(candidate, preferWidth)
-          : async (candidate, signal) => {
-              try {
-                return await api.render(candidate, signal);
-              } catch (err) {
-                // Only a 422 means the D2 is wrong; anything else must not trigger a syntax-fix round.
-                if (isAbort(err) || isD2SyntaxError(err)) throw err;
-                throw new RenderUnavailableError(errText(err));
-              }
-            },
+        render:
+          format === "composition"
+            ? async (candidate) => renderComposition(candidate, preferWidth)
+            : format === "architecture"
+              ? renderArchitecture
+              : async (candidate, signal) => {
+                  try {
+                    return await api.render(candidate, signal);
+                  } catch (err) {
+                    // Only a 422 means the D2 is wrong; anything else must not trigger a syntax-fix round.
+                    if (isAbort(err) || isD2SyntaxError(err)) throw err;
+                    throw new RenderUnavailableError(errText(err));
+                  }
+                },
         assess: reviewEnabled
           ? async (review, signal) => (await api.assess({ svg: review.svg, prompt: review.prompt, d2Code: review.code, format }, reviewer, signal)).assessment
           : undefined,
@@ -447,7 +496,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         if (result.skipClarification || result.questions.length === 0) {
           note("Your request is detailed enough — skipping clarifying questions.");
           setBusy("idle");
-          void startRun({ prompt, mode: "create", analysis: result.analysis, format: newFormat });
+          void startRun({ prompt, mode: "create", analysis: result.analysis, ...pickFormat(prompt, result.analysis) });
           return;
         }
         setClarify({ prompt, questions: result.questions as ClarifyQuestion[], analysis: result.analysis });
@@ -456,12 +505,12 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
         setBusy("idle");
         if (isAbort(err)) return;
         note(`Couldn't get clarifying questions (${errText(err)}). Generating directly.`, "warning");
-        void startRun({ prompt, mode: "create", format: newFormat });
+        void startRun({ prompt, mode: "create", ...pickFormat(prompt) });
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [newFormat, note, selection, startRun],
+    [note, pickFormat, selection, startRun],
   );
 
   const send = useCallback(
@@ -476,10 +525,10 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       } else if (settings.clarify) {
         void askClarify(prompt);
       } else {
-        void startRun({ prompt, mode: "create", format: newFormat });
+        void startRun({ prompt, mode: "create", ...pickFormat(prompt) });
       }
     },
-    [askClarify, busy, currentCode, currentFormat, newFormat, priorRequests, pushItem, settings.clarify, startRun],
+    [askClarify, busy, currentCode, currentFormat, pickFormat, priorRequests, pushItem, settings.clarify, startRun],
   );
 
   const submitClarify = useCallback(
@@ -490,17 +539,17 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       const prompt = specs.length > 0 ? `${clarify.prompt}\n\nAdditional specifications:\n${specs.map((s) => `- ${s}`).join("\n")}` : clarify.prompt;
       const analysis = clarify.analysis;
       setClarify(null);
-      void startRun({ prompt, mode: "create", analysis, format: newFormat });
+      void startRun({ prompt, mode: "create", analysis, ...pickFormat(prompt, analysis) });
     },
-    [clarify, newFormat, pushItem, startRun],
+    [clarify, pickFormat, pushItem, startRun],
   );
 
   const skipClarify = useCallback(() => {
     if (!clarify) return;
     const { prompt, analysis } = clarify;
     setClarify(null);
-    void startRun({ prompt, mode: "create", analysis, format: newFormat });
-  }, [clarify, newFormat, startRun]);
+    void startRun({ prompt, mode: "create", analysis, ...pickFormat(prompt, analysis) });
+  }, [clarify, pickFormat, startRun]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -512,12 +561,23 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Try again", at: Date.now() });
       if (run.mode === "create") {
-        void startRun({ prompt: run.prompt, mode: "create", format: run.format ?? newFormat });
+        void startRun({ prompt: run.prompt, mode: "create", ...(run.format ? { format: run.format, routed: run.routed } : pickFormat(run.prompt)) });
       } else {
         void startRun({ prompt: run.prompt, mode: "edit", existingCode: currentCode(), history: priorRequests(), format: currentFormat() });
       }
     },
-    [busy, currentCode, currentFormat, newFormat, priorRequests, pushItem, startRun],
+    [busy, currentCode, currentFormat, pickFormat, priorRequests, pushItem, startRun],
+  );
+
+  /** Draws a new diagram from a run's request in another style (the style chip's "Redo as …"). */
+  const redoAs = useCallback(
+    (run: RunRecord, format: DiagramFormat) => {
+      if (busy !== "idle" || run.mode !== "create") return;
+      setClarify(null);
+      pushItem({ id: newId(), kind: "user", text: `Redo as ${FORMAT_LABEL[format]}`, at: Date.now() });
+      void startRun({ prompt: run.prompt, mode: "create", format });
+    },
+    [busy, pushItem, startRun],
   );
 
   const fixRenderError = useCallback(
@@ -526,9 +586,9 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       if (busy !== "idle" || !existing.trim()) return;
       const format = currentFormat();
       const prompt =
-        format === "composition"
-          ? `The diagram spec can't be used: "${message}". Fix the spec while keeping the architecture intact.`
-          : `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`;
+        format === "d2"
+          ? `The diagram fails to render with this D2 error: "${message}". Fix the syntax while keeping the architecture intact.`
+          : `The diagram spec can't be used: "${message}". Fix the spec while keeping the architecture intact.`;
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Fix the rendering error", at: Date.now() });
       void startRun({ prompt, mode: "edit", existingCode: existing, format });
@@ -541,12 +601,16 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
       const existing = currentCode();
       if (busy !== "idle" || !existing.trim()) return;
       const format = currentFormat();
-      const prompt = format === "composition" ? COMPOSITION_LANGUAGE.reviewFixPrompt(assessment, null) : reviewFixPrompt(assessment, null);
+      const prompt =
+        format === "composition"
+          ? COMPOSITION_LANGUAGE.reviewFixPrompt(assessment, null)
+          : format === "architecture"
+            ? ARCHITECTURE_LANGUAGE.reviewFixPrompt(assessment, null)
+            : reviewFixPrompt(assessment, null);
       setClarify(null);
       pushItem({ id: newId(), kind: "user", text: "Apply the reviewer's suggested fixes", at: Date.now() });
       void startRun({ prompt, mode: "edit", existingCode: existing, relayout: true, format });
-    },
-    [busy, currentCode, currentFormat, pushItem, startRun],
+    },    [busy, currentCode, currentFormat, pushItem, startRun],
   );
 
   const reset = useCallback(() => {
@@ -577,6 +641,7 @@ export function useDiagramAgent(models: AgentModels, document?: AgentDocument) {
     skipClarify,
     stop,
     retryRun,
+    redoAs,
     reset,
     fixRenderError,
     applyReview,

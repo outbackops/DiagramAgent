@@ -61,7 +61,7 @@ export default function ImportD2Dialog({
       open={open}
       onClose={onClose}
       title="Import a diagram"
-      description="Paste a composition spec (JSON) or D2 source to replace the current diagram. The import is one undoable step."
+      description="Paste an Architecture or Poster spec (JSON) or D2 source to replace the current diagram. The import is one undoable step."
       className="max-w-2xl"
       footer={
         warnings ? (
@@ -98,7 +98,7 @@ export default function ImportD2Dialog({
             onChange={(e) => setCode(e.target.value)}
             aria-label="Diagram source"
             className="h-72 w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs text-zinc-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-            placeholder={'{ "title": "…", "columns": [ … ] }   or   x -> y'}
+            placeholder={'{ "title": "…", "items": [ … ], "connections": [ … ] }   or   x -> y'}
           />
           {error && (
             <div role="alert" className="flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">

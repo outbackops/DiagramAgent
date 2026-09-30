@@ -5,7 +5,10 @@ import type { DiagramModel, DiagramNode } from "@/lib/model/types";
 const render = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/client/api", () => ({ api: { render } }));
 
-import { MODEL_BACKUP_KEY, MODEL_STORAGE_KEY, suggestsTidyUp, useDiagramDocument } from "./useDiagramDocument";
+import { recomposeArchitecture } from "@/lib/arch";
+import { setArchDetail } from "@/lib/arch/edit";
+import { diagramKind } from "@/lib/model/kind";
+import { MODEL_BACKUP_KEY, MODEL_STORAGE_KEY, suggestsTidyUp, useDiagramDocument, type AcceptResult } from "./useDiagramDocument";
 
 const node = (id: string, x: number, parent: string | null = null): DiagramNode => ({
   id,
@@ -222,4 +225,63 @@ describe("useDiagramDocument", () => {
     act(() => result.current.clear());
     await waitFor(() => expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBeNull());
   });
+});
+
+describe("useDiagramDocument with Architecture diagrams", () => {
+  const archSpec = {
+    title: "Hub and spoke",
+    platform: "azure",
+    items: [
+      { id: "onprem", name: "Corporate network" },
+      { type: "group", kind: "vnet", id: "hub", name: "Hub VNet", items: [{ id: "fw", name: "Azure Firewall" }, { id: "bastion", name: "Bastion" }] },
+    ],
+    connections: [{ from: "onprem", to: "fw", meaning: "vpn", label: "ExpressRoute" }],
+  };
+
+  it("imports a spec in the browser, keeps a detail edit through Tidy up, and lays out like recomposeArchitecture", async () => {
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.importD2(JSON.stringify(archSpec));
+    });
+    expect(render).not.toHaveBeenCalled();
+    expect(diagramKind(result.current.model)).toBe("architecture");
+
+    const fw = result.current.model!.nodes.find((n) => n.arch?.id === "fw")!;
+    act(() => result.current.apply((m) => setArchDetail(m, fw.id, "Premium")));
+    const edited = result.current.model!;
+    expect(result.current.specText).toContain('"detail": "Premium"');
+    await act(async () => {
+      await result.current.tidyUp();
+    });
+    const expected = await recomposeArchitecture(edited);
+    expect(result.current.model).toEqual({ ...expected.model, handArranged: false });
+    expect(result.current.model!.nodes.find((n) => n.arch?.id === "fw")?.arch?.detail).toBe("Premium");
+  }, 30_000);
+
+  it("lands a run's Architecture spec on the canvas", async () => {
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let accepted!: AcceptResult;
+    await act(async () => {
+      accepted = await result.current.acceptRunSpec(JSON.stringify(archSpec), "architecture");
+    });
+    expect(diagramKind(result.current.model)).toBe("architecture");
+    expect(accepted).toEqual({ added: 0, regrouped: 0, warnings: [] });
+  }, 30_000);
+
+  it("previews converting a Graph document, then converts it as one undoable step", async () => {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(model([node("a", 0), node("b", 300)])));
+    const { result } = renderHook(() => useDiagramDocument());
+    await waitFor(() => expect(result.current.model).not.toBeNull());
+    const preview = result.current.previewArchitecture()!;
+    expect(preview).toMatchObject({ components: 2, boundaries: 0, connections: 1 });
+    await act(async () => {
+      await result.current.convertToArchitecture(preview.spec);
+    });
+    expect(diagramKind(result.current.model)).toBe("architecture");
+    expect(result.current.previewArchitecture()).toBeNull();
+    act(() => result.current.undo());
+    expect(diagramKind(result.current.model)).toBe("graph");
+  }, 30_000);
 });

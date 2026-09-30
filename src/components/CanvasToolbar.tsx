@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlignCenter, AlignEndHorizontal, AlignHorizontalJustifyCenter, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignVerticalJustifyCenter, AlignVerticalSpaceAround, Box, Link2, Plus, Redo2, Rows3, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { AlignCenter, AlignEndHorizontal, AlignHorizontalJustifyCenter, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignVerticalJustifyCenter, AlignVerticalSpaceAround, Box, Link2, Network, Plus, Redo2, Rows3, Sparkles, Trash2, Undo2 } from "lucide-react";
 import type { DiagramModel } from "@/lib/model/types";
 import { addGroup, addNode, alignItems, deleteItems, distributeItems } from "@/lib/model/ops";
 import { indexModel, isGroup } from "@/lib/model/query";
@@ -31,6 +31,7 @@ export default function CanvasToolbar({
   onSelectionChange,
   onStartConnect,
   onTidyUp,
+  onConvertToArchitecture,
 }: {
   model: DiagramModel | null;
   selection: string[];
@@ -43,6 +44,8 @@ export default function CanvasToolbar({
   onSelectionChange(ids: string[]): void;
   onStartConnect(from: string): void;
   onTidyUp(): Promise<void>;
+  /** Offered on Graph documents: previews and converts the diagram to an Architecture diagram. */
+  onConvertToArchitecture?: () => void;
 }) {
   const { toast } = useToast();
   const [label, setLabel] = useState("New node");
@@ -50,12 +53,14 @@ export default function CanvasToolbar({
   const [tidying, setTidying] = useState(false);
   const disabled = readOnly || !model;
   const index = useMemo(() => (model ? indexModel(model) : null), [model]);
-  const selectedNodes = selection.filter((id) => index?.byId.has(id));
+  // Generated page nodes (an Architecture title) can be selected and renamed, nothing else.
+  const editable = selection.filter((id) => !index?.byId.get(id)?.generated);
+  const selectedNodes = editable.filter((id) => index?.byId.has(id));
   const oneSelectedNode = selectedNodes.length === 1 ? index?.byId.get(selectedNodes[0]) ?? null : null;
   const canConnect = Boolean(oneSelectedNode && !oneSelectedNode.container) && !disabled;
   const canAlign = selectedNodes.length >= 2 && !disabled;
   const canDistribute = selectedNodes.length >= 3 && !disabled;
-  const canDelete = selection.length > 0 && !disabled;
+  const canDelete = editable.length > 0 && !disabled;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -154,6 +159,9 @@ export default function CanvasToolbar({
       <IconButton label="Delete (Del)" size="sm" disabled={!canDelete} onClick={() => onApply((m) => deleteItems(m, selection))} className="hover:!bg-rose-50 hover:!text-rose-600 dark:hover:!bg-rose-500/10"><Trash2 className="size-3.5" /></IconButton>
       <div className="mx-0.5 h-5 w-px bg-zinc-200 dark:bg-zinc-800" />
       <Button variant="ghost" size="xs" disabled={disabled || tidying} onClick={() => void runTidy()} icon={tidying ? <Spinner className="size-3" /> : <Sparkles className="size-3.5" />}>Tidy up</Button>
+      {onConvertToArchitecture && (
+        <IconButton label="Convert to an Architecture diagram" size="sm" disabled={disabled || tidying} onClick={onConvertToArchitecture}><Network className="size-3.5" /></IconButton>
+      )}
     </div>
   );
 }

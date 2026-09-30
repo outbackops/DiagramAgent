@@ -14,7 +14,25 @@
         ["monitor", "azure monitor"],
         ["dr region", "secondary region"]
       ],
-      "minNodes": 14
+      "minNodes": 14,
+      "components": [
+        ["traffic manager"],
+        ["application gateway", "app gateway"],
+        ["sql"],
+        ["listener"],
+        ["domain controller", "active directory", "ad ds"],
+        ["bastion"],
+        ["monitor"],
+        ["log analytics"],
+        ["backup", "recovery services"]
+      ],
+      "boundaries": [["primary"], ["dr", "secondary", "disaster recovery"], ["vnet", "virtual network"], ["subnet"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["traffic manager"]],
+        [["primary"], ["dr", "secondary", "disaster recovery"]],
+        [["sql"], ["backup", "recovery services"]]
+      ],
+      "prohibited": ["aws", "gcp", "google cloud"]
     }
   },
   {
@@ -32,7 +50,30 @@
         ["waf"],
         ["cloudwatch"]
       ],
-      "minNodes": 12
+      "minNodes": 12,
+      "components": [
+        ["route 53"],
+        ["cloudfront"],
+        ["waf"],
+        ["application load balancer", "alb"],
+        ["ec2", "auto scaling"],
+        ["rds"],
+        ["elasticache", "redis"],
+        ["nat"],
+        ["s3"],
+        ["secrets manager"],
+        ["cloudwatch"],
+        ["flow logs"]
+      ],
+      "boundaries": [["account", "aws cloud"], ["region"], ["vpc"], ["availability zone", "az"], ["public"], ["private"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["cloudfront", "route 53"]],
+        [["cloudfront"], ["alb", "application load balancer", "waf", "igw", "internet gateway"]],
+        [["alb", "application load balancer"], ["ec2", "auto scaling"]],
+        [["ec2", "auto scaling"], ["rds"]],
+        [["ec2", "auto scaling"], ["redis", "elasticache"]]
+      ],
+      "prohibited": ["azure", "gcp", "google cloud"]
     }
   },
   {
@@ -50,7 +91,30 @@
         ["sns"],
         ["dlq", "dead letter"]
       ],
-      "minNodes": 11
+      "minNodes": 11,
+      "components": [
+        ["api gateway"],
+        ["authorizer"],
+        ["lambda"],
+        ["sqs"],
+        ["eventbridge", "event bus"],
+        ["dynamodb"],
+        ["step functions", "state machine"],
+        ["sns"],
+        ["s3"],
+        ["cloudwatch"],
+        ["iam"],
+        ["dlq", "dead letter"]
+      ],
+      "boundaries": [["account", "aws cloud"], ["region"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["api gateway"]],
+        [["api gateway"], ["lambda", "function"]],
+        [["lambda", "function"], ["sqs", "queue"]],
+        [["sqs", "queue", "lambda", "function"], ["dlq", "dead letter"]],
+        [["eventbridge", "event bus"], ["step functions", "state machine", "lambda", "sns"]]
+      ],
+      "prohibited": ["azure", "gcp", "google cloud"]
     }
   },
   {
@@ -68,7 +132,34 @@
         ["prometheus"],
         ["jaeger", "tracing"]
       ],
-      "minNodes": 13
+      "minNodes": 13,
+      "components": [
+        ["dns"],
+        ["ingress"],
+        ["gateway"],
+        ["frontend"],
+        ["orders"],
+        ["payments"],
+        ["inventory"],
+        ["postgres"],
+        ["redis"],
+        ["broker", "kafka", "rabbitmq", "nats"],
+        ["prometheus"],
+        ["grafana"],
+        ["jaeger"],
+        ["log", "fluent"],
+        ["secret"],
+        ["autoscaler", "hpa"]
+      ],
+      "boundaries": [["cluster"], ["namespace"], ["observability", "monitoring"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["dns", "ingress"]],
+        [["ingress"], ["gateway", "frontend"]],
+        [["orders"], ["payments", "inventory"]],
+        [["orders", "payments", "inventory"], ["broker", "kafka", "rabbitmq", "nats", "queue"]],
+        [["orders", "payments", "inventory", "frontend"], ["postgres", "redis"]]
+      ],
+      "prohibited": ["aws", "azure", "gcp", "google cloud", "eks", "aks", "gke"]
     }
   },
   {
@@ -86,7 +177,15 @@
         ["application insights", "azure monitor"],
         ["rollback"]
       ],
-      "minNodes": 12
+      "minNodes": 12,
+      "components": [["repository", "github repo"], ["container registry", "acr"], ["key vault"], ["aks", "kubernetes service"]],
+      "flows": [
+        [["developer", "commit", "repository", "github"], ["build", "workflow", "actions", "ci"]],
+        [["build", "workflow", "actions", "ci", "image"], ["container registry", "acr"]],
+        [["deploy", "workflow", "actions", "cd"], ["aks", "kubernetes", "cluster", "namespace", "staging", "production"]],
+        [["deploy", "workflow", "actions", "aks", "cluster", "app", "pod"], ["key vault"]]
+      ],
+      "prohibited": ["aws", "gcp", "google cloud", "jenkins"]
     }
   },
   {
@@ -94,17 +193,33 @@
     "title": "Streaming Kafka to Lakehouse Analytics",
     "prompt": "Create a vendor-neutral streaming data pipeline diagram. Include producers, Kafka cluster with topics, schema registry, stream ingestion service, Apache Spark streaming jobs, checkpoint storage, raw data lake zone, curated data lake zone, batch quality checks, data warehouse, BI dashboard, metadata catalog, monitoring, and alerting. Show event ingestion, schema validation, stream processing, writes to raw and curated zones, warehouse loading, BI queries, and operational metrics. Group into ingestion, processing, storage, serving, and operations zones.",
     "expect": {
-      "keywords": [
-        ["kafka"],
+      "keywords": [["kafka"], ["schema registry"], ["spark"], ["checkpoint"], ["data lake"], ["warehouse"], ["bi", "dashboard"], ["catalog"]],
+      "minNodes": 11,
+      "components": [
+        ["producer"],
+        ["kafka", "topic"],
         ["schema registry"],
+        ["ingestion"],
         ["spark"],
         ["checkpoint"],
-        ["data lake"],
+        ["raw"],
+        ["curated"],
+        ["quality"],
         ["warehouse"],
         ["bi", "dashboard"],
-        ["catalog"]
+        ["catalog"],
+        ["monitoring"],
+        ["alert"]
       ],
-      "minNodes": 11
+      "boundaries": [["ingestion"], ["processing"], ["storage"], ["serving"], ["operations", "ops"]],
+      "flows": [
+        [["producer"], ["kafka", "topic", "ingestion"]],
+        [["kafka", "topic", "ingestion"], ["spark"]],
+        [["spark"], ["raw", "curated", "lake"]],
+        [["curated", "lake", "quality", "load"], ["warehouse"]],
+        [["warehouse", "bi", "dashboard"], ["bi", "dashboard", "warehouse"]]
+      ],
+      "prohibited": ["aws", "azure", "gcp", "google cloud"]
     }
   },
   {
@@ -122,7 +237,24 @@
         ["private endpoint"],
         ["route table", "udr"]
       ],
-      "minNodes": 14
+      "minNodes": 14,
+      "components": [
+        ["vpn gateway"],
+        ["expressroute"],
+        ["firewall"],
+        ["bastion"],
+        ["dns resolver", "private dns"],
+        ["private endpoint"],
+        ["log analytics"],
+        ["monitor"]
+      ],
+      "boundaries": [["hub"], ["spoke"], ["subnet"], ["subscription"], ["region"]],
+      "flows": [
+        [["on-prem", "on prem", "datacenter", "corporate"], ["vpn", "expressroute", "hub"]],
+        [["hub", "firewall"], ["spoke", "workload"]],
+        [["app", "workload", "spoke"], ["private endpoint"]]
+      ],
+      "prohibited": ["aws", "gcp", "google cloud"]
     }
   },
   {
@@ -140,7 +272,31 @@
         ["key vault"],
         ["private endpoint"]
       ],
-      "minNodes": 12
+      "minNodes": 12,
+      "components": [
+        ["front door"],
+        ["app service", "web app"],
+        ["managed identity"],
+        ["openai"],
+        ["search"],
+        ["blob"],
+        ["cosmos"],
+        ["function"],
+        ["embedding", "chunking"],
+        ["key vault"],
+        ["application insights"],
+        ["monitor"],
+        ["private endpoint"]
+      ],
+      "boundaries": [["subscription"], ["region"], ["resource group"], ["subnet"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["front door"]],
+        [["front door"], ["app service", "web app"]],
+        [["app service", "web app"], ["search"]],
+        [["app service", "web app"], ["openai"]],
+        [["function", "ingestion", "embedding", "chunking"], ["search", "openai", "blob"]]
+      ],
+      "prohibited": ["aws", "gcp", "google cloud"]
     }
   },
   {
@@ -158,7 +314,30 @@
         ["data catalog", "catalog"],
         ["cloud monitoring", "monitoring"]
       ],
-      "minNodes": 11
+      "minNodes": 11,
+      "components": [
+        ["producer"],
+        ["pub/sub", "pubsub"],
+        ["dataflow"],
+        ["cloud storage", "bucket", "gcs"],
+        ["dataproc", "dataform"],
+        ["bigquery"],
+        ["looker"],
+        ["composer"],
+        ["catalog"],
+        ["secret manager"],
+        ["monitoring"],
+        ["service account", "iam"]
+      ],
+      "boundaries": [["project"], ["region"]],
+      "flows": [
+        [["producer"], ["pub/sub", "pubsub"]],
+        [["pub/sub", "pubsub"], ["dataflow"]],
+        [["dataflow"], ["storage", "bucket", "bigquery"]],
+        [["dataproc", "dataform", "storage", "bucket"], ["bigquery"]],
+        [["bigquery", "looker"], ["looker", "bigquery"]]
+      ],
+      "prohibited": ["aws", "azure"]
     }
   },
   {
@@ -176,7 +355,73 @@
         ["device management"],
         ["ota", "update"]
       ],
-      "minNodes": 12
+      "minNodes": 12,
+      "components": [
+        ["sensor"],
+        ["gateway"],
+        ["adapter"],
+        ["rule"],
+        ["buffer"],
+        ["identity"],
+        ["mqtt"],
+        ["ingestion"],
+        ["stream"],
+        ["time-series", "time series"],
+        ["object storage"],
+        ["alert"],
+        ["device management"],
+        ["dashboard"],
+        ["monitoring"],
+        ["ota"]
+      ],
+      "boundaries": [["edge"], ["cloud"]],
+      "flows": [
+        [["sensor"], ["gateway", "adapter", "edge"]],
+        [["gateway", "edge", "buffer", "rule"], ["mqtt", "broker"]],
+        [["mqtt", "broker", "ingestion"], ["stream"]],
+        [["stream"], ["time series", "time-series"]],
+        [["stream"], ["object storage", "cold"]],
+        [["ota", "update"], ["gateway", "edge", "device", "mqtt", "broker"]]
+      ],
+      "prohibited": ["aws", "azure", "gcp", "google cloud"]
+    }
+  },
+  {
+    "id": "azure-zone-redundant-web",
+    "title": "Azure Zone-Redundant Web App",
+    "prompt": "Create an Azure reference architecture for a zone-redundant web application. Users reach the app over HTTPS through Azure Application Gateway with WAF in a spoke virtual network. App Service runs across three availability zones with VNet integration. Azure SQL Database, Key Vault and Storage are reached only through private endpoints in a dedicated subnet. Include Microsoft Entra ID, Application Insights and Log Analytics as shared services. Number the inbound request flow and the outbound data access flow.",
+    "expect": {
+      "keywords": [
+        ["application gateway"],
+        ["waf"],
+        ["app service"],
+        ["zone"],
+        ["private endpoint"],
+        ["sql"],
+        ["key vault"],
+        ["storage"],
+        ["application insights"],
+        ["log analytics"]
+      ],
+      "minNodes": 10,
+      "components": [
+        ["application gateway"],
+        ["app service", "web app"],
+        ["sql"],
+        ["key vault"],
+        ["storage"],
+        ["private endpoint"],
+        ["entra", "active directory"],
+        ["application insights"],
+        ["log analytics"]
+      ],
+      "boundaries": [["vnet", "virtual network"], ["zone"], ["subnet"]],
+      "flows": [
+        [["users", "user", "internet", "client", "customer"], ["application gateway"]],
+        [["application gateway"], ["app service", "web app", "private endpoint"]],
+        [["app service", "web app", "integration"], ["private endpoint", "sql", "key vault", "storage"]]
+      ],
+      "prohibited": ["aws", "gcp", "google cloud"]
     }
   }
 ]

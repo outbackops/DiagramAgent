@@ -1,6 +1,9 @@
 import { D2_THEME_0 } from "./d2-theme";
+import { safeIconHref } from "./icon-href";
 import { longestSegmentMidpoint, unionBoxes } from "./geometry";
+import { diagramKind } from "./kind";
 import { indexModel, isGroup } from "./query";
+import { architectureBounds, renderArchitectureSvg } from "./render-architecture";
 import { composedBounds, renderComposedSvg } from "./render-composed";
 import type { Arrowhead, Box, DiagramEdge, DiagramModel, DiagramNode, NodeStyle, Point, Size } from "./types";
 
@@ -23,7 +26,9 @@ const DEFAULT_FONT = "#0A0F25";
 const LABEL_PAD = 8;
 
 export function modelBounds(model: DiagramModel): Box {
-  if (model.composed) return composedBounds(model);
+  const kind = diagramKind(model);
+  if (kind === "architecture") return architectureBounds(model);
+  if (kind === "poster") return composedBounds(model);
   const boxes: Box[] = [];
   const index = indexModel(model);
   for (const node of model.nodes) {
@@ -41,7 +46,9 @@ export function modelBounds(model: DiagramModel): Box {
 }
 
 export function renderModelSvg(model: DiagramModel, options: RenderModelSvgOptions = {}): string {
-  if (model.composed) return renderComposedSvg(model, options);
+  const kind = diagramKind(model);
+  if (kind === "architecture") return renderArchitectureSvg(model, options);
+  if (kind === "poster") return renderComposedSvg(model, options);
   const padding = options.padding ?? 40;
   const background = options.background === undefined ? "#ffffff" : options.background;
   const idPrefix = sanitizeId(options.idPrefix ?? "da");
@@ -87,7 +94,7 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
   if (shape !== "text" && shape !== "image") {
     if (node.style.multiple) parts.push(renderShape(node, group, translateBox(node.box, 8, 8), "opacity=\"0.28\""));
     parts.push(renderShape(node, group, node.box, node.style.shadow ? `filter="url(#${idPrefix}-shadow)"` : ""));
-    if (node.style.doubleBorder) parts.push(renderShape(node, group, insetBox(node.box, 5), "fill=\"none\""));
+    if (node.style.doubleBorder) parts.push(renderShape(node, group, insetBox(node.box, 5), "", "none"));
   }
   const icon = safeIconHref(node.icon);
   if (icon) {
@@ -99,14 +106,15 @@ function renderNode(node: DiagramNode, group: boolean, idPrefix: string): string
   return parts.join("");
 }
 
-function renderShape(node: DiagramNode, group: boolean, box: Box, extra: string): string {
+/** `fill` replaces the node's fill (the inner outline of a double border is unfilled); one fill attribute, or XML parsers reject the SVG. */
+function renderShape(node: DiagramNode, group: boolean, box: Box, extra: string, fill?: string): string {
   const style = node.style;
-  const fill = style.fill === undefined ? "transparent" : resolveColor(style.fill);
+  const fillColor = fill ?? (style.fill === undefined ? "transparent" : resolveColor(style.fill));
   const stroke = resolveColor(style.stroke ?? (group ? "#757575" : DEFAULT_STROKE));
   const sw = style.strokeWidth ?? (group ? 2 : 1);
   const attrs = [
     `stroke="${escAttr(stroke)}"`,
-    `fill="${escAttr(fill)}"`,
+    `fill="${escAttr(fillColor)}"`,
     `stroke-width="${num(sw)}"`,
     dashAttr(style.strokeDash),
     opacityAttr(style.opacity),
@@ -348,13 +356,6 @@ function renderMarker(id: string, arrow: Arrowhead, color: string): string {
 function labelSize(label: string, fontSize: number, measured?: Size): Size {
   if (measured) return measured;
   return { w: Math.max(1, label.length * fontSize * 0.6), h: Math.ceil(fontSize * 1.3) };
-}
-
-function safeIconHref(href: string | undefined): string | null {
-  if (!href) return null;
-  if (/^\/icons\/[A-Za-z0-9._-]+\.svg$/.test(href)) return href;
-  if (/^data:image\/(?:svg\+xml|png|jpeg|gif|webp)[;,]/i.test(href)) return href;
-  return null;
 }
 
 function parsePosition(pos: string): ["INSIDE" | "OUTSIDE", "TOP" | "MIDDLE" | "BOTTOM", "LEFT" | "CENTER" | "RIGHT"] {

@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "title": "Lakehouse data platform",
+  "subtitle": "Batch and streaming sources into bronze, silver and gold, served to BI, ML and APIs",
+  "platform": "azure",
+  "view": "dataflow",
+  "items": [
+    { "type": "group", "kind": "group", "id": "sources", "name": "Sources", "items": [
+      { "id": "crm", "name": "CRM (SaaS)", "icon": "cloud" },
+      { "id": "oltp", "name": "Orders database", "icon": "azure-sql-server", "detail": "SQL Server" },
+      { "id": "devices", "name": "Devices", "icon": "azure-iot-hub" },
+      { "id": "files", "name": "Partner files", "icon": "storage" }
+    ] },
+    { "type": "group", "kind": "group", "id": "ingest", "name": "Ingestion", "items": [
+      { "id": "adf", "name": "Data Factory", "icon": "azure-data-factory" },
+      { "id": "eventhubs", "name": "Event Hubs", "icon": "azure-event-hubs", "detail": "Kafka endpoint" }
+    ] },
+    { "type": "group", "kind": "group", "id": "lake", "name": "Data Lake Storage", "facts": "Delta Lake", "items": [
+      { "id": "bronze", "name": "Bronze", "icon": "azure-blob-storage", "detail": "Raw" },
+      { "id": "silver", "name": "Silver", "icon": "azure-blob-storage", "detail": "Cleaned" },
+      { "id": "gold", "name": "Gold", "icon": "azure-blob-storage", "detail": "Aggregated" }
+    ] },
+    { "type": "group", "kind": "group", "id": "process", "name": "Processing", "items": [
+      { "id": "dbx-batch", "name": "Batch jobs", "icon": "azure-databricks" },
+      { "id": "dbx-stream", "name": "Streaming jobs", "icon": "azure-databricks" }
+    ] },
+    { "type": "group", "kind": "group", "id": "serve", "name": "Serving", "items": [
+      { "id": "synapse", "name": "SQL endpoint", "icon": "azure-synapse-analytics" },
+      { "id": "powerbi", "name": "Power BI", "icon": "monitor" },
+      { "id": "ml", "name": "Churn model", "icon": "tensorflow" },
+      { "id": "api", "name": "Data API", "icon": "azure-app-service" }
+    ] },
+    { "type": "group", "kind": "shared", "id": "gov", "name": "Governance", "items": [
+      { "id": "purview", "name": "Purview", "icon": "azure-policy" },
+      { "id": "kv", "name": "Key Vault", "icon": "azure-key-vault" }
+    ] }
+  ],
+  "connections": [
+    { "from": "crm", "to": "adf", "meaning": "request", "label": "REST · hourly" },
+    { "from": "oltp", "to": "adf", "meaning": "replication", "label": "CDC" },
+    { "from": "files", "to": "adf", "meaning": "request", "label": "SFTP · daily" },
+    { "from": "devices", "to": "eventhubs", "meaning": "async", "label": "AMQP telemetry" },
+    { "from": "adf", "to": "bronze", "meaning": "request", "label": "Parquet" },
+    { "from": "eventhubs", "to": "dbx-stream", "meaning": "async", "label": "Kafka protocol" },
+    { "from": "dbx-stream", "to": "bronze", "meaning": "request", "label": "Delta append" },
+    { "from": "bronze", "to": "dbx-batch", "meaning": "request", "label": "Read raw" },
+    { "from": "dbx-batch", "to": "silver", "meaning": "request", "label": "Merge · dedupe" },
+    { "from": "silver", "to": "dbx-batch", "meaning": "request", "label": "Read clean" },
+    { "from": "dbx-batch", "to": "gold", "meaning": "request", "label": "Aggregate" },
+    { "from": "gold", "to": "synapse", "meaning": "request", "label": "External tables" },
+    { "from": "synapse", "to": "powerbi", "meaning": "request", "label": "DirectQuery" },
+    { "from": "gold", "to": "ml", "meaning": "request", "label": "Features" },
+    { "from": "ml", "to": "api", "meaning": "request", "label": "Scores" },
+    { "from": "synapse", "to": "api", "meaning": "request", "label": "T-SQL" },
+    { "from": "dbx-stream", "to": "silver", "meaning": "request", "label": "Upserts" },
+    { "from": "purview", "to": "bronze", "meaning": "management", "label": "Scan" },
+    { "from": "purview", "to": "gold", "meaning": "management", "label": "Lineage" },
+    { "from": "kv", "to": "adf", "meaning": "management", "label": "Secrets" },
+    { "from": "kv", "to": "dbx-batch", "meaning": "management", "label": "Secrets" },
+    { "from": "api", "to": "gold", "meaning": "request", "label": "Point reads" },
+    { "from": "powerbi", "to": "gold", "meaning": "request", "label": "Import mode" },
+    { "from": "dbx-batch", "to": "ml", "meaning": "async", "label": "Retrain trigger" },
+    { "from": "eventhubs", "to": "bronze", "meaning": "request", "label": "Capture · Avro" },
+    { "from": "adf", "to": "dbx-batch", "meaning": "request", "label": "Trigger job" },
+    { "from": "silver", "to": "gold", "meaning": "replication", "label": "Delta sharing" },
+    { "from": "api", "to": "synapse", "meaning": "request", "label": "Aggregates" },
+    { "from": "ml", "to": "silver", "meaning": "request", "label": "Training set" },
+    { "from": "synapse", "to": "gold", "meaning": "request", "label": "Serverless SQL" }
+  ]
+}

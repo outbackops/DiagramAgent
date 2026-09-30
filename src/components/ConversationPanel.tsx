@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useRef, type ReactNode } from "react";
 import { Boxes, Cloud, Database, GitBranch, Info, Network, Radio, Server, Sparkles, TriangleAlert, Workflow } from "lucide-react";
-import type { AgentBusy, ChatItem, ClarifyState, RunRecord } from "@/hooks/useDiagramAgent";
+import type { AgentBusy, ChatItem, ClarifyState, DiagramFormat, RunRecord } from "@/hooks/useDiagramAgent";
 import type { CatalogModel } from "@/lib/llm/types";
 import ClarifyPanel, { type ClarifyAnswers } from "./ClarifyPanel";
 import Composer, { type ComposerHandle } from "./Composer";
@@ -137,12 +137,14 @@ interface ConversationPanelProps {
   onSend: (text: string) => void;
   onStop: () => void;
   onRetry: (run: RunRecord) => void;
+  /** Draws the run's request again in another style. */
+  onRedoAs?: (run: RunRecord, format: DiagramFormat) => void;
   onSubmitClarify: (answers: ClarifyAnswers) => void;
   onSkipClarify: () => void;
 }
 
 const ConversationPanel = forwardRef<ComposerHandle, ConversationPanelProps>(function ConversationPanel(
-  { items, busy, clarify, models, hasDiagram, disabled = false, onSend, onStop, onRetry, onSubmitClarify, onSkipClarify },
+  { items, busy, clarify, models, hasDiagram, disabled = false, onSend, onStop, onRetry, onRedoAs, onSubmitClarify, onSkipClarify },
   composerRef,
 ) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -172,6 +174,7 @@ const ConversationPanel = forwardRef<ComposerHandle, ConversationPanelProps>(fun
                 models={models}
                 onStop={onStop}
                 onRetry={busy === "idle" && item.id === latestRunId ? onRetry : undefined}
+                onRedoAs={busy === "idle" && item.id === latestRunId ? onRedoAs : undefined}
               />
             ) : (
               <Bubble key={item.id} item={item} />

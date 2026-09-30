@@ -15,6 +15,12 @@ import { buildSystemPrompt } from "@/lib/system-prompt";
 import { svgToPng } from "@/lib/svg-raster";
 import { buildGenerationConversation, cleanD2Output } from "./d2-text";
 import {
+  ARCH_ASSESSMENT_ADDENDUM,
+  archEditPrompt,
+  buildArchitectSystemPrompt,
+  cleanArchOutput,
+} from "@/lib/arch/prompt";
+import {
   buildComposerSystemPrompt,
   cleanSpecOutput,
   composeEditPrompt,
@@ -104,7 +110,7 @@ export interface GenerateInput {
   history?: ChatTurn[];
 }
 
-type DiagramFormat = "d2" | "composition";
+type DiagramFormat = "d2" | "composition" | "architecture";
 
 function readVendoredIconKeys(): string[] | undefined {
   try {
@@ -127,6 +133,15 @@ function buildCompositionConversation(input: GenerateInput): { prompt: string; h
   };
 }
 
+function buildArchitectureConversation(input: GenerateInput): { prompt: string; history: ChatTurn[] } {
+  const history = (input.history ?? []).filter((turn) => turn.content.trim().length > 0);
+  if (!input.existingCode?.trim()) return { prompt: input.prompt, history };
+  return {
+    prompt: archEditPrompt(input.prompt),
+    history: [...history, { role: "assistant", content: input.existingCode }],
+  };
+}
+
 export async function runGenerate(
   input: GenerateInput,
   ctx: StepContext,
@@ -134,13 +149,24 @@ export async function runGenerate(
   options: { format?: DiagramFormat } = {},
 ): Promise<{ code: string; raw: string; usage?: LlmUsage }> {
   const format = options.format ?? "d2";
-  const conversation = format === "composition" ? buildCompositionConversation(input) : buildGenerationConversation(input);
+  const conversation =
+    format === "composition"
+      ? buildCompositionConversation(input)
+      : format === "architecture"
+        ? buildArchitectureConversation(input)
+        : buildGenerationConversation(input);
+  const system =
+    format === "composition"
+      ? buildComposerSystemPrompt(readVendoredIconKeys())
+      : format === "architecture"
+        ? buildArchitectSystemPrompt(readVendoredIconKeys())
+        : buildSystemPrompt();
   const result = await getProvider(ctx.selection.provider).stream(
     {
       selection: ctx.selection,
       credentials: ctx.credentials,
       signal: ctx.signal,
-      system: format === "composition" ? buildComposerSystemPrompt(readVendoredIconKeys()) : buildSystemPrompt(),
+      system,
       prompt: conversation.prompt,
       history: conversation.history,
       temperature: 0.3,
@@ -148,7 +174,8 @@ export async function runGenerate(
     },
     onDelta,
   );
-  return { code: format === "composition" ? cleanSpecOutput(result.text) : cleanD2Output(result.text), raw: result.text, usage: result.usage };
+  const code = format === "composition" ? cleanSpecOutput(result.text) : format === "architecture" ? cleanArchOutput(result.text) : cleanD2Output(result.text);
+  return { code, raw: result.text, usage: result.usage };
 }
 
 export type AssessmentResult = Assessment & { raw?: string; parse_error?: string };
@@ -168,10 +195,12 @@ export async function runAssess(
     selection: ctx.selection,
     credentials: ctx.credentials,
     signal: ctx.signal,
-    system: `${ASSESSMENT_SYSTEM_PROMPT}${input.format === "composition" ? COMPOSED_ASSESSMENT_ADDENDUM : ""}`,
+    system: `${ASSESSMENT_SYSTEM_PROMPT}${
+      input.format === "composition" ? COMPOSED_ASSESSMENT_ADDENDUM : input.format === "architecture" ? ARCH_ASSESSMENT_ADDENDUM : ""
+    }`,
     prompt: `Original prompt: "${input.prompt}"
 
-Current ${input.format === "composition" ? "diagram spec (JSON)" : "D2 code"}:
+Current ${input.format === "composition" || input.format === "architecture" ? "diagram spec (JSON)" : "D2 code"}:
 \`\`\`
 ${input.d2Code ?? ""}
 \`\`\`

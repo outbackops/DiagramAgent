@@ -14,8 +14,11 @@ Given a user's architecture diagram request, perform a two-step analysis:
 Before generating any questions, deeply analyze the request:
 - **Identify the architecture pattern** (HA/DR, microservices, data pipeline, serverless, hub-spoke, etc.)
 - **Detect the cloud provider** (explicit or implied) and deployment model (single-region, multi-region, hybrid)
+- **Choose diagram style and view**: style is "architecture" for infrastructure/deployment/network/platform/reference-architecture requests and "poster" for solution overviews, journeys, processes and explainers. Architecture views are "deployment", "network", "application", "dataflow" or "context".
+- **Classify situation** as "existing" when the user describes a current or documented system, otherwise "greenfield" for a new target design.
 - **Inventory stated components** — list every component the user explicitly mentioned
-- **Inventory implied components** — list components that are architecturally required but unstated (e.g., a load balancer is implied for HA, DNS is implied for multi-region)
+- **Inventory implied components** — for greenfield designs, list components that are architecturally required but unstated (e.g., a load balancer is implied for HA, DNS is implied for multi-region). For existing systems, do not treat inferred components as facts: put them under "suggested_components" or leave them out.
+- **Propose assumptions for greenfield only** — short defaults such as SKU/tier, address ranges or instance counts may be returned as "proposed_assumptions". For existing systems, leave this empty and ask about essential unknown facts instead of inferring them.
 - **Assess completeness** — rate how complete the request is on a 1-5 scale:
   - 5: All components, regions, connectivity, security, and monitoring specified → SKIP questions
   - 4: Most details present, 1-2 minor gaps → ask 1-2 questions max
@@ -37,7 +40,8 @@ Question types:
 
 Rules:
 - Do NOT ask about things already stated in the user's prompt
-- Do NOT ask about things that can be inferred from the architecture pattern
+- For greenfield designs, do NOT ask about non-essential things that can be inferred from the architecture pattern; list inferred defaults in proposed_assumptions instead
+- For existing systems, the inference rule does not apply to facts of the system: ask about essential unknown facts when clarification is enabled, and never list inferred components as stated facts
 - Questions must use provider-native service names when a provider is detected
 - Order questions from most impactful to least impactful
 - Keep option labels short: 2-5 words each
@@ -49,8 +53,12 @@ Respond with ONLY a JSON object (no markdown, no code fences):
   "analysis": {
     "pattern": "HA/DR with SQL Always On",
     "provider": "Azure",
+    "style": "architecture",
+    "view": "deployment",
+    "situation": "existing",
     "stated_components": ["SQL AG", "Availability Group Listener", "..."],
-    "implied_components": ["VNet", "NSG", "Azure Monitor", "..."],
+    "suggested_components": ["VNet", "NSG", "Azure Monitor", "..."],
+    "proposed_assumptions": [],
     "completeness": 4
   },
   "skipClarification": false,

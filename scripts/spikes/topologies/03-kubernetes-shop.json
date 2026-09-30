@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "title": "Shop platform on Kubernetes",
+  "subtitle": "Ingress, three service namespaces and managed data outside the cluster",
+  "platform": "kubernetes",
+  "view": "application",
+  "items": [
+    { "id": "shoppers", "name": "Shoppers", "icon": "users" },
+    { "type": "group", "kind": "cluster", "id": "cluster", "name": "Production cluster", "facts": "3 node pools · v1.30", "items": [
+      { "type": "group", "kind": "namespace", "id": "ns-ingress", "name": "ingress-nginx", "items": [
+        { "id": "ingress", "name": "Ingress controller", "icon": "k8s-ingress", "detail": "2 replicas" }
+      ] },
+      { "type": "group", "kind": "namespace", "id": "ns-shop", "name": "shop", "items": [
+        { "id": "web", "name": "storefront", "icon": "k8s-deployment", "detail": "3 replicas" },
+        { "id": "api", "name": "catalog-api", "icon": "k8s-deployment", "detail": "4 replicas · HPA" },
+        { "id": "cart", "name": "cart", "icon": "k8s-statefulset", "detail": "3 replicas" }
+      ] },
+      { "type": "group", "kind": "namespace", "id": "ns-pay", "name": "payments", "items": [
+        { "id": "payments", "name": "payments", "icon": "k8s-deployment", "detail": "2 replicas" },
+        { "id": "payments-secret", "name": "gateway-keys", "icon": "k8s-secret" }
+      ] },
+      { "type": "group", "kind": "namespace", "id": "ns-obs", "name": "observability", "items": [
+        { "id": "prometheus", "name": "Prometheus", "icon": "prometheus" },
+        { "id": "grafana", "name": "Grafana", "icon": "grafana" }
+      ] }
+    ] },
+    { "type": "group", "kind": "group", "id": "managed", "name": "Managed data services", "items": [
+      { "id": "postgres", "name": "PostgreSQL", "icon": "postgresql", "detail": "HA pair" },
+      { "id": "redis", "name": "Redis", "icon": "redis", "detail": "Session cache" },
+      { "id": "kafka", "name": "Kafka", "icon": "kafka", "detail": "3 brokers" }
+    ] },
+    { "id": "psp", "name": "Payment provider", "icon": "api" }
+  ],
+  "connections": [
+    { "from": "shoppers", "to": "ingress", "meaning": "request", "label": "HTTPS 443", "step": "1" },
+    { "from": "ingress", "to": "web", "meaning": "request", "label": "HTTP", "step": "2" },
+    { "from": "web", "to": "api", "meaning": "request", "label": "gRPC", "step": "3" },
+    { "from": "web", "to": "cart", "meaning": "request", "label": "gRPC" },
+    { "from": "api", "to": "postgres", "meaning": "request", "label": "TCP 5432", "step": "4" },
+    { "from": "cart", "to": "redis", "meaning": "request", "label": "TCP 6379" },
+    { "from": "cart", "to": "payments", "meaning": "request", "label": "gRPC", "step": "5" },
+    { "from": "payments", "to": "psp", "meaning": "request", "label": "HTTPS" },
+    { "from": "payments", "to": "payments-secret", "meaning": "management", "label": "mounted" },
+    { "from": "payments", "to": "kafka", "meaning": "async", "label": "order-paid events" },
+    { "from": "prometheus", "to": "api", "meaning": "monitoring", "label": "scrape" },
+    { "from": "grafana", "to": "prometheus", "meaning": "request", "label": "PromQL" }
+  ],
+  "sequences": [
+    { "id": "main", "name": "Checkout", "steps": [
+      "Shoppers reach the ingress controller over HTTPS.",
+      "Ingress routes to the storefront.",
+      "The storefront calls the catalog and cart services.",
+      "The catalog reads PostgreSQL.",
+      "Cart hands checkout to payments, which calls the provider and publishes an event."
+    ] }
+  ]
+}

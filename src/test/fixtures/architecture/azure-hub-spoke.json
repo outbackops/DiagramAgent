@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "title": "Hub-and-spoke network",
+  "subtitle": "Branches and the datacenter reach three workload spokes through the hub firewall",
+  "platform": "azure",
+  "view": "network",
+  "items": [
+    { "type": "group", "kind": "onprem", "id": "onprem", "name": "Corporate network", "items": [
+      { "id": "branch", "name": "Branch offices", "icon": "users", "detail": "SD-WAN" },
+      { "id": "dc", "name": "Datacenter", "icon": "server", "detail": "Core services" }
+    ] },
+    { "type": "group", "kind": "vnet", "id": "hub", "name": "Hub virtual network", "facts": "10.0.0.0/16", "items": [
+      { "type": "group", "kind": "subnet", "id": "gw-subnet", "name": "GatewaySubnet", "facts": "10.0.0.0/27", "items": [
+        { "id": "er-gw", "name": "ExpressRoute gateway", "icon": "azure-expressroute", "detail": "ErGw2AZ" },
+        { "id": "vpn-gw", "name": "VPN gateway", "icon": "azure-vpn-gateway", "detail": "VpnGw2AZ" }
+      ] },
+      { "type": "group", "kind": "subnet", "id": "fw-subnet", "name": "AzureFirewallSubnet", "facts": "10.0.1.0/26", "items": [
+        { "id": "fw", "name": "Azure Firewall", "icon": "azure-firewall", "detail": "Premium" }
+      ] },
+      { "type": "group", "kind": "subnet", "id": "bastion-subnet", "name": "AzureBastionSubnet", "facts": "10.0.2.0/26", "items": [
+        { "id": "bastion", "name": "Bastion", "icon": "azure-bastion" }
+      ] }
+    ] },
+    { "type": "group", "kind": "vnet", "id": "spoke-web", "name": "Web spoke", "facts": "10.1.0.0/16", "items": [
+      { "id": "app-gw", "name": "Application Gateway", "icon": "azure-application-gateway" },
+      { "id": "web-vmss", "name": "Web tier", "icon": "azure-vm-scale-sets", "detail": "3 instances" }
+    ] },
+    { "type": "group", "kind": "vnet", "id": "spoke-aks", "name": "Container spoke", "facts": "10.2.0.0/16", "items": [
+      { "id": "aks", "name": "AKS cluster", "icon": "azure-kubernetes-service", "detail": "Private cluster" }
+    ] },
+    { "type": "group", "kind": "vnet", "id": "spoke-data", "name": "Data spoke", "facts": "10.3.0.0/16", "items": [
+      { "id": "sqlmi", "name": "SQL Managed Instance", "icon": "azure-sql-managed-instance", "detail": "Business Critical" }
+    ] },
+    { "type": "group", "kind": "shared", "id": "ops", "name": "Shared services", "items": [
+      { "id": "logs", "name": "Log Analytics", "icon": "azure-log-analytics" },
+      { "id": "dns", "name": "Private DNS zones", "icon": "azure-dns" },
+      { "id": "ddos", "name": "DDoS Protection", "icon": "azure-ddos" }
+    ] }
+  ],
+  "connections": [
+    { "from": "dc", "to": "er-gw", "meaning": "vpn", "label": "ExpressRoute 1 Gbps" },
+    { "from": "branch", "to": "vpn-gw", "meaning": "vpn", "label": "IPsec" },
+    { "from": "er-gw", "to": "fw", "meaning": "request" },
+    { "from": "vpn-gw", "to": "fw", "meaning": "request" },
+    { "from": "hub", "to": "spoke-web", "meaning": "peering", "label": "Peering" },
+    { "from": "hub", "to": "spoke-aks", "meaning": "peering", "label": "Peering" },
+    { "from": "hub", "to": "spoke-data", "meaning": "peering", "label": "Peering" },
+    { "from": "fw", "to": "app-gw", "meaning": "request", "label": "UDR" },
+    { "from": "app-gw", "to": "web-vmss", "meaning": "request", "label": "HTTPS" },
+    { "from": "web-vmss", "to": "sqlmi", "meaning": "request", "label": "TDS via firewall" },
+    { "from": "aks", "to": "sqlmi", "meaning": "request", "label": "TDS via firewall" },
+    { "from": "bastion", "to": "web-vmss", "meaning": "management", "label": "SSH/RDP" },
+    { "from": "fw", "to": "logs", "meaning": "monitoring" },
+    { "from": "aks", "to": "logs", "meaning": "monitoring" },
+    { "from": "web-vmss", "to": "logs", "meaning": "monitoring" }
+  ]
+}

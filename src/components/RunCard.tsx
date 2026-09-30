@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Ban, CheckCircle2, ChevronDown, Circle, Loader2, XCircle, Zap } from "lucide-react";
-import type { RunRecord, RunStep } from "@/hooks/useDiagramAgent";
+import { FORMAT_LABEL, type DiagramFormat, type RunRecord, type RunStep } from "@/hooks/useDiagramAgent";
 import type { CatalogModel, ModelSelection } from "@/lib/llm/types";
 import type { PipelinePhase } from "@/lib/pipeline/refine-loop";
 import { Badge, Button, cn } from "./ui/primitives";
 
 export const PHASE_LABEL: Record<PipelinePhase, string> = {
   planning: "Planning architecture",
-  generating: "Writing D2",
+  generating: "Writing the diagram",
   rendering: "Rendering",
   reviewing: "Reviewing layout",
   refining: "Refining",
@@ -69,16 +69,23 @@ const OUTCOME: Record<string, { label: string; tone: "green" | "amber" | "sky" |
   render_failed: { label: "Render failed", tone: "rose", title: "The generated D2 did not compile" },
 };
 
+/** The other engine style a run can be redrawn in. */
+function redoFormat(format: DiagramFormat): DiagramFormat {
+  return format === "architecture" ? "composition" : "architecture";
+}
+
 export default function RunCard({
   run,
   models,
   onStop,
   onRetry,
+  onRedoAs,
 }: {
   run: RunRecord;
   models: CatalogModel[];
   onStop?: () => void;
   onRetry?: (run: RunRecord) => void;
+  onRedoAs?: (run: RunRecord, format: DiagramFormat) => void;
 }) {
   const running = run.status === "running";
   const now = useNow(running);
@@ -86,6 +93,8 @@ export default function RunCard({
   const showSteps = running || expanded;
   const elapsed = (run.endedAt ?? now) - run.startedAt;
   const outcome = run.outcome ? OUTCOME[run.outcome] : undefined;
+  const format = run.format ?? "d2";
+  const redo = onRedoAs && run.mode === "create" && !running ? redoFormat(format) : null;
 
   return (
     <div
@@ -133,6 +142,10 @@ export default function RunCard({
 
       {run.status === "done" && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Badge title={run.routed ? "Auto chose this style from your request" : "The diagram style of this run"}>
+            {FORMAT_LABEL[format]}
+            {run.routed ? " · auto" : ""}
+          </Badge>
           {outcome && (
             <Badge tone={outcome.tone} title={outcome.title}>
               {outcome.label}
@@ -183,6 +196,11 @@ export default function RunCard({
         {run.status === "failed" && onRetry && (
           <Button variant="secondary" size="xs" onClick={() => onRetry(run)}>
             Try again
+          </Button>
+        )}
+        {redo && (
+          <Button variant="ghost" size="xs" onClick={() => onRedoAs?.(run, redo)} title={`Draw this request again as a${redo === "architecture" ? "n" : ""} ${FORMAT_LABEL[redo]} diagram`}>
+            Redo as {FORMAT_LABEL[redo]}
           </Button>
         )}
         {!running && run.steps.length > 0 && (

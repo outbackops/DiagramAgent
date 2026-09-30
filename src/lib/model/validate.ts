@@ -1,5 +1,6 @@
+import { BOUNDARY_KINDS, MEANINGS, PLATFORMS, VIEWS, type NOverlay, type NSequence } from "@/lib/arch/spec";
 import { ensureParentsFirst } from "./query";
-import { NODE_ROLES, TONES, type Arrowhead, type Box, type DiagramEdge, type DiagramModel, type DiagramNode, type EdgeKind, type EdgeStyle, type LayoutHints, type NodeContent, type NodeStyle, type Point, type Size } from "./types";
+import { NODE_ROLES, TONES, type ArchModelMeta, type ArchNodeMeta, type Arrowhead, type Box, type DiagramEdge, type DiagramModel, type DiagramNode, type EdgeBadge, type EdgeKind, type EdgeStyle, type LayoutHints, type NodeContent, type NodeStyle, type Point, type Size } from "./types";
 
 /**
  * Strict validation for models that arrive from outside (browser storage, API
@@ -240,7 +241,78 @@ function validateNode(v: unknown, i: number): DiagramNode {
     role: optEnum(n.role, `${where}.role`, NODE_ROLES),
     tone: optEnum(n.tone, `${where}.tone`, TONES),
     content: nodeContent(n.content, `${where}.content`),
+    arch: archNodeMeta(n.arch, `${where}.arch`),
+    generated: optBool(n.generated, `${where}.generated`),
   }) as DiagramNode;
+}
+
+/** Bounds are generous: hand edits may exceed the spec's text budgets, and a loaded document must never be rejected for that. */
+function archNodeMeta(v: unknown, where: string): ArchNodeMeta | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const a = v as Record<string, unknown>;
+  return compact({
+    id: str(a.id, `${where}.id`, MODEL_LIMITS.idLength),
+    kind: optEnum(a.kind, `${where}.kind`, BOUNDARY_KINDS),
+    platform: optEnum(a.platform, `${where}.platform`, PLATFORMS),
+    detail: optStr(a.detail, `${where}.detail`, 400),
+    facts: optStr(a.facts, `${where}.facts`, 400),
+    iconKey: optStr(a.iconKey, `${where}.iconKey`, 200),
+  });
+}
+
+function edgeBadges(v: unknown, where: string): EdgeBadge[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > 4) fail(`${where} must be a list of at most 4 badges`);
+  return (v as unknown[]).map((b, i) => {
+    if (!isObject(b)) fail(`${where}[${i}] must be an object`);
+    const badge = b as Record<string, unknown>;
+    return compact({
+      sequence: str(badge.sequence, `${where}[${i}].sequence`, 100),
+      number: optInt(badge.number, `${where}[${i}].number`, { min: 1, max: 99 }) ?? fail(`${where}[${i}].number must be a whole number from 1 to 99`),
+      at: badge.at === undefined ? undefined : point(badge.at, `${where}[${i}].at`),
+    });
+  });
+}
+
+function archModelMeta(v: unknown, where: string): ArchModelMeta | undefined {
+  if (v === undefined) return undefined;
+  if (!isObject(v)) fail(`${where} must be an object`);
+  const a = v as Record<string, unknown>;
+  const list = (value: unknown, at: string, max: number) => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > max) fail(`${at} must be a list of at most ${max}`);
+    return value as unknown[];
+  };
+  const sequences: NSequence[] = list(a.sequences, `${where}.sequences`, 4).map((s, i) => {
+    if (!isObject(s)) fail(`${where}.sequences[${i}] must be an object`);
+    const seq = s as Record<string, unknown>;
+    return {
+      id: str(seq.id, `${where}.sequences[${i}].id`, 100),
+      name: str(seq.name, `${where}.sequences[${i}].name`, 200),
+      badge: optEnum(seq.badge, `${where}.sequences[${i}].badge`, ["circle", "square"] as const) ?? "circle",
+      steps: list(seq.steps, `${where}.sequences[${i}].steps`, 24).map((step, j) => str(step, `${where}.sequences[${i}].steps[${j}]`, 600)),
+    };
+  });
+  const overlays: NOverlay[] = list(a.overlays, `${where}.overlays`, 8).map((o, i) => {
+    if (!isObject(o)) fail(`${where}.overlays[${i}] must be an object`);
+    const ov = o as Record<string, unknown>;
+    return {
+      id: str(ov.id, `${where}.overlays[${i}].id`, 100),
+      kind: optEnum(ov.kind, `${where}.overlays[${i}].kind`, BOUNDARY_KINDS) ?? "group",
+      name: str(ov.name, `${where}.overlays[${i}].name`, 200),
+      members: list(ov.members, `${where}.overlays[${i}].members`, 240).map((m, j) => str(m, `${where}.overlays[${i}].members[${j}]`, MODEL_LIMITS.idLength)),
+    };
+  });
+  return compact({
+    title: str(a.title, `${where}.title`, 400),
+    subtitle: optStr(a.subtitle, `${where}.subtitle`, 800),
+    platform: optEnum(a.platform, `${where}.platform`, PLATFORMS),
+    view: optEnum(a.view, `${where}.view`, VIEWS),
+    sequences,
+    assumptions: list(a.assumptions, `${where}.assumptions`, 12).map((s, i) => str(s, `${where}.assumptions[${i}]`, 600)),
+    overlays,
+  });
 }
 
 function validateEdge(v: unknown, i: number): DiagramEdge {
@@ -262,6 +334,9 @@ function validateEdge(v: unknown, i: number): DiagramEdge {
     tone: optEnum(e.tone, `${where}.tone`, TONES),
     curve: optBool(e.curve, `${where}.curve`),
     labelAt: e.labelAt === undefined ? undefined : point(e.labelAt, `${where}.labelAt`),
+    meaning: optEnum(e.meaning, `${where}.meaning`, MEANINGS),
+    badges: edgeBadges(e.badges, `${where}.badges`),
+    hidden: optBool(e.hidden, `${where}.hidden`),
   }) as DiagramEdge;
 }
 
@@ -288,13 +363,17 @@ export function validateModel(input: unknown): ValidationResult {
       if (!ids.has(e.from) || !ids.has(e.to)) fail(`edge "${e.id}" references a missing node`);
     }
 
+    const kind = optEnum(m.kind, "kind", ["poster", "architecture"] as const);
     const model: DiagramModel = compact({
       version: 1 as const,
       layout: layoutHints(m.layout, "layout"),
       nodes,
       edges,
       handArranged: optBool(m.handArranged, "handArranged"),
-      composed: optBool(m.composed, "composed"),
+      // `kind` wins over the legacy Poster marker; an Architecture document is never also composed.
+      composed: kind === "architecture" ? undefined : optBool(m.composed, "composed"),
+      kind,
+      arch: kind === "architecture" ? archModelMeta(m.arch, "arch") : undefined,
     });
     return { ok: true, model };
   } catch (err) {

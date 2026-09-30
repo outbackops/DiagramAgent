@@ -1,4 +1,9 @@
 import { PAGE } from "@/lib/compose/theme";
+import { overlayGeometries } from "@/lib/arch/overlays";
+import { overlayTag } from "@/lib/arch/page";
+import { badgeStyle, boundaryStyle, connectorStyle, stepLabel, stylePack } from "@/lib/arch/styles";
+import { architectureExportView, architecturePageLines, badgeCenter, type ArchitectureExportView } from "./export-result";
+import { diagramKind } from "./kind";
 import type { DiagramEdge, DiagramModel, DiagramNode, Point } from "./types";
 
 type ElementBinding = { type: "text" | "arrow"; id: string };
@@ -50,13 +55,20 @@ interface TextElement extends BaseElement {
 interface ArrowElement extends BaseElement {
   type: "arrow";
   points: Array<[number, number]>;
-  startArrowhead: null;
+  startArrowhead: "arrow" | null;
   endArrowhead: "arrow" | null;
   startBinding: { elementId: string; focus: 0; gap: 4 } | null;
   endBinding: { elementId: string; focus: 0; gap: 4 } | null;
 }
 
-type ExcalidrawElement = RectangleElement | TextElement | ArrowElement;
+interface ImageElement extends BaseElement {
+  type: "image";
+  fileId: string;
+  status: "saved";
+  scale: [1, 1];
+}
+
+type ExcalidrawElement = RectangleElement | TextElement | ArrowElement | ImageElement;
 
 const SOURCE = "https://github.com/outbackops/DiagramAgent";
 const DARK_TEXT = "#1b1f24";
@@ -145,7 +157,22 @@ function rectForNode(node: DiagramNode, id: string, container: boolean): Rectang
   };
 }
 
+function archStyledNode(view: ArchitectureExportView, model: DiagramModel, node: DiagramNode): DiagramNode {
+  if (node.role === "boundary" || (node.container && !node.generated)) {
+    const style = boundaryStyle(view.boundaryPlatforms.get(node.id) ?? view.platform, node.arch?.kind ?? "group");
+    return { ...node, style: { fill: style.fill === "none" ? "transparent" : style.fill, stroke: style.stroke, strokeWidth: style.strokeWidth, strokeDash: style.dash ? 6 : undefined, borderRadius: style.radius, fontColor: style.headerColor, bold: style.bold }, container: true };
+  }
+  if (node.generated) {
+    const [label, ...lines] = architecturePageLines(model, node);
+    return { ...node, label, content: { ...node.content, lines }, style: { fill: "transparent", stroke: "transparent", fontColor: stylePack(view.platform).text, fontSize: node.role === "title" ? 20 : 12, bold: node.role === "title" } };
+  }
+  const pack = stylePack(view.platform);
+  return { ...node, style: { fill: pack.node.cardFill ?? "#ffffff", stroke: pack.node.cardStroke ?? "#D0D7DE", strokeWidth: 1, fontColor: pack.text, fontSize: 12 } };
+}
+
 function linesForNode(node: DiagramNode): string[] {
+  if (node.role === "boundary") return [node.label, node.arch?.facts].filter((line): line is string => Boolean(line));
+  if (node.role === "service") return [node.label, node.arch?.detail].filter((line): line is string => Boolean(line));
   const lines = [node.label];
   if (!node.content) return lines;
   const c = node.content;
@@ -306,12 +333,44 @@ function arrowForEdge(edge: DiagramEdge, id: string, nodeIds: Map<string, string
   };
 }
 
+function archArrowForEdge(view: ArchitectureExportView, edge: DiagramEdge, id: string, nodeIds: Map<string, string>): ArrowElement | null {
+  const arrow = arrowForEdge(edge, id, nodeIds);
+  if (!arrow) return null;
+  const style = connectorStyle(view.platform, edge.meaning ?? "request");
+  return { ...arrow, strokeColor: style.stroke, strokeWidth: style.width, strokeStyle: style.dash ? "dashed" : "solid", startArrowhead: style.arrowStart === "none" ? null : "arrow", endArrowhead: style.arrowEnd === "none" ? null : "arrow" };
+}
+
+function imageDataUrl(icon: string): string {
+  const safe = icon.replace(/"/g, "&quot;");
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><image href="${safe}" width="64" height="64" preserveAspectRatio="xMidYMid meet"/></svg>`)}`;
+}
+
+function imageElementForNode(node: DiagramNode, id: string, fileId: string): ImageElement {
+  const size = Math.min(48, Math.max(24, Math.min(node.box.w, node.box.h) - 36));
+  return {
+    ...baseElement(id, "image"),
+    type: "image",
+    x: Math.round(node.box.x + node.box.w / 2 - size / 2),
+    y: Math.round(node.box.y + 10),
+    width: size,
+    height: size,
+    backgroundColor: "transparent",
+    strokeColor: "transparent",
+    fileId,
+    status: "saved",
+    scale: [1, 1],
+  };
+}
+
 export function modelToExcalidraw(model: DiagramModel): string {
+  if (diagramKind(model) === "architecture") return modelToArchitectureExcalidraw(model);
   const used = new Set<string>();
   const children = new Map<string, DiagramNode[]>();
   for (const node of model.nodes) {
     if (!node.parent) continue;
-    children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+    const siblings = children.get(node.parent);
+    if (siblings) siblings.push(node);
+    else children.set(node.parent, [node]);
   }
 
   const nodeIds = new Map<string, string>();
@@ -364,8 +423,106 @@ export function modelToExcalidraw(model: DiagramModel): string {
       version: 2,
       source: SOURCE,
       elements,
-      appState: { viewBackgroundColor: model.composed ? PAGE.background : "#ffffff", gridSize: null },
+      appState: { viewBackgroundColor: diagramKind(model) === "poster" ? PAGE.background : "#ffffff", gridSize: null },
       files: {},
+    },
+    null,
+    2
+  );
+}
+
+function modelToArchitectureExcalidraw(model: DiagramModel): string {
+  const used = new Set<string>();
+  const children = new Map<string, DiagramNode[]>();
+  for (const node of model.nodes) {
+    if (!node.parent) continue;
+    const siblings = children.get(node.parent);
+    if (siblings) siblings.push(node);
+    else children.set(node.parent, [node]);
+  }
+
+  const nodeIds = new Map<string, string>();
+  const view = architectureExportView(model);
+  const styledNodes = model.nodes.map((node) => archStyledNode(view, model, node));
+  const rectangles = styledNodes.map((node) => {
+    const id = elementId(`node:${node.id}`, used);
+    nodeIds.set(node.id, id);
+    return { node, rect: rectForNode(node, id, isContainer(node, children)) };
+  });
+  const containers = rectangles.filter(({ node }) => isContainer(node, children));
+  const leaves = rectangles.filter(({ node }) => !isContainer(node, children));
+  const arrows: ArrowElement[] = [];
+  const texts: TextElement[] = [];
+  const images: ImageElement[] = [];
+  const files: Record<string, { mimeType: "image/svg+xml"; id: string; dataURL: string; created: 1 }> = {};
+
+  for (const { node, rect } of rectangles) {
+    const freeText = node.generated || node.role === "boundary";
+    const textId = elementId(`text:${node.id}`, used);
+    texts.push(textForNode(node, rect.id, textId, !freeText));
+    if (!freeText) rect.boundElements?.push({ type: "text", id: textId });
+    if (node.role === "service" && node.icon?.startsWith("/icons/")) {
+      const fileId = elementId(`file:${node.icon}`, used);
+      files[fileId] = { id: fileId, mimeType: "image/svg+xml", dataURL: imageDataUrl(node.icon), created: 1 };
+      images.push(imageElementForNode(node, elementId(`image:${node.id}`, used), fileId));
+    }
+  }
+
+  for (const overlay of overlayGeometries(model)) {
+    if (overlay.clean) {
+      const id = elementId(`overlay:${overlay.overlay.name}`, used);
+      const rect = rectForNode({ id, parent: null, label: overlay.overlay.name, shape: "rectangle", box: overlay.box, style: { fill: "transparent", stroke: "#ED7100", strokeDash: 6, strokeWidth: 1.5, fontColor: "#ED7100" }, container: false }, id, false);
+      containers.push({ node: { ...styledNodes[0], id, label: overlay.overlay.name, box: overlay.box }, rect });
+    } else {
+      const tag = overlayTag(overlay.overlay);
+      for (const memberId of overlay.memberIds) {
+        const node = styledNodes.find((candidate) => candidate.id === memberId);
+        if (!node) continue;
+        texts.push(textElement({ id: elementId(`overlay-tag:${memberId}:${tag}`, used), text: tag, x: node.box.x + node.box.w - 36, y: node.box.y + 4, width: 32, fontSize: 10, color: "#ED7100", align: "center" }));
+      }
+    }
+  }
+
+  for (const edge of model.edges.filter((candidate) => !candidate.hidden)) {
+    const arrowId = elementId(`edge:${edge.id}`, used);
+    const arrow = archArrowForEdge(view, edge, arrowId, nodeIds);
+    if (!arrow) continue;
+    arrows.push(arrow);
+    if (edge.label) {
+      const point = edge.labelAt ?? longestSegmentMidpoint(edge.curve ? sampleCurve(edge.route) : edge.route);
+      texts.push(textElement({ id: elementId(`edge-label:${edge.id}`, used), text: edge.label, x: point.x - 70, y: point.y - 10, width: 140, fontSize: 12, color: DARK_TEXT, align: "center" }));
+    }
+    for (const badge of edge.badges ?? []) {
+      const at = badge.at ?? badgeCenter(edge);
+      const page = view.platform;
+      const sequenceIndex = Math.max(0, (model.arch?.sequences ?? []).findIndex((sequence) => sequence.id === badge.sequence));
+      const style = badgeStyle(page, sequenceIndex);
+      const badgeId = elementId(`badge:${edge.id}:${badge.number}`, used);
+      const mark = stepLabel(sequenceIndex, badge.number);
+      containers.push({
+        node: { ...styledNodes[0], id: badgeId, label: mark, box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 } },
+        rect: { ...rectForNode({ id: badgeId, parent: null, label: mark, shape: "rectangle", box: { x: at.x - 9, y: at.y - 9, w: 18, h: 18 }, style: { fill: style.fill, stroke: style.fill, fontColor: style.text, fontSize: 10, bold: true }, container: false }, badgeId, false), roundness: style.shape === "circle" ? { type: 2 } : { type: 3 } },
+      });
+      texts.push(textElement({ id: elementId(`badge-text:${edge.id}:${badge.number}`, used), text: mark, x: at.x - 9, y: at.y - 7, width: 18, fontSize: 10, color: style.text, align: "center", verticalAlign: "middle" }));
+    }
+  }
+
+  const elements: ExcalidrawElement[] = [
+    ...containers.map((entry) => entry.rect),
+    ...leaves.map((entry) => entry.rect),
+    ...images,
+    ...arrows,
+    ...texts,
+  ].map((element) => ({ ...element, boundElements: element.boundElements && element.boundElements.length > 0 ? element.boundElements : null }));
+
+  return JSON.stringify(
+    {
+      type: "excalidraw",
+      version: 2,
+      source: SOURCE,
+      elements,
+      appState: { viewBackgroundColor: stylePack(view.platform).background, gridSize: null },
+      files,
     },
     null,
     2

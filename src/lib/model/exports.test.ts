@@ -7,11 +7,13 @@ import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 
 import { composeText } from "@/lib/compose";
+import { composeArchitectureText } from "@/lib/arch";
 import { compileD2 } from "../d2-render";
 import { iconBox } from "./render-svg";
 import { modelFromCompiled } from "./from-d2";
+import { modelToD2Result } from "./to-d2";
 import { modelToDrawio } from "./to-drawio";
-import { modelToMermaid } from "./to-mermaid";
+import { modelToMermaid, modelToMermaidResult } from "./to-mermaid";
 import { modelToVsdx } from "./to-vsdx";
 import type { Box, DiagramModel } from "./types";
 
@@ -184,6 +186,11 @@ function edgeCaseModel(): DiagramModel {
 async function composedFixtureModel(): Promise<DiagramModel> {
   const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "compositions", "knowledge-assistant.json"), "utf8");
   return composeText(fixture).model;
+}
+
+async function architectureFixtureModel(name = "azure-zone-redundant-web.json"): Promise<DiagramModel> {
+  const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "architecture", name), "utf8");
+  return (await composeArchitectureText(fixture)).model;
 }
 
 interface Cell {
@@ -445,6 +452,71 @@ describe("model exports", () => {
     expect(mermaid).toContain("-.->|\"SQL &lt;read&gt;\"|");
     expect(mermaid).toContain("API #quot;Gateway#quot;");
   });
+
+  it("exports architecture draw.io with icons, styled boundaries, step badges, overlays, and no hidden edges", async () => {
+    const model = await architectureFixtureModel();
+    const hidden = model.edges.find((edge) => edge.hidden);
+    expect(hidden).toBeDefined();
+    const xml = await modelToDrawio(model);
+    const cells = parseCells(xml);
+    const visibleEdges = model.edges.filter((edge) => !edge.hidden);
+
+    expect(xml).toContain("shape=image");
+    expect(xml).toContain("image=data:image/svg+xml,");
+    expect(xml).toContain("Spoke virtual network");
+    expect(xml).toContain("strokeColor=#1490DF");
+    expect(xml).toContain("dashed=1");
+    expect(xml).toContain("Gateway subnet");
+    expect(cells.some((cell) => cell.value === "1" && cell.w === 18 && cell.h === 18)).toBe(true);
+    expect(cells.filter((cell) => cell.source !== undefined && cell.target !== undefined)).toHaveLength(visibleEdges.length);
+    expect(xml).not.toContain(hidden!.id);
+
+    const aws = await architectureFixtureModel("aws-multi-az-three-tier.json");
+    const overlayXml = await modelToDrawio(aws);
+    expect(overlayXml).toMatch(/Auto Scaling|ASG|overlay/);
+    const overlayCells = parseCells(overlayXml).filter((cell) => cell.id.startsWith("overlay-"));
+    expect(overlayCells.length).toBeGreaterThan(0);
+    expect(overlayCells.some((cell) => cell.style.includes("strokeColor=#ED7100"))).toBe(true);
+
+    const vsdx = await JSZip.loadAsync(await modelToVsdx(model));
+    const page = await vsdx.file("visio/pages/page1.xml")!.async("string");
+    const badgeShape = page.match(/<Shape ID="\d+" NameU="badge\.[^"]+"[\s\S]*?<\/Shape>/)?.[0] ?? "";
+    expect(badgeShape).toContain('<Cell N="FillForegnd" V="#107C10"/>');
+    expect(badgeShape).toContain('<Cell N="Color" V="#FFFFFF"/>');
+  }, 120000);
+
+  it("exports architecture Mermaid and D2 topology with grouped boundaries, step labels, hidden logical links, and one warning", async () => {
+    const model = await architectureFixtureModel();
+    const hidden = model.edges.find((edge) => edge.hidden);
+    const mermaid = modelToMermaidResult(model);
+    const d2 = modelToD2Result(model);
+
+    expect(mermaid.content).toContain("subgraph");
+    expect(mermaid.content).toMatch(/\(1\).*HTTPS 443/);
+    expect(mermaid.warnings).toHaveLength(1);
+    expect(mermaid.warnings[0]).toMatch(/drops embedded icons/);
+    expect(d2.content).toContain("Spoke virtual network");
+    expect(d2.content).toContain(JSON.stringify("Spoke virtual network\n10.20.0.0/16"));
+    expect(d2.content).toMatch(/\(1\).*HTTPS 443/);
+    expect(d2.warnings).toHaveLength(1);
+    if (hidden) {
+      expect(mermaid.content).toContain("logical link");
+      expect(d2.content).toContain("logical link");
+    }
+  }, 120000);
+
+  it("escapes architecture names in draw.io, Mermaid, D2 and VSDX exports", async () => {
+    const model = await architectureFixtureModel();
+    const service = model.nodes.find((node) => node.role === "service")!;
+    service.label = "API <Gateway> & \"Auth\"";
+    const drawio = await modelToDrawio(model, { embedIcons: false });
+    expect(drawio).toContain("API &amp;lt;Gateway&amp;gt; &amp;amp; &quot;Auth&quot;");
+    expect(modelToMermaid(model)).toContain("API &lt;Gateway&gt; &amp; #quot;Auth#quot;");
+    expect(modelToD2Result(model).content).toContain(JSON.stringify("API <Gateway> & \"Auth\""));
+    const zip = await JSZip.loadAsync(await modelToVsdx(model));
+    const page = await zip.file("visio/pages/page1.xml")!.async("string");
+    expect(page).toContain("API &lt;Gateway&gt; &amp; &quot;Auth&quot;");
+  }, 120000);
 
   it("exports empty and no-icon edge-case models to draw.io without throwing", async () => {
     await expect(modelToDrawio({ version: 1, nodes: [], edges: [] })).resolves.toContain("<mxfile");

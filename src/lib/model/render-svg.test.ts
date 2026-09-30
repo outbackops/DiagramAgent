@@ -62,6 +62,20 @@ describe("renderModelSvg", () => {
     expect(svg).not.toContain("<script>");
   });
 
+  it("writes one fill per element, so a double border stays valid XML for PNG export", () => {
+    const svg = renderModelSvg({
+      version: 1,
+      nodes: [
+        node({ id: "done", shape: "circle", style: { fill: "#ffffff", doubleBorder: true } }),
+        node({ id: "shipped", box: { x: 200, y: 0, w: 100, h: 60 }, style: { fill: "#E6F4EA", doubleBorder: true, multiple: true } }),
+      ],
+      edges: [],
+    });
+    expect(svg).not.toMatch(/<[a-z]+[^>]*\sfill="[^"]*"[^>]*\sfill="[^"]*"/i);
+    // The inner outline is unfilled, so the node's own fill still shows.
+    expect(svg).toMatch(/<ellipse[^>]*fill="none"/);
+  });
+
   it("omits unsafe icons and keeps vendored and data image icons", () => {
     const dataUri = "data:image/png;base64,AAAA";
     const svg = renderModelSvg({

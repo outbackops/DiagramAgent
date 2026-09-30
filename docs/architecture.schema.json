@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/outbackops/DiagramAgent/blob/main/docs/architecture.schema.json",
+  "title": "DiagramAgent Architecture spec",
+  "description": "A system as a topology: components with service icons and details, nested typed boundaries, connections with a meaning, numbered step sequences, overlays and assumptions. No coordinates: the engine lays everything out. Guide: docs/architecture-guide.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "items"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "title": { "type": "string", "maxLength": 80, "description": "States what the diagram shows and its scope, e.g. 'Zone-redundant web app — production'." },
+    "subtitle": { "type": "string", "maxLength": 160 },
+    "platform": { "$ref": "#/$defs/Platform", "description": "Optional; inferred from the icons when omitted." },
+    "view": { "enum": ["deployment", "network", "application", "dataflow", "context"], "description": "Which view of the system this is; decides what belongs on the page." },
+    "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Item" }, "description": "Top-level components and boundaries in reading order (entry points first)." },
+    "connections": { "type": "array", "maxItems": 80, "items": { "$ref": "#/$defs/Connection" } },
+    "sequences": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/Sequence" }, "description": "Numbered workflows; the first draws circle badges, the second squares." },
+    "overlays": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/Overlay" }, "description": "Boundaries that span others, such as an Auto Scaling group across Availability Zones." },
+    "assumptions": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 }, "description": "Proposed values the prompt didn't give (tiers, address ranges, counts): at most 6 of your own. The app may add up to 2 lines starting \"Proposed, not in the request:\" that list facts the request didn't state." }
+  },
+  "$defs": {
+    "Platform": { "enum": ["azure", "aws", "gcp", "kubernetes", "neutral"] },
+    "Id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "maxLength": 48, "description": "Stable kebab-case id; keep it across edits." },
+    "Item": { "oneOf": [{ "$ref": "#/$defs/Component" }, { "$ref": "#/$defs/Boundary" }] },
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "name": { "type": "string", "maxLength": 60, "description": "Specific service or component name." },
+        "icon": { "type": "string", "description": "An icon key from public/icons/manifest.json, e.g. azure-app-service, aws-lambda, k8s-deployment." },
+        "detail": { "type": "string", "maxLength": 60, "description": "One line: SKU or tier, instance count, runtime or version, port." }
+      }
+    },
+    "Boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "items"],
+      "properties": {
+        "type": { "const": "group" },
+        "id": { "$ref": "#/$defs/Id" },
+        "kind": {
+          "enum": ["group", "shared", "cloud", "account", "subscription", "resource-group", "project", "region", "zone", "vnet", "vpc", "subnet", "public-subnet", "private-subnet", "security-group", "scaling-group", "cluster", "namespace", "node-pool", "onprem", "external"],
+          "description": "Drawn in the platform's convention for this kind; `shared` groups cross-cutting services in a band."
+        },
+        "name": { "type": "string", "maxLength": 60 },
+        "facts": { "type": "string", "maxLength": 60, "description": "Header facts: address range, region, zone, namespace." },
+        "platform": { "$ref": "#/$defs/Platform" },
+        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Item" } }
+      }
+    },
+    "Connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string", "description": "Id (or unique name) of the component or boundary that starts the interaction." },
+        "to": { "type": "string" },
+        "meaning": { "enum": ["request", "async", "replication", "private-link", "peering", "vpn", "monitoring", "management", "egress"] },
+        "label": { "type": "string", "maxLength": 40, "description": "Protocol, port or purpose, e.g. 'HTTPS 443'." },
+        "step": {
+          "oneOf": [
+            { "type": "string", "pattern": "^([A-Za-z][\\w-]*[.:#])?\\d{1,2}$" },
+            { "type": "integer", "minimum": 1 },
+            { "type": "object", "additionalProperties": false, "required": ["number"], "properties": { "sequence": { "type": "string" }, "number": { "type": "integer", "minimum": 1 } } }
+          ],
+          "description": "The numbered step this connection belongs to: 'in.2', 2, or {sequence, number}."
+        }
+      }
+    },
+    "Sequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "name": { "type": "string", "maxLength": 60 },
+        "steps": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 160 } }
+      }
+    },
+    "Overlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "members"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "kind": { "enum": ["scaling-group", "security-group", "group"] },
+        "name": { "type": "string", "maxLength": 60 },
+        "members": { "type": "array", "minItems": 2, "items": { "type": "string" } }
+      }
+    }
+  }
+}

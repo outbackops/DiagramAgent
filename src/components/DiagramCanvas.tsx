@@ -3,10 +3,11 @@
 import { useState, type ReactNode } from "react";
 import { AlertOctagon, Braces, Clipboard, Download, FileCode2, FileImage, Image as ImageIcon, Layers, Wand2 } from "lucide-react";
 import { api, downloadBlob, safeFileName } from "@/lib/client/api";
+import { diagramKind } from "@/lib/model/kind";
 import { renderModelSvg } from "@/lib/model/render-svg";
-import { modelToD2 } from "@/lib/model/to-d2";
+import { modelToD2Result } from "@/lib/model/to-d2";
 import { modelToExcalidraw } from "@/lib/model/to-excalidraw";
-import { modelToMermaid } from "@/lib/model/to-mermaid";
+import { modelToMermaidResult } from "@/lib/model/to-mermaid";
 import type { DiagramModel } from "@/lib/model/types";
 import type { QualityReport } from "@/lib/quality/diagram-quality";
 import { MenuItem, Popover } from "./ui/Popover";
@@ -36,8 +37,15 @@ function ExportMenu({ model, title }: { model: DiagramModel | null; title: strin
     );
   };
 
-  const d2 = model ? modelToD2(model) : "";
-  const mermaid = model ? modelToMermaid(model) : "";
+  const showWarnings = (warnings: string[]) => {
+    if (warnings.length) toast({ tone: "info", title: "Export warnings", description: warnings.join("\n") });
+  };
+  const d2 = model ? modelToD2Result(model) : { content: "", warnings: [] };
+  const mermaid = model ? modelToMermaidResult(model) : { content: "", warnings: [] };
+  const downloadExportBlob = async (result: { blob: Blob; warnings: string[] }, fileName: string) => {
+    downloadBlob(result.blob, fileName);
+    showWarnings(result.warnings);
+  };
 
   return (
     <Popover
@@ -61,17 +69,17 @@ function ExportMenu({ model, title }: { model: DiagramModel | null; title: strin
       {(close) => (
         <div role="menu" aria-label="Export">
           <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Image</p>
-          <MenuItem icon={<ImageIcon className="size-3.5" />} disabled={!model} hint=".svg" onSelect={() => { if (!model) return; close(); downloadBlob(new Blob([renderModelSvg(model, model.composed ? { padding: 0 } : {})], { type: "image/svg+xml" }), `${base}.svg`); }}>SVG</MenuItem>
-          <MenuItem icon={<FileImage className="size-3.5" />} disabled={!model} hint=".png" onSelect={() => { if (!model) return; close(); void run("PNG", async () => downloadBlob(await api.exportPng(model), `${base}.png`)); }}>PNG (high resolution)</MenuItem>
+          <MenuItem icon={<ImageIcon className="size-3.5" />} disabled={!model} hint=".svg" onSelect={() => { if (!model) return; close(); downloadBlob(new Blob([renderModelSvg(model, diagramKind(model) !== "graph" ? { padding: 0 } : {})], { type: "image/svg+xml" }), `${base}.svg`); }}>SVG</MenuItem>
+          <MenuItem icon={<FileImage className="size-3.5" />} disabled={!model} hint=".png" onSelect={() => { if (!model) return; close(); void run("PNG", async () => downloadExportBlob(await api.exportPng(model), `${base}.png`)); }}>PNG (high resolution)</MenuItem>
           <p className="px-2.5 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Editable</p>
-          <MenuItem icon={<Layers className="size-3.5" />} disabled={!model} hint=".drawio" onSelect={() => { if (!model) return; close(); void run("draw.io", async () => downloadBlob(await api.exportDrawio(model, title), `${base}.drawio`)); }}>draw.io / diagrams.net</MenuItem>
-          <MenuItem icon={<FileCode2 className="size-3.5" />} disabled={!model} hint=".vsdx" onSelect={() => { if (!model) return; close(); void run("Visio", async () => downloadBlob(await api.exportVisio(model, title), `${base}.vsdx`)); }}>Microsoft Visio</MenuItem>
+          <MenuItem icon={<Layers className="size-3.5" />} disabled={!model} hint=".drawio" onSelect={() => { if (!model) return; close(); void run("draw.io", async () => downloadExportBlob(await api.exportDrawio(model, title), `${base}.drawio`)); }}>draw.io / diagrams.net</MenuItem>
+          <MenuItem icon={<FileCode2 className="size-3.5" />} disabled={!model} hint=".vsdx" onSelect={() => { if (!model) return; close(); void run("Visio", async () => downloadExportBlob(await api.exportVisio(model, title), `${base}.vsdx`)); }}>Microsoft Visio</MenuItem>
           <MenuItem icon={<FileCode2 className="size-3.5" />} disabled={!model} hint=".excalidraw" onSelect={() => { if (!model) return; close(); downloadBlob(new Blob([modelToExcalidraw(model)], { type: "application/json" }), `${base}.excalidraw`); }}>Excalidraw</MenuItem>
-          <MenuItem icon={<Braces className="size-3.5" />} disabled={!model} hint=".d2" onSelect={() => { close(); downloadBlob(new Blob([d2], { type: "text/plain" }), `${base}.d2`); }}>D2 source</MenuItem>
-          <MenuItem icon={<Braces className="size-3.5" />} disabled={!model} hint=".mmd" onSelect={() => { close(); downloadBlob(new Blob([mermaid], { type: "text/plain" }), `${base}.mmd`); }}>Mermaid</MenuItem>
+          <MenuItem icon={<Braces className="size-3.5" />} disabled={!model} hint=".d2" onSelect={() => { close(); downloadBlob(new Blob([d2.content], { type: "text/plain" }), `${base}.d2`); showWarnings(d2.warnings); }}>D2 source</MenuItem>
+          <MenuItem icon={<Braces className="size-3.5" />} disabled={!model} hint=".mmd" onSelect={() => { close(); downloadBlob(new Blob([mermaid.content], { type: "text/plain" }), `${base}.mmd`); showWarnings(mermaid.warnings); }}>Mermaid</MenuItem>
           <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
-          <MenuItem icon={<Clipboard className="size-3.5" />} disabled={!model} onSelect={() => { close(); copy("D2", d2); }}>Copy D2</MenuItem>
-          <MenuItem icon={<Clipboard className="size-3.5" />} disabled={!model} onSelect={() => { close(); copy("Mermaid", mermaid); }}>Copy Mermaid</MenuItem>
+          <MenuItem icon={<Clipboard className="size-3.5" />} disabled={!model} onSelect={() => { close(); copy("D2", d2.content); showWarnings(d2.warnings); }}>Copy D2</MenuItem>
+          <MenuItem icon={<Clipboard className="size-3.5" />} disabled={!model} onSelect={() => { close(); copy("Mermaid", mermaid.content); showWarnings(mermaid.warnings); }}>Copy Mermaid</MenuItem>
         </div>
       )}
     </Popover>

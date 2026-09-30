@@ -1,15 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { composeArchitecture, composeArchitectureText, modelArchSpecText, modelToArchSpec, recomposeArchitecture } from "@/lib/arch";
+import type { ArchSpecInput } from "@/lib/arch/spec";
 import { api } from "@/lib/client/api";
 import { composeText, modelSpecText, pageWidthOf, recompose } from "@/lib/compose";
 import { looksLikeSpec } from "@/lib/compose/partial";
+import { diagramKind } from "@/lib/model/kind";
 import { commit, createHistory, redo as redoHistory, undo as undoHistory, type History } from "@/lib/model/history";
 import { carryContainers, mergeStable } from "@/lib/model/merge";
 import { routeModelEdges } from "@/lib/model/route";
 import { modelToD2 } from "@/lib/model/to-d2";
 import type { DiagramModel } from "@/lib/model/types";
 import { validateModel } from "@/lib/model/validate";
+import { formatOfCode } from "@/lib/spec-format";
 
 export const MODEL_STORAGE_KEY = "diagramAgent.model.v1";
 /** Where a saved model that no longer validates is kept, instead of being deleted. */
@@ -28,6 +32,16 @@ export interface AcceptResult {
 }
 
 export type DocumentStatus = "loading" | "migrating" | "ready";
+
+/** What converting a Graph document to Architecture would produce, shown before it happens. */
+export interface ArchitectureConversion {
+  spec: ArchSpecInput;
+  components: number;
+  boundaries: number;
+  connections: number;
+  /** What doesn't carry over (shapes, colours, tooltips, custom icons, layout hints). */
+  lost: string[];
+}
 
 /** After a chat edit merged into the layout, many new or regrouped items deserve a fresh layout (R16). */
 export function suggestsTidyUp(result: AcceptResult, layout: RunLayout): boolean {
@@ -58,6 +72,29 @@ function readLegacyCode(): string {
   } catch {
     return "";
   }
+}
+
+/** Lays a spec (Architecture or Poster, told apart by its shape) out in the browser. */
+async function composeSpecText(code: string): Promise<{ model: DiagramModel; warnings: string[] }> {
+  if (formatOfCode(code) === "architecture") {
+    const { model, warnings, report } = await composeArchitectureText(code);
+    return { model, warnings: [...warnings, ...report.warnings] };
+  }
+  return composeText(code);
+}
+
+function countSpec(items: ArchSpecInput["items"]): { components: number; boundaries: number } {
+  let components = 0;
+  let boundaries = 0;
+  for (const item of items) {
+    if ("items" in item && Array.isArray(item.items)) {
+      boundaries++;
+      const inner = countSpec(item.items);
+      components += inner.components;
+      boundaries += inner.boundaries;
+    } else components++;
+  }
+  return { components, boundaries };
 }
 
 async function importCode(code: string, signal?: AbortSignal): Promise<{ model: DiagramModel; warnings: string[] }> {
@@ -112,18 +149,24 @@ export function useDiagramDocument() {
       setStatus("ready");
       return;
     }
-    // The last run's code can be a composition spec (a reload mid-run): compose it rather than import D2.
+    let cancelled = false;
+    // The last run's code can be a spec (a reload mid-run): lay it out rather than import D2.
     if (looksLikeSpec(legacy)) {
-      try {
-        setHistory(createHistory(composeText(legacy).model));
-      } catch {
-        // An unfinished spec: start empty rather than show an error for a draft.
-      }
-      setStatus("ready");
-      return;
+      composeSpecText(legacy)
+        .then(({ model: composed }) => {
+          if (!cancelled) setHistory(createHistory(composed));
+        })
+        .catch(() => {
+          // An unfinished spec: start empty rather than show an error for a draft.
+        })
+        .finally(() => {
+          if (!cancelled) setStatus("ready");
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     setStatus("migrating");
-    let cancelled = false;
     importCode(legacy)
       .then(({ model: imported }) => {
         if (!cancelled) setHistory(createHistory(imported));
@@ -193,13 +236,20 @@ export function useDiagramDocument() {
     return { added: imported.nodes.length, regrouped: 0, warnings };
   }, [replace]);
 
-  /** Re-lays out the current diagram (R15): composed diagrams are recomposed from their spec, graphs re-run D2's layout. */
+  /** Re-lays out the current diagram (R15): Poster and Architecture diagrams are recomposed from their spec, graphs re-run D2's layout. */
   const tidyUp = useCallback(async () => {
     const started = generation.current;
     const current = historyRef.current.present;
     if (!current || current.nodes.length === 0) return;
-    if (current.composed) {
+    const kind = diagramKind(current);
+    if (kind === "poster") {
       replace({ ...recompose(current).model, handArranged: false });
+      return;
+    }
+    if (kind === "architecture") {
+      const { model: laidOut } = await recomposeArchitecture(current);
+      if (generation.current !== started) throw new Error("The diagram changed while it was being tidied. Try again.");
+      replace({ ...laidOut, handArranged: false });
       return;
     }
     const { model: imported } = await importCode(modelToD2(current));
@@ -209,26 +259,35 @@ export function useDiagramDocument() {
   }, [replace]);
 
   /**
-   * Lands a run's composition spec on the canvas. The layout is deterministic,
-   * so an edit keeps everything it didn't touch in place; the page width is
-   * kept too, so the page doesn't reflow.
+   * Lands a run's spec on the canvas. Poster layouts are deterministic, so an
+   * edit keeps everything it didn't touch in place, and the page width is kept
+   * so the page doesn't reflow. Architecture specs are laid out afresh.
    */
   const acceptRunSpec = useCallback(
-    (spec: string): AcceptResult => {
-      const current = historyRef.current.present;
-      const { model: composed, warnings } = composeText(spec, { preferWidth: pageWidthOf(current) });
+    async (spec: string, format: "composition" | "architecture" = "composition"): Promise<AcceptResult> => {
+      const started = generation.current;
+      if (format === "architecture") {
+        const { model: laidOut, warnings, report } = await composeArchitectureText(spec);
+        // Async results only land if the diagram hasn't changed (edit, undo, New…) meanwhile.
+        if (generation.current !== started) return { added: 0, regrouped: 0, warnings: [] };
+        replace({ ...laidOut, handArranged: false });
+        return { added: 0, regrouped: 0, warnings: [...warnings, ...report.warnings] };
+      }
+      const { model: composed, warnings } = composeText(spec, { preferWidth: pageWidthOf(historyRef.current.present) });
       replace({ ...composed, handArranged: false });
       return { added: 0, regrouped: 0, warnings };
     },
     [replace],
   );
 
-  /** Opens D2 or a composition spec (JSON) from elsewhere as the current diagram (undoable). */
+  /** Opens D2 or a spec (Architecture or Poster JSON) from elsewhere as the current diagram (undoable). */
   const importD2 = useCallback(
     async (code: string, signal?: AbortSignal): Promise<string[]> => {
       const started = generation.current;
       if (looksLikeSpec(code)) {
-        const { model: composed, warnings } = composeText(code);
+        const { model: composed, warnings } = await composeSpecText(code);
+        if (signal?.aborted) throw new DOMException("Import cancelled", "AbortError");
+        if (generation.current !== started) throw new Error("The diagram changed while importing. Try again.");
         replace(composed);
         return warnings;
       }
@@ -257,9 +316,33 @@ export function useDiagramDocument() {
     setHistory((h) => redoHistory(h));
   }, []);
 
+  /** The Architecture spec a Graph document would become and what doesn't carry over; null when there's nothing to convert. */
+  const previewArchitecture = useCallback((): ArchitectureConversion | null => {
+    const current = historyRef.current.present;
+    if (!current || current.nodes.length === 0 || diagramKind(current) !== "graph") return null;
+    const { spec, lost } = modelToArchSpec(current);
+    return { spec, ...countSpec(spec.items), connections: spec.connections?.length ?? 0, lost };
+  }, []);
+
+  /** Replaces the Graph document with its Architecture layout (one undoable step); returns the normaliser's warnings. */
+  const convertToArchitecture = useCallback(
+    async (spec: ArchSpecInput): Promise<string[]> => {
+      const started = generation.current;
+      const { model: laidOut, warnings, report } = await composeArchitecture(spec);
+      if (generation.current !== started) throw new Error("The diagram changed while converting. Try again.");
+      replace({ ...laidOut, handArranged: false });
+      return [...warnings, ...report.warnings];
+    },
+    [replace],
+  );
+
   const d2 = useMemo(() => (model && model.nodes.length > 0 ? modelToD2(model) : ""), [model]);
-  /** The composition spec of a composed diagram (what AI edits start from); "" otherwise. */
-  const specText = useMemo(() => (model?.composed && model.nodes.length > 0 ? modelSpecText(model) : ""), [model]);
+  /** The spec of a Poster or Architecture diagram (what AI edits start from); "" for graphs. */
+  const specText = useMemo(() => {
+    if (!model || model.nodes.length === 0) return "";
+    const kind = diagramKind(model);
+    return kind === "poster" ? modelSpecText(model) : kind === "architecture" ? modelArchSpecText(model) : "";
+  }, [model]);
 
   return {
     model,
@@ -278,6 +361,8 @@ export function useDiagramDocument() {
     acceptRunSpec,
     tidyUp,
     importD2,
+    previewArchitecture,
+    convertToArchitecture,
     clear,
   };
 }

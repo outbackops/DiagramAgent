@@ -35,6 +35,12 @@ export interface PipelineLanguage {
   renderFixPrompt(message: string): string;
   structuralFixPrompt(quality: QualityReport): string;
   reviewFixPrompt(assessment: ReviewAssessment, quality: QualityReport | null): string;
+  /**
+   * Applied to every candidate before it is rendered (Architecture lists the facts nothing the
+   * user said backs up as assumptions). `grounding` is what the user said: the request, earlier
+   * requests and the code being edited.
+   */
+  finalize?(code: string, grounding: readonly string[]): string;
 }
 
 export interface PipelineSteps {
@@ -220,6 +226,15 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   const existingCode = options.existingCode ?? "";
   const maxRefinements = Math.max(0, Math.min(5, Math.floor(options.maxRefinements)));
   const language = steps.language ?? D2_LANGUAGE;
+  const grounding = [options.prompt, ...(options.history ?? []).filter((turn) => turn.role === "user").map((turn) => turn.content), existingCode].filter(Boolean);
+  const finalize = (candidate: string): string => {
+    if (!language.finalize) return candidate;
+    try {
+      return language.finalize(candidate, grounding);
+    } catch {
+      return candidate;
+    }
+  };
 
   let best: Candidate | null = null;
   // Candidates only compete once reviewed; a cancel mid-review still keeps the draft that rendered.
@@ -250,13 +265,15 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   emit({ type: "phase", phase: "generating", round: 0 });
   let code: string;
   try {
-    code = await steps.generate(
-      {
-        prompt: existingCode ? options.prompt : language.initialPrompt(options.prompt, plan, options.analysis ?? null),
-        existingCode,
-        history: options.history ?? [],
-      },
-      signal,
+    code = finalize(
+      await steps.generate(
+        {
+          prompt: existingCode ? options.prompt : language.initialPrompt(options.prompt, plan, options.analysis ?? null),
+          existingCode,
+          history: options.history ?? [],
+        },
+        signal,
+      ),
     );
   } catch (err) {
     if (wasCancelled(err)) throw cancelled();
@@ -274,7 +291,7 @@ export async function runDiagramPipeline(steps: PipelineSteps, options: Pipeline
   /** A follow-up candidate, or null when the model call failed — the best so far is still returned. */
   const regenerate = async (prompt: string, round: number): Promise<string | null> => {
     try {
-      const next = await steps.generate({ prompt, existingCode: code, history: [] }, signal);
+      const next = finalize(await steps.generate({ prompt, existingCode: code, history: [] }, signal));
       checkAbort();
       emit({ type: "candidate", round, code: next });
       return next;

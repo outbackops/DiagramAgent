@@ -7,12 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import { PAGE } from "@/lib/compose/theme";
 import { composeText } from "@/lib/compose";
+import { composeArchitecture, composeArchitectureText } from "@/lib/arch";
 import { modelToExcalidraw } from "./to-excalidraw";
 import type { DiagramModel } from "./types";
 
 interface ExcalidrawElement {
   id: string;
-  type: "rectangle" | "arrow" | "text";
+  type: "rectangle" | "arrow" | "text" | "image";
   x: number;
   y: number;
   width: number;
@@ -20,8 +21,11 @@ interface ExcalidrawElement {
   backgroundColor: string;
   strokeColor: string;
   boundElements: Array<{ type: "text" | "arrow"; id: string }> | null;
+  startArrowhead?: "arrow" | null;
+  endArrowhead?: "arrow" | null;
   startBinding?: { elementId: string };
   endBinding?: { elementId: string };
+  fileId?: string;
 }
 
 interface ExcalidrawFile {
@@ -30,12 +34,17 @@ interface ExcalidrawFile {
   source: string;
   elements: ExcalidrawElement[];
   appState: { viewBackgroundColor: string; gridSize: null };
-  files: Record<string, never>;
+  files: Record<string, { mimeType: string; dataURL: string }>;
 }
 
 async function composedModel(): Promise<DiagramModel> {
   const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "compositions", "knowledge-assistant.json"), "utf8");
   return composeText(fixture).model;
+}
+
+async function architectureModel(): Promise<DiagramModel> {
+  const fixture = await fs.readFile(path.join(process.cwd(), "src", "test", "fixtures", "architecture", "azure-zone-redundant-web.json"), "utf8");
+  return (await composeArchitectureText(fixture)).model;
 }
 
 function parseExcalidraw(model: DiagramModel): ExcalidrawFile {
@@ -104,5 +113,39 @@ describe("modelToExcalidraw", () => {
       edges: [],
     };
     expect(parseExcalidraw(model).appState.viewBackgroundColor).toBe("#ffffff");
+  });
+
+  it("exports architecture icons as image elements with matching files and omits hidden edges", async () => {
+    const model = await architectureModel();
+    const file = parseExcalidraw(model);
+    const images = file.elements.filter((element) => element.type === "image");
+    const iconNodes = model.nodes.filter((node) => node.role === "service" && node.icon?.startsWith("/icons/"));
+    expect(images.length).toBe(iconNodes.length);
+    for (const image of images) {
+      expect(image.fileId).toBeTruthy();
+      expect(file.files[image.fileId!]?.mimeType).toBe("image/svg+xml");
+      expect(file.files[image.fileId!]?.dataURL).toMatch(/^data:image\/svg\+xml,/);
+    }
+    const hidden = model.edges.find((edge) => edge.hidden);
+    expect(hidden).toBeDefined();
+    if (hidden) {
+      const source = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.from)!);
+      const target = matchingRectangle(file.elements, model.nodes.find((node) => node.id === hidden.to)!);
+      const arrows = file.elements.filter((element) => element.type === "arrow");
+      expect(arrows.some((arrow) => arrow.startBinding?.elementId === source?.id && arrow.endBinding?.elementId === target?.id)).toBe(false);
+    }
+  }, 120000);
+
+  it("keeps start arrowheads for architecture peering links", async () => {
+    const { model } = await composeArchitecture({
+      title: "Peering",
+      items: [{ id: "a", name: "VNet A" }, { id: "b", name: "VNet B" }],
+      connections: [{ from: "a", to: "b", meaning: "peering", label: "VNet peering" }],
+    });
+    const file = parseExcalidraw(model);
+    const arrow = file.elements.find((element) => element.type === "arrow");
+    expect(arrow).toBeDefined();
+    expect(arrow!.startArrowhead).toBe("arrow");
+    expect(arrow!.endArrowhead).toBe("arrow");
   });
 });

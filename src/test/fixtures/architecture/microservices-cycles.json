@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "title": "Order processing services",
+  "subtitle": "Synchronous calls, callbacks and an event bus between five services",
+  "view": "application",
+  "items": [
+    { "id": "clients", "name": "Web and mobile clients", "icon": "mobile" },
+    { "id": "gateway", "name": "API gateway", "icon": "api", "detail": "Rate limited" },
+    { "type": "group", "kind": "group", "id": "services", "name": "Services", "items": [
+      { "id": "orders", "name": "Orders", "icon": "server", "detail": "Java 21" },
+      { "id": "inventory", "name": "Inventory", "icon": "server", "detail": "Go" },
+      { "id": "payments", "name": "Payments", "icon": "server", "detail": ".NET 9" },
+      { "id": "catalog", "name": "Catalog", "icon": "server", "detail": "Node.js" },
+      { "id": "notify", "name": "Notifications", "icon": "notification" }
+    ] },
+    { "id": "bus", "name": "Event bus", "icon": "kafka", "detail": "Topics per domain" },
+    { "type": "group", "kind": "group", "id": "data", "name": "Data stores", "items": [
+      { "id": "orders-db", "name": "Orders DB", "icon": "postgresql" },
+      { "id": "inventory-db", "name": "Inventory DB", "icon": "mongodb" },
+      { "id": "catalog-cache", "name": "Catalog cache", "icon": "redis" }
+    ] },
+    { "id": "email", "name": "Email provider", "icon": "email" }
+  ],
+  "connections": [
+    { "from": "clients", "to": "gateway", "meaning": "request", "label": "HTTPS", "step": "1" },
+    { "from": "gateway", "to": "orders", "meaning": "request", "label": "REST", "step": "2" },
+    { "from": "gateway", "to": "catalog", "meaning": "request", "label": "REST" },
+    { "from": "orders", "to": "inventory", "meaning": "request", "label": "Reserve stock", "step": "3" },
+    { "from": "inventory", "to": "orders", "meaning": "async", "label": "Reservation result" },
+    { "from": "orders", "to": "payments", "meaning": "request", "label": "Charge", "step": "4" },
+    { "from": "payments", "to": "orders", "meaning": "async", "label": "Payment callback" },
+    { "from": "orders", "to": "bus", "meaning": "async", "label": "OrderPlaced", "step": "5" },
+    { "from": "bus", "to": "inventory", "meaning": "async", "label": "OrderPlaced" },
+    { "from": "bus", "to": "notify", "meaning": "async", "label": "OrderPlaced" },
+    { "from": "notify", "to": "email", "meaning": "request", "label": "SMTP" },
+    { "from": "orders", "to": "orders-db", "meaning": "request", "label": "SQL" },
+    { "from": "inventory", "to": "inventory-db", "meaning": "request" },
+    { "from": "catalog", "to": "catalog-cache", "meaning": "request" },
+    { "from": "catalog", "to": "inventory", "meaning": "request", "label": "Stock level" }
+  ],
+  "sequences": [
+    { "id": "main", "name": "Place an order", "steps": [
+      "A client submits the order.",
+      "The gateway routes it to Orders.",
+      "Orders reserves stock.",
+      "Orders charges the payment.",
+      "Orders publishes OrderPlaced for downstream services."
+    ] }
+  ]
+}

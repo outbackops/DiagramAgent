@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "title": "Three-tier web app across two Availability Zones",
+  "subtitle": "CloudFront and an Application Load Balancer in front of an Auto Scaling web tier and Multi-AZ RDS",
+  "platform": "aws",
+  "view": "deployment",
+  "items": [
+    { "id": "users", "name": "Users", "icon": "users" },
+    { "id": "route53", "name": "Route 53", "icon": "aws-route53", "detail": "Alias record" },
+    { "id": "cloudfront", "name": "CloudFront", "icon": "aws-cloudfront", "detail": "WAF attached" },
+    { "type": "group", "kind": "aws-cloud", "id": "aws", "name": "AWS Cloud", "items": [
+      { "type": "group", "kind": "region", "id": "region", "name": "Region", "facts": "us-east-1", "items": [
+        { "type": "group", "kind": "vpc", "id": "vpc", "name": "VPC", "facts": "10.0.0.0/16", "items": [
+          { "id": "alb", "name": "Application Load Balancer", "icon": "aws-elastic-load-balancing", "detail": "HTTPS listener" },
+          { "type": "group", "kind": "zone", "id": "az-a", "name": "Availability Zone A", "items": [
+            { "type": "group", "kind": "public-subnet", "id": "pub-a", "name": "Public subnet", "facts": "10.0.1.0/24", "items": [
+              { "id": "nat-a", "name": "NAT gateway", "icon": "aws-vpc" }
+            ] },
+            { "type": "group", "kind": "private-subnet", "id": "app-a", "name": "App subnet", "facts": "10.0.11.0/24", "items": [
+              { "id": "web-a", "name": "Web server", "icon": "aws-ec2", "detail": "m6i.large" }
+            ] },
+            { "type": "group", "kind": "private-subnet", "id": "data-a", "name": "Data subnet", "facts": "10.0.21.0/24", "items": [
+              { "id": "rds-primary", "name": "RDS primary", "icon": "aws-rds", "detail": "MySQL 8.0" }
+            ] }
+          ] },
+          { "type": "group", "kind": "zone", "id": "az-b", "name": "Availability Zone B", "items": [
+            { "type": "group", "kind": "public-subnet", "id": "pub-b", "name": "Public subnet", "facts": "10.0.2.0/24", "items": [
+              { "id": "nat-b", "name": "NAT gateway", "icon": "aws-vpc" }
+            ] },
+            { "type": "group", "kind": "private-subnet", "id": "app-b", "name": "App subnet", "facts": "10.0.12.0/24", "items": [
+              { "id": "web-b", "name": "Web server", "icon": "aws-ec2", "detail": "m6i.large" }
+            ] },
+            { "type": "group", "kind": "private-subnet", "id": "data-b", "name": "Data subnet", "facts": "10.0.22.0/24", "items": [
+              { "id": "rds-standby", "name": "RDS standby", "icon": "aws-rds", "detail": "Multi-AZ" }
+            ] }
+          ] }
+        ] },
+        { "id": "s3", "name": "S3 bucket", "icon": "aws-s3", "detail": "Static assets" },
+        { "type": "group", "kind": "shared", "id": "ops", "name": "Operations", "items": [
+          { "id": "cloudwatch", "name": "CloudWatch", "icon": "aws-cloudwatch" },
+          { "id": "secrets", "name": "Secrets Manager", "icon": "aws-secrets-manager" }
+        ] }
+      ] }
+    ] }
+  ],
+  "overlays": [ { "kind": "auto-scaling-group", "name": "Auto Scaling group", "members": ["web-a", "web-b"] } ],
+  "connections": [
+    { "from": "users", "to": "route53", "meaning": "request", "label": "DNS", "step": "1" },
+    { "from": "users", "to": "cloudfront", "meaning": "request", "label": "HTTPS 443", "step": "2" },
+    { "from": "cloudfront", "to": "s3", "meaning": "request", "label": "Static files" },
+    { "from": "cloudfront", "to": "alb", "meaning": "request", "label": "HTTPS 443", "step": "3" },
+    { "from": "alb", "to": "web-a", "meaning": "request", "label": "HTTP 8080", "step": "4" },
+    { "from": "alb", "to": "web-b", "meaning": "request", "label": "HTTP 8080" },
+    { "from": "web-a", "to": "rds-primary", "meaning": "request", "label": "MySQL 3306", "step": "5" },
+    { "from": "web-b", "to": "rds-primary", "meaning": "request", "label": "MySQL 3306" },
+    { "from": "rds-primary", "to": "rds-standby", "meaning": "replication", "label": "Synchronous" },
+    { "from": "web-a", "to": "nat-a", "meaning": "request", "label": "Outbound updates" },
+    { "from": "web-b", "to": "nat-b", "meaning": "request", "label": "Outbound updates" },
+    { "from": "web-a", "to": "secrets", "meaning": "request" },
+    { "from": "web-a", "to": "cloudwatch", "meaning": "monitoring" },
+    { "from": "web-b", "to": "cloudwatch", "meaning": "monitoring" },
+    { "from": "alb", "to": "cloudwatch", "meaning": "monitoring" }
+  ],
+  "sequences": [
+    { "id": "main", "name": "Request", "steps": [
+      "The client resolves the site through Route 53.",
+      "CloudFront serves cached content and forwards dynamic requests.",
+      "The load balancer terminates HTTPS.",
+      "It spreads requests across the web servers in both zones.",
+      "The web tier reads and writes the RDS primary; RDS keeps a synchronous standby in the other zone."
+    ] }
+  ],
+  "assumptions": ["Instance sizes are recommendations"]
+}

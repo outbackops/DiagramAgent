@@ -4,7 +4,8 @@ import { modelFromBody, sanitizeFilename } from "@/lib/api/model-input";
 import { getRequestCredentials } from "@/lib/auth/session";
 import { errorMessage } from "@/lib/error-message";
 import { LlmError, isLlmError } from "@/lib/llm/errors";
-import { modelToVsdx } from "@/lib/model/to-vsdx";
+import { warningsHeaderValue } from "@/lib/model/export-result";
+import { modelToVsdxResult } from "@/lib/model/to-vsdx";
 
 /**
  * Export a diagram as a native Microsoft Visio (.vsdx) file with editable
@@ -21,12 +22,14 @@ export async function POST(request: NextRequest) {
     const input = await modelFromBody(body, request.signal);
     if ("response" in input) return input.response;
     const title = typeof body?.title === "string" && body.title ? body.title : "Architecture Diagram";
-    const vsdx = await modelToVsdx(input.model);
+    const result = await modelToVsdxResult(input.model);
+    const vsdx = result.content;
     return new Response(new Uint8Array(vsdx), {
       headers: {
         "Content-Type": "application/vnd.ms-visio.drawing",
         "Content-Disposition": `attachment; filename="${sanitizeFilename(title)}.vsdx"`,
         "Content-Length": String(vsdx.length),
+        "X-Export-Warnings": warningsHeaderValue(result.warnings),
       },
     });
   } catch (error) {

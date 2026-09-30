@@ -74,6 +74,26 @@ describe("POST /api/generate", () => {
     expect(call.prompt).toContain("COMPLETE updated spec JSON only");
   });
 
+  it("uses the architect system prompt and spec edit prompt for architecture", async () => {
+    llm.chunks = ['{"title":"x","items":["A"]}'];
+    await readSseEvents(
+      await POST(
+        makeJsonRequest({
+          prompt: "add private endpoint",
+          existingCode: '{"title":"x","items":["A"]}',
+          format: "architecture",
+        }),
+      ),
+    );
+    const call = llm.lastCall();
+    expect(call.system).toContain("ArchSpec");
+    expect(call.system).toContain("Retail Web App");
+    expect(call.system).toContain("TRUST POLICY");
+    expect(call.history?.at(-1)).toEqual({ role: "assistant", content: '{"title":"x","items":["A"]}' });
+    expect(call.prompt).toContain("Modify the Architecture diagram spec above");
+    expect(call.prompt).toContain("Keep ids stable");
+  });
+
   it("reports failures inside the stream after it started", async () => {
     llm.chunks = ["partial"];
     llm.error = new LlmError("quota", "Monthly premium request quota exhausted");
